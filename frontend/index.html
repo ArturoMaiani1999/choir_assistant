@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Choir Assistant · Pitch Lab</title>
+    <link rel="stylesheet" href="styles.css" />
+    <script src="pitch_detector.js" defer></script>
+    <script src="score_runtime.js" defer></script>
+    <script src="app.js" defer></script>
+  </head>
+  <body>
+    <main class="shell">
+      <header class="topbar">
+        <div>
+          <p class="eyebrow">CHOIR ASSISTANT / FIRST VERTICAL SLICE</p>
+          <h1>Pitch lab</h1>
+          <p class="lede">Local microphone pitch detection against a symbolic target.</p>
+        </div>
+        <span class="status-pill" id="engine-status">Idle</span>
+      </header>
+
+      <section class="notice">
+        <strong>Privacy:</strong> microphone samples stay in this browser tab. Nothing is uploaded or recorded.
+      </section>
+
+      <section class="grid">
+        <article class="card target-card">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">SYMBOLIC TARGET</p>
+              <h2>Sing one stable note</h2>
+            </div>
+            <span class="target-note" id="target-note">A4</span>
+          </div>
+          <label for="target-hz">Target frequency (Hz)</label>
+          <div class="target-controls">
+            <input id="target-hz" type="number" min="60" max="1200" step="0.01" value="440" />
+            <button class="secondary" id="reset-target" type="button">A4 / 440 Hz</button>
+          </div>
+          <div class="runtime-summary">
+            <span id="score-title">Development symbolic target</span>
+            <strong id="score-position">Measure 1 · beat 1</strong>
+          </div>
+          <button class="secondary runtime-button" id="toggle-exercise" type="button">Start target timeline</button>
+          <button class="primary" id="toggle-mic" type="button">Start microphone</button>
+          <p class="hint" id="mic-hint">Use headphones if you later add guide playback. This first test does not play audio.</p>
+          <p class="debug" id="debug-info">Audio input: not started</p>
+        </article>
+
+        <article class="card live-card">
+          <div class="card-heading">
+            <div>
+              <p class="eyebrow">LIVE ESTIMATE</p>
+              <h2 id="pitch-state">Waiting for microphone</h2>
+            </div>
+            <span class="confidence" id="confidence">—</span>
+          </div>
+          <div class="metrics">
+            <div><span>Detected</span><strong id="detected-hz">—</strong></div>
+            <div><span>Deviation</span><strong id="cents">—</strong></div>
+            <div><span>Input level</span><strong id="rms">—</strong></div>
+          </div>
+          <canvas id="pitch-canvas" width="900" height="360" aria-label="Pitch trajectory"></canvas>
+          <div class="legend"><span><i class="dot target-dot"></i> target</span><span><i class="dot singer-dot"></i> singer</span></div>
+        </article>
+      </section>
+
+      <section class="card next-card">
+        <p class="eyebrow">BENCHMARK CONTEXT</p>
+        <h2>Target score</h2>
+        <p><code>sheets/Gloria Frisina.pdf</code> is the first repertoire benchmark. OMR and score compilation are not run by this pitch-lab screen yet; this slice validates the browser microphone path first.</p>
+      </section>
+    </main>
+  </body>
+</html>

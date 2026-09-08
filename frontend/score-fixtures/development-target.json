@@ -1,0 +1,27 @@
+{
+  "score_version_id": "development-symbolic-target-v1",
+  "title": "Development symbolic target · JSON runtime · not Gloria Frisina",
+  "parts": [
+    { "id": "soprano", "name": "Soprano", "kind": "vocal" }
+  ],
+  "measures": [
+    { "id": "measure-1", "number": "1", "index": 0, "time_signature_numerator": 4, "time_signature_denominator": 4 },
+    { "id": "measure-2", "number": "2", "index": 1, "time_signature_numerator": 4, "time_signature_denominator": 4 },
+    { "id": "measure-3", "number": "3", "index": 2, "time_signature_numerator": 4, "time_signature_denominator": 4 },
+    { "id": "measure-4", "number": "4", "index": 3, "time_signature_numerator": 4, "time_signature_denominator": 4 }
+  ],
+  "events": [],
+  "performance_occurrences": [],
+  "target_events": [
+    { "id": "demo-note-1", "occurrence_id": "demo-occurrence-1", "written_measure_id": "measure-1", "part_id": "soprano", "onset_beats": 0, "duration_beats": 2, "onset_seconds": 0, "duration_seconds": 1.5, "midi_pitch": 69, "frequency_hz": 440, "lyric": null, "is_rest": false },
+    { "id": "demo-note-2", "occurrence_id": "demo-occurrence-1", "written_measure_id": "measure-1", "part_id": "soprano", "onset_beats": 2, "duration_beats": 2, "onset_seconds": 1.5, "duration_seconds": 1.5, "midi_pitch": 69, "frequency_hz": 440, "lyric": null, "is_rest": false },
+    { "id": "demo-note-3", "occurrence_id": "demo-occurrence-2", "written_measure_id": "measure-2", "part_id": "soprano", "onset_beats": 4, "duration_beats": 2, "onset_seconds": 3, "duration_seconds": 1.5, "midi_pitch": 71, "frequency_hz": 493.883301, "lyric": null, "is_rest": false },
+    { "id": "demo-note-4", "occurrence_id": "demo-occurrence-2", "written_measure_id": "measure-2", "part_id": "soprano", "onset_beats": 6, "duration_beats": 2, "onset_seconds": 4.5, "duration_seconds": 1.5, "midi_pitch": 71, "frequency_hz": 493.883301, "lyric": null, "is_rest": false },
+    { "id": "demo-note-5", "occurrence_id": "demo-occurrence-3", "written_measure_id": "measure-3", "part_id": "soprano", "onset_beats": 8, "duration_beats": 2, "onset_seconds": 6, "duration_seconds": 1.5, "midi_pitch": 72, "frequency_hz": 523.251131, "lyric": null, "is_rest": false },
+    { "id": "demo-note-6", "occurrence_id": "demo-occurrence-3", "written_measure_id": "measure-3", "part_id": "soprano", "onset_beats": 10, "duration_beats": 2, "onset_seconds": 7.5, "duration_seconds": 1.5, "midi_pitch": 72, "frequency_hz": 523.251131, "lyric": null, "is_rest": false },
+    { "id": "demo-note-7", "occurrence_id": "demo-occurrence-4", "written_measure_id": "measure-4", "part_id": "soprano", "onset_beats": 12, "duration_beats": 2, "onset_seconds": 9, "duration_seconds": 1.5, "midi_pitch": 74, "frequency_hz": 587.329536, "lyric": null, "is_rest": false },
+    { "id": "demo-note-8", "occurrence_id": "demo-occurrence-4", "written_measure_id": "measure-4", "part_id": "soprano", "onset_beats": 14, "duration_beats": 2, "onset_seconds": 10.5, "duration_seconds": 1.5, "midi_pitch": 69, "frequency_hz": 440, "lyric": null, "is_rest": false }
+  ],
+  "tempo_map": [ { "beat": 0, "bpm": 80 } ],
+  "navigation": []
+}
