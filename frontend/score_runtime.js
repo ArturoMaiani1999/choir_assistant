@@ -1,6 +1,5 @@
-// Small browser runtime for an approved symbolic score.
-// This fixture is intentionally synthetic: it proves the runtime contract
-// without pretending that Gloria Frisina has already passed through OMR.
+// Browser adapter for the normalized symbolic-score contract.
+// Draft/approval state belongs to the source version, not to this runtime.
 (function exposeScoreRuntime(global) {
   function midiToHz(midi) {
     return 440 * Math.pow(2, (midi - 69) / 12);
@@ -13,16 +12,26 @@
   }
 
   class NormalizedScoreRuntime {
-    constructor({ title, tempoBpm, beatsPerMeasure, measures = [], targetEvents }) {
+    constructor({ title, tempoBpm, beatsPerMeasure, measures = [], parts = [], performanceOccurrences = [], targetEvents }) {
       this.title = title;
       this.tempoBpm = tempoBpm;
       this.beatsPerMeasure = beatsPerMeasure;
       this.measures = measures;
-      this.targetEvents = targetEvents.map((event) => ({
+      this.parts = parts;
+      this.performanceOccurrences = performanceOccurrences;
+      this.allTargetEvents = targetEvents.map((event) => ({
         ...event,
         frequencyHz: event.frequencyHz ?? midiToHz(event.midiPitch),
         noteName: event.noteName ?? midiToName(event.midiPitch),
       }));
+      this.selectedPartId = parts[0]?.id ?? this.allTargetEvents[0]?.partId ?? null;
+      this.selectPart(this.selectedPartId);
+    }
+
+    selectPart(partId) {
+      this.selectedPartId = partId;
+      this.targetEvents = this.allTargetEvents.filter((event) => event.partId === partId);
+      return this;
     }
 
     targetAt(beat) {
@@ -33,6 +42,17 @@
 
     measureAt(beat) {
       const safeBeat = Math.max(0, beat);
+      if (this.performanceOccurrences.length > 0) {
+        const occurrence = this.performanceOccurrences.find(
+          (item) => item.startBeat <= safeBeat && safeBeat < item.endBeat,
+        ) ?? this.performanceOccurrences[this.performanceOccurrences.length - 1];
+        const measure = this.measures.find((item) => item.id === occurrence.writtenMeasureId);
+        return {
+          number: measure?.number ?? '?',
+          beatInMeasure: Math.max(0, safeBeat - occurrence.startBeat) + 1,
+          occurrenceIndex: occurrence.occurrenceIndex,
+        };
+      }
       if (this.measures.length > 0) {
         let startBeat = 0;
         for (const measure of this.measures) {
@@ -56,13 +76,27 @@
       const firstTempo = payload.tempo_map?.[0]?.bpm ?? 80;
       const sourceMeasures = payload.measures ?? [];
       const measures = sourceMeasures.map((measure) => ({
+        id: measure.id,
         number: measure.number,
         timeSignatureNumerator: measure.time_signature_numerator,
         timeSignatureDenominator: measure.time_signature_denominator,
       }));
       const beatsPerMeasure = measures[0]?.timeSignatureNumerator ?? 4;
+      const parts = (payload.parts ?? []).map((part) => ({
+        id: part.id,
+        name: part.name,
+        kind: part.kind,
+      }));
+      const performanceOccurrences = (payload.performance_occurrences ?? []).map((occurrence) => ({
+        id: occurrence.id,
+        writtenMeasureId: occurrence.written_measure_id,
+        occurrenceIndex: occurrence.occurrence_index,
+        startBeat: occurrence.start_beat,
+        endBeat: occurrence.end_beat,
+      }));
       const targetEvents = (payload.target_events ?? []).map((event) => ({
         id: event.id,
+        partId: event.part_id,
         measureNumber: sourceMeasures.find((measure) => measure.id === event.written_measure_id)?.number,
         onsetBeat: event.onset_beats,
         durationBeats: event.duration_beats,
@@ -75,6 +109,8 @@
         tempoBpm: firstTempo,
         beatsPerMeasure,
         measures,
+        parts,
+        performanceOccurrences,
         targetEvents: targetEvents.filter((event) => !event.isRest && event.midiPitch != null),
       });
     }
@@ -131,11 +167,13 @@
   function createDemoScore() {
     const midiPitches = [69, 69, 71, 71, 72, 72, 74, 69];
     return new NormalizedScoreRuntime({
-      title: 'Development symbolic target · not Gloria Frisina',
+      title: 'Esercizio simbolico di sviluppo',
       tempoBpm: 80,
       beatsPerMeasure: 4,
+      parts: [{ id: 'P1', name: 'Soprano', kind: 'vocal' }],
       targetEvents: midiPitches.map((midiPitch, index) => ({
         id: `demo-note-${index + 1}`,
+        partId: 'P1',
         measureNumber: Math.floor((index * 2) / 4) + 1,
         onsetBeat: index * 2,
         durationBeats: 2,

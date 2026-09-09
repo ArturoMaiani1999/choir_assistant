@@ -15,3 +15,13 @@ The command creates a versioned job under `data/ingestions/<job-id>/`. It preser
 ## Runtime model
 
 `choir_assistant.domain.models` contains the first runtime score contract. It deliberately separates written measures and performance occurrences, even before the MusicXML compiler is added.
+
+## Compile MusicXML
+
+The first dependency-free symbolic compiler is available through:
+
+```powershell
+python -m backend.choir_assistant.cli score compile-musicxml path/to/score.musicxml --output data/score.json
+```
+
+`choir_assistant.ingestion.musicxml.compile_musicxml` currently parses partwise MusicXML notes, rests, durations, voices, lyrics, time signatures and basic metronome/`<sound tempo>` changes. It emits `NormalizedScore` JSON with beat and second coordinates. Forward/backward repeats and simple first/second ending labels are flattened into distinct `PerformanceOccurrence` records. One explicit D.C. or D.S. pass is also supported, including Fine and the basic To Coda/Coda path; ambiguous or nested navigation remains a reported limitation.

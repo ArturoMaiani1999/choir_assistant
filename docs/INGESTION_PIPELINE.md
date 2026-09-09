@@ -60,6 +60,16 @@ The state transition is persisted after every stage. Retries are idempotent: a s
 
 The first implementation can use Python functions/classes rather than an LLM. If an LLM is later added for report synthesis or operator guidance, its output is advisory, schema-validated, logged, and never the only source of a musical mutation.
 
+## Implemented symbolic compiler slice
+
+`backend/choir_assistant/ingestion/musicxml.py` now provides a dependency-free `compile_musicxml()` function and the CLI command:
+
+```text
+python -m backend.choir_assistant.cli score compile-musicxml path/to/score.musicxml --output data/score.json
+```
+
+This slice parses partwise notes, rests, durations, voices, lyrics, time signatures and basic tempo directions into the existing `NormalizedScore` contract. It computes both beat coordinates and seconds using the tempo map. Forward/backward repeats and simple first/second ending labels are flattened into performance occurrences. One explicit D.C. or D.S. pass is supported, including Fine and the basic To Coda/Coda path. It remains a compiler, not an OMR engine, and nested or ambiguous navigation is not silently guessed.
+
 ## Artifact layout
 
 ```text
