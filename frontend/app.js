@@ -1,707 +1,659 @@
-const TARGET_DEFAULT_HZ = 440;
-const ANALYSIS_INTERVAL_MS = 55;
-const HISTORY_WINDOW_MS = 8000;
-const {
-  MIN_HZ,
-  MAX_HZ,
-  centsBetween,
-  detectPitch,
-  PitchSmoother,
-  rmsOf,
-} = window.ChoirPitch;
-const { createDemoScore, NormalizedScoreRuntime, PerformanceClock } = window.ChoirScore;
+const { NormalizedScoreRuntime, MediaPlaybackClock } = window.ChoirScore;
+const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, measureSeekState, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
+const { detectPitch, PitchSmoother } = window.ChoirPitch;
 
-let scoreRuntime = createDemoScore();
-let performanceClock = new PerformanceClock({ tempoBpm: scoreRuntime.tempoBpm });
-let activeRuntimeTarget = scoreRuntime.targetAt(0);
-let sessionState = 'idle';
+const UI_CONFIG = Object.freeze({
+  historyBeats: 4.5,
+  futureBeats: 7.5,
+  centeredCents: 12,
+  acceptableCents: 30,
+  targetToleranceCents: 25,
+  pitchViewportResponseMs: 180,
+});
 
-const els = {
-  scoreTitle: document.querySelector('#score-title'),
-  sessionAlert: document.querySelector('#session-alert'),
-  sessionAlertTitle: document.querySelector('#session-alert-title'),
-  sessionAlertCopy: document.querySelector('#session-alert-copy'),
-  scorePosition: document.querySelector('#score-position'),
-  targetNote: document.querySelector('#target-note'),
-  tempoLabel: document.querySelector('#tempo-label'),
-  scoreViewport: document.querySelector('#score-viewport'),
-  scorePages: document.querySelector('#score-pages'),
-  partSelector: document.querySelector('#part-selector'),
-  scoreProgress: document.querySelector('#score-progress'),
-  expectedNote: document.querySelector('#expected-note'),
-  targetFrequency: document.querySelector('#target-frequency'),
-  voiceFrequency: document.querySelector('#voice-frequency'),
-  voiceRangeState: document.querySelector('#voice-range-state'),
-  voiceValue: document.querySelector('.voice-value'),
-  heardNote: document.querySelector('#heard-note'),
-  toggleSession: document.querySelector('#toggle-session'),
-  sessionLabel: document.querySelector('#session-label'),
-  resetSession: document.querySelector('#reset-session'),
-  engineStatus: document.querySelector('#engine-status'),
-  pitchState: document.querySelector('#pitch-state'),
-  confidence: document.querySelector('#confidence'),
-  intonationMarker: document.querySelector('#intonation-marker'),
-  detectedHz: document.querySelector('#detected-hz'),
-  cents: document.querySelector('#cents'),
-  rms: document.querySelector('#rms'),
-  micHint: document.querySelector('#mic-hint'),
-  debugInfo: document.querySelector('#debug-info'),
-  canvas: document.querySelector('#pitch-canvas'),
-  plotRange: document.querySelector('#plot-range'),
-  rangeAlert: document.querySelector('#range-alert'),
+const els = Object.fromEntries([
+  'piece-title', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-mode', 'settings',
+  'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
+  'score-loading', 'pitch-lane', 'intonation-readout', 'live-note', 'live-cents', 'live-state',
+  'measure-counter', 'scoring-cue', 'previous-measure', 'toggle-playback', 'next-measure', 'volume', 'metronome-toggle', 'metronome-volume', 'backing-audio', 'toast', 'asset-status', 'microphone',
+].map((id) => [id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]));
+
+const state = {
+  runtime: null,
+  clock: null,
+  glyphMap: {},
+  occurrenceMeasures: [],
+  selectedMeasureIndex: 0,
+  scoringStartBeat: 0,
+  scorePage: 1,
+  fullScore: false,
+  rafId: null,
+  lastAnnouncedState: '',
+  backingManifest: null,
+  bundleManifest: null,
+  bundleApproved: false,
+  scoreGeometry: new Map(),
+  activeScoreSegment: null,
+  pitchViewport: null,
+  lastSnapshot: null,
+  metronomeContext: null,
+  lastMetronomeBeat: null,
+  rememberedMetronomeVolume: 34,
+  syncDebug: new URLSearchParams(window.location.search).has('syncDebug'),
+  microphoneStatus: 'idle',
+  microphoneStream: null,
+  microphoneContext: null,
+  microphoneAnalyser: null,
+  microphoneBuffer: null,
+  pitchSmoother: new PitchSmoother(),
+  livePitch: null,
+  pitchSamples: [],
 };
 
-const graphContext = els.canvas.getContext('2d');
-const pitchSmoother = new PitchSmoother();
-const intentionallyStoppedTracks = new WeakSet();
-const PART_ASSET_NAMES = { P1: 'soprano', P2: 'contralto', P3: 'tenore', P4: 'basso' };
-const MEASURE_LAYOUT = {
-  1: { page: 1, left: 6, top: 33.5, width: 23.6, height: 14.5 },
-  2: { page: 1, left: 29.6, top: 33.5, width: 20.2, height: 14.5 },
-  3: { page: 1, left: 49.8, top: 33.5, width: 17.8, height: 14.5 },
-  4: { page: 1, left: 67.6, top: 33.5, width: 14.1, height: 14.5 },
-  5: { page: 1, left: 81.7, top: 33.5, width: 18.2, height: 14.5 },
-  6: { page: 1, left: 4.1, top: 83, width: 34.1, height: 15 },
-  7: { page: 1, left: 38.2, top: 83, width: 22.2, height: 15 },
-  8: { page: 1, left: 60.4, top: 83, width: 22.1, height: 15 },
-  9: { page: 1, left: 82.5, top: 83, width: 17.4, height: 15 },
-  10: { page: 2, left: 4.1, top: 15, width: 95.8, height: 21 },
-  11: { page: 2, left: 4.1, top: 79, width: 95.8, height: 20 },
-  12: { page: 3, left: 4.1, top: 45, width: 11.3, height: 47 },
-};
-let audioContext = null;
-let analyser = null;
-let source = null;
-let silentMonitor = null;
-let stream = null;
-let track = null;
-let animationId = null;
-let samples = null;
-let byteSamples = null;
-let history = [];
-let lastAnalysisMs = 0;
-let lastCursorMeasure = null;
-let scoreView = 'original';
-let silenceStartedMs = null;
-let scoreGlyphMap = {};
-
-function midiToItalianName(midi) {
-  const names = ['Do', 'Do♯', 'Re', 'Re♯', 'Mi', 'Fa', 'Fa♯', 'Sol', 'Sol♯', 'La', 'La♯', 'Si'];
-  const pitchClass = ((midi % 12) + 12) % 12;
-  return `${names[pitchClass]}${Math.floor(midi / 12) - 1}`;
+function normalizeSlug(value) {
+  return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-function hzToMidi(hz) {
-  return 69 + 12 * Math.log2(hz / 440);
+function vocalParts(runtime, glyphMap) {
+  return runtime.parts.filter((part) => Object.keys(glyphMap).some((key) => key.startsWith(`${part.id}-`)));
 }
 
-function hzToName(hz) {
-  return midiToItalianName(Math.round(hzToMidi(hz)));
-}
-
-function formatHz(hz, digits = 1) {
-  return `${hz.toFixed(digits).replace('.', ',')} Hz`;
-}
-
-function formatSigned(value, digits = 1) {
-  const formatted = Math.abs(value).toFixed(digits).replace('.', ',');
-  return `${value >= 0 ? '+' : '−'}${formatted}`;
-}
-
-function targetHz() {
-  return activeRuntimeTarget?.frequencyHz ?? TARGET_DEFAULT_HZ;
-}
-
-function scoreDurationBeats() {
-  if (scoreRuntime.performanceOccurrences?.length) {
-    return scoreRuntime.performanceOccurrences.at(-1).endBeat;
+function buildOccurrenceMeasures(runtime) {
+  if (runtime.performanceOccurrences.length) {
+    return runtime.performanceOccurrences.map((occurrence) => {
+      const written = runtime.measures.find((measure) => measure.id === occurrence.writtenMeasureId);
+      return {
+        id: occurrence.id,
+        number: written?.number ?? '?',
+        startBeat: occurrence.startBeat,
+        endBeat: occurrence.endBeat,
+        timeSignatureNumerator: written?.timeSignatureNumerator ?? 4,
+        timeSignatureDenominator: written?.timeSignatureDenominator ?? 4,
+      };
+    });
   }
-  return scoreRuntime.targetEvents.reduce(
-    (maximum, event) => Math.max(maximum, event.onsetBeat + event.durationBeats),
-    0,
+  let beat = 0;
+  return runtime.measures.map((measure) => {
+    const duration = measure.timeSignatureNumerator * (4 / measure.timeSignatureDenominator);
+    const item = { id: measure.id, number: measure.number, startBeat: beat, endBeat: beat + duration, timeSignatureNumerator: measure.timeSignatureNumerator, timeSignatureDenominator: measure.timeSignatureDenominator };
+    beat += duration;
+    return item;
+  });
+}
+
+function totalBeats() {
+  return state.occurrenceMeasures.at(-1)?.endBeat ?? Math.max(0, ...state.runtime.targetEvents.map((event) => event.onsetBeat + event.durationBeats));
+}
+
+function measureIndexAt(beat) {
+  const index = state.occurrenceMeasures.findIndex((measure) => measure.startBeat <= beat && beat < measure.endBeat);
+  return index < 0 ? Math.max(0, state.occurrenceMeasures.length - 1) : index;
+}
+
+function sourceGlyph(event) {
+  return event ? state.scoreGeometry.get(event.sourceEventId) ?? null : null;
+}
+
+function closestScoreEvent(beat) {
+  const events = state.runtime.targetEvents;
+  return events.find((event) => event.onsetBeat <= beat && beat < event.onsetBeat + event.durationBeats)
+    ?? events.find((event) => event.onsetBeat > beat)
+    ?? events.at(-1);
+}
+
+function loadScoreImage(page = 1) {
+  const part = state.runtime.parts.find((item) => item.id === state.runtime.selectedPartId);
+  const pages = state.fullScore
+    ? state.bundleManifest.assets.full_score_pages
+    : state.bundleManifest.assets.score_pages[state.runtime.selectedPartId];
+  const source = pages?.[Math.max(0, Math.min(pages.length - 1, page - 1))];
+  if (!source) { els.scoreLoading.hidden = false; els.scoreLoading.textContent = 'Pagina spartito non disponibile'; return; }
+  if (els.scoreImage.getAttribute('src') === source) return;
+  els.scoreLoading.hidden = false;
+  state.activeScoreSegment = null;
+  els.scoreImage.src = source;
+  els.scoreImage.alt = state.fullScore ? 'Partitura completa' : `Spartito: ${part?.name ?? 'parte selezionata'}`;
+}
+
+function configureBacking() {
+  if (!state.bundleApproved || !state.bundleManifest?.integrity?.consistent
+      || state.backingManifest?.score_version_id !== state.runtime.scoreVersionId
+      || state.backingManifest?.timeline_hash !== state.bundleManifest.integrity.hashes.timeline) {
+    els.backingAudio.removeAttribute('src');
+    els.togglePlayback.disabled = true;
+    return;
+  }
+  const mix = state.backingManifest?.mixes?.[state.runtime.selectedPartId];
+  if (!mix) { els.backingAudio.removeAttribute('src'); return; }
+  const speed = Number(els.playbackSpeed.value);
+  const speedFile = mix.files_by_speed?.[String(speed)];
+  state.usesPreRenderedSpeed = Boolean(speedFile);
+  els.backingAudio.src = `${state.bundleManifest.assets.audio_root}/${speedFile ?? mix.file}`;
+  els.togglePlayback.disabled = false;
+  els.backingAudio.volume = Number(els.volume.value) / 100;
+  els.backingAudio.playbackRate = state.usesPreRenderedSpeed ? 1 : speed;
+  els.backingAudio.preservesPitch = true;
+}
+
+function buildScoreGeometry(partId) {
+  const entries = Object.entries(state.glyphMap)
+    .filter(([eventId]) => eventId.startsWith(`${partId}-`))
+    .map(([eventId, glyph]) => ({ eventId, ...glyph }))
+    .sort((a, b) => a.page - b.page || a.y_percent - b.y_percent || a.x_percent - b.x_percent);
+  const systems = [];
+  entries.forEach((entry) => {
+    let system = systems.at(-1);
+    if (!system || system.page !== entry.page || (entry.system_id && entry.system_id !== system.sourceSystemId) || (!entry.system_id && entry.y_percent - system.maxY > 16)) {
+      const sequence = systems.filter((item) => item.page === entry.page).length + 1;
+      system = { id: `${partId}-p${entry.page}-s${sequence}`, sourceSystemId: entry.system_id, page: entry.page, minY: entry.y_percent, maxY: entry.y_percent, events: [] };
+      systems.push(system);
+    }
+    system.minY = Math.min(system.minY, entry.y_percent);
+    system.maxY = Math.max(system.maxY, entry.y_percent);
+    system.events.push(entry);
+  });
+  const geometry = new Map();
+  systems.forEach((system) => {
+    const centerY = (system.minY + system.maxY) / 2;
+    system.events.forEach((entry) => geometry.set(entry.eventId, { ...entry, systemId: system.id, systemCenterY: centerY }));
+  });
+  state.scoreGeometry = geometry;
+  state.activeScoreSegment = null;
+}
+
+function renderScore(beat) {
+  const event = closestScoreEvent(beat);
+  const glyph = sourceGlyph(event);
+  const page = glyph?.page ?? Math.min(3, Math.floor(measureIndexAt(beat) / 7) + 1);
+  if (page !== state.scorePage) state.scorePage = page;
+  loadScoreImage(page);
+  if (state.fullScore) { els.scoreSheet.style.transform = 'translate(0, 0)'; return; }
+  if (!glyph) return;
+
+  const nextEvent = state.runtime.targetEvents.find((candidate) => {
+    const candidateGlyph = sourceGlyph(candidate);
+    return candidate.onsetBeat >= event.onsetBeat + event.durationBeats - 0.001 && candidateGlyph?.systemId === glyph.systemId;
+  });
+  const candidateNextGlyph = sourceGlyph(nextEvent);
+  const nextGlyph = candidateNextGlyph?.x_percent >= glyph.x_percent ? candidateNextGlyph : null;
+  const progress = Math.max(0, Math.min(1, (beat - event.onsetBeat) / Math.max(event.durationBeats, .01)));
+  const x = nextGlyph ? glyph.x_percent + (nextGlyph.x_percent - glyph.x_percent) * progress : glyph.x_percent;
+  els.scoreCursor.style.left = `${x}%`;
+  els.scoreCursor.style.top = `${glyph.y_percent}%`;
+
+  const imageHeight = els.scoreImage.getBoundingClientRect().height;
+  const viewportHeight = els.scoreViewport.clientHeight;
+  const sheetWidth = els.scoreSheet.getBoundingClientRect().width;
+  const viewportWidth = els.scoreViewport.clientWidth;
+  if (!imageHeight || !sheetWidth || !viewportWidth) return;
+  const systemY = imageHeight * glyph.systemCenterY / 100;
+  const panelCount = Math.max(1, Math.ceil(sheetWidth / viewportWidth));
+  const panelIndex = Math.min(panelCount - 1, Math.floor(x / 100 * panelCount));
+  const segmentKey = `${glyph.systemId}-panel${panelIndex}`;
+  if (segmentKey !== state.activeScoreSegment) {
+    const offsetY = Math.max(viewportHeight - imageHeight, Math.min(0, viewportHeight * .52 - systemY));
+    const offsetX = panelCount > 1 ? -panelIndex * (sheetWidth - viewportWidth) / (panelCount - 1) : 0;
+    els.scoreSheet.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+    state.activeScoreSegment = segmentKey;
+  }
+  state.lastScoreEvent = { eventId: event.id, sourceEventId: event.sourceEventId, measureNumber: event.measureNumber, beat };
+}
+
+function pitchBounds(beat) {
+  const measureIndex = measureIndexAt(beat);
+  const key = `${state.runtime.selectedPartId}:${measureIndex}`;
+  if (!state.pitchViewport || state.pitchViewport.key !== key) {
+    const firstIndex = Math.max(0, measureIndex - 1);
+    const lastIndex = Math.min(state.occurrenceMeasures.length - 1, measureIndex + 2);
+    const startBeat = state.occurrenceMeasures[firstIndex]?.startBeat ?? beat - UI_CONFIG.historyBeats;
+    const endBeat = state.occurrenceMeasures[lastIndex]?.endBeat ?? beat + UI_CONFIG.futureBeats;
+    const pitches = state.runtime.targetEvents
+      .filter((event) => event.onsetBeat + event.durationBeats >= startBeat && event.onsetBeat <= endBeat)
+      .map((event) => event.midiPitch).filter(Number.isFinite);
+    let target = { min: 55, max: 67 };
+    if (pitches.length) {
+      let min = Math.floor(Math.min(...pitches)) - 2;
+      let max = Math.ceil(Math.max(...pitches)) + 2;
+      if (max - min < 9) { const pad = (9 - (max - min)) / 2; min -= pad; max += pad; }
+      target = { min: Math.floor(min), max: Math.ceil(max) };
+    }
+    const current = state.pitchViewport?.bounds ?? { ...target };
+    state.pitchViewport = { key, bounds: current, target, lastFrameMs: performance.now(), animating: current.min !== target.min || current.max !== target.max };
+  }
+  const viewport = state.pitchViewport;
+  const now = performance.now();
+  const elapsed = Math.min(64, Math.max(0, now - viewport.lastFrameMs));
+  const transition = smoothPitchBounds(viewport.bounds, viewport.target, elapsed, UI_CONFIG.pitchViewportResponseMs);
+  viewport.bounds = transition.bounds;
+  viewport.lastFrameMs = now;
+  viewport.animating = transition.animating;
+  return viewport.bounds;
+}
+
+function sampleMicrophone(beat, running) {
+  if (state.microphoneStatus !== 'active') { state.livePitch = null; return; }
+  state.microphoneAnalyser.getFloatTimeDomainData(state.microphoneBuffer);
+  const estimate = state.pitchSmoother.update(
+    detectPitch(state.microphoneBuffer, state.microphoneContext.sampleRate),
+    performance.now(),
   );
+  state.livePitch = estimate.stable && estimate.clarity >= .7 && estimate.hz
+    ? 69 + 12 * Math.log2(estimate.hz / 440)
+    : null;
+  if (running && state.livePitch != null) {
+    const previous = state.pitchSamples.at(-1);
+    if (!previous || beat - previous.beat >= .025) state.pitchSamples.push({ beat, pitch: state.livePitch, confidence: estimate.confidence });
+  }
+  const oldest = beat - UI_CONFIG.historyBeats - 1;
+  state.pitchSamples = state.pitchSamples.filter((sample) => sample.beat >= oldest && sample.beat <= beat + .1).slice(-900);
 }
 
-function renderScorePages() {
-  lastCursorMeasure = null;
-  const assetName = PART_ASSET_NAMES[scoreRuntime.selectedPartId] ?? 'soprano';
-  const partName = scoreRuntime.parts.find((part) => part.id === scoreRuntime.selectedPartId)?.name ?? 'Soprano';
-  const pages = [1, 2, 3].map((pageNumber) => {
-    const page = document.createElement('figure');
-    page.className = 'score-page';
-    page.dataset.page = String(pageNumber);
-    const image = document.createElement('img');
-    image.src = scoreView === 'original'
-      ? `score-assets/gloria-originale/pagina-${pageNumber}.svg`
-      : `score-assets/gloria-parts/${assetName}-${pageNumber}.svg`;
-    image.alt = scoreView === 'original'
-      ? `Gloria, partitura completa, pagina ${pageNumber} di 3`
-      : `Gloria, parte ${partName}, pagina ${pageNumber} di 3`;
-    image.loading = pageNumber === 1 ? 'eager' : 'lazy';
-    image.addEventListener('load', () => updateScoreCursor(scoreRuntime.measureAt(performanceClock.currentBeat)));
-    const highlight = document.createElement('span');
-    highlight.className = 'measure-highlight';
-    highlight.hidden = true;
-    const noteCursor = document.createElement('span');
-    noteCursor.className = 'target-note-cursor';
-    noteCursor.setAttribute('aria-hidden', 'true');
-    noteCursor.hidden = true;
-    page.append(image, highlight, noteCursor);
-    return page;
+function roundedRect(context, x, y, width, height, radius) {
+  const r = Math.min(radius, Math.abs(width) / 2, Math.abs(height) / 2);
+  context.beginPath();
+  context.roundRect(x, y, width, height, r);
+}
+
+function drawPitchLane(beat) {
+  const canvas = els.pitchLane;
+  const rect = canvas.getBoundingClientRect();
+  if (rect.width < 2 || rect.height < 2) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+  const width = Math.round(rect.width * dpr);
+  const height = Math.round(rect.height * dpr);
+  if (canvas.width !== width || canvas.height !== height) { canvas.width = width; canvas.height = height; }
+  const ctx = canvas.getContext('2d');
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  ctx.clearRect(0, 0, rect.width, rect.height);
+
+  const plot = { left: rect.width < 700 ? 48 : 58, right: rect.width - 8, top: rect.width < 700 ? 28 : 32, bottom: rect.height - 24 };
+  const bounds = pitchBounds(beat);
+  const rowHeight = (plot.bottom - plot.top) / (bounds.max - bounds.min);
+  const nowX = timeToX(beat, beat, plot.left, plot.right, UI_CONFIG.historyBeats, UI_CONFIG.futureBeats);
+
+  ctx.textBaseline = 'middle';
+  ctx.font = `${rect.width < 700 ? 9 : 10}px Inter, sans-serif`;
+  for (let pitch = Math.ceil(bounds.min); pitch <= Math.floor(bounds.max); pitch += 1) {
+    const y = pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
+    const isNaturalC = ((pitch % 12) + 12) % 12 === 0;
+    ctx.strokeStyle = isNaturalC ? 'rgba(190,215,211,.19)' : 'rgba(190,215,211,.09)';
+    ctx.lineWidth = 1;
+    ctx.beginPath(); ctx.moveTo(plot.left, Math.round(y) + .5); ctx.lineTo(plot.right, Math.round(y) + .5); ctx.stroke();
+    ctx.fillStyle = isNaturalC ? '#c9d5d1' : '#7f9695';
+    ctx.textAlign = 'right'; ctx.fillText(pitchToName(pitch), plot.left - 8, y);
+  }
+
+  const visibleStart = beat - UI_CONFIG.historyBeats - 1;
+  const visibleEnd = beat + UI_CONFIG.futureBeats + 1;
+  ctx.save();
+  ctx.beginPath(); ctx.rect(plot.left, 0, plot.right - plot.left, plot.bottom); ctx.clip();
+  rhythmGridLines(state.occurrenceMeasures, visibleStart, visibleEnd).forEach((line) => {
+    const x = timeToX(line.beat, beat, plot.left, plot.right, UI_CONFIG.historyBeats, UI_CONFIG.futureBeats);
+    if (line.kind === 'measure') {
+      ctx.strokeStyle = 'rgba(226,180,101,.48)'; ctx.lineWidth = 1.4; ctx.setLineDash([]);
+    } else if (line.kind === 'beat') {
+      ctx.strokeStyle = 'rgba(180,207,203,.25)'; ctx.lineWidth = 1; ctx.setLineDash([]);
+    } else {
+      ctx.strokeStyle = 'rgba(180,207,203,.12)'; ctx.lineWidth = 1; ctx.setLineDash([2, 4]);
+    }
+    ctx.beginPath(); ctx.moveTo(Math.round(x) + .5, line.kind === 'subdivision' ? plot.top : 18); ctx.lineTo(Math.round(x) + .5, plot.bottom); ctx.stroke();
+    if (line.label && Math.abs(x - nowX) > 34) {
+      ctx.fillStyle = line.kind === 'measure' ? '#d9ad67' : '#829a99';
+      ctx.font = `${line.kind === 'measure' ? '700 ' : ''}${rect.width < 700 ? 8 : 9}px Inter, sans-serif`;
+      ctx.textAlign = 'left'; ctx.textBaseline = 'top'; ctx.fillText(line.label, x + 4, line.kind === 'measure' ? 4 : 19);
+    }
   });
-  els.scorePages.replaceChildren(...pages);
-}
-
-function updateScoreCursor(position) {
-  const layout = MEASURE_LAYOUT[Number(position?.number)];
-  const sourceEventId = activeRuntimeTarget?.id.match(/^target-(.+)-\d+$/)?.[1];
-  const glyph = sourceEventId ? scoreGlyphMap[sourceEventId] : null;
-  els.scorePages.querySelectorAll('.score-page').forEach((page) => {
-    const highlight = page.querySelector('.measure-highlight');
-    const noteCursor = page.querySelector('.target-note-cursor');
-    const activePage = scoreView === 'part' && glyph ? glyph.page : layout?.page;
-    const active = activePage && Number(page.dataset.page) === activePage;
-    page.classList.toggle('is-active', Boolean(active));
-    highlight.hidden = !active || scoreView === 'original';
-    noteCursor.hidden = !active || scoreView !== 'part' || !glyph;
-    if (!active) return;
-    if (scoreView === 'part') {
-      Object.assign(highlight.style, {
-        left: `${layout.left}%`, top: `${layout.top}%`, width: `${layout.width}%`, height: `${layout.height}%`,
-      });
-      if (glyph) {
-        Object.assign(noteCursor.style, { left: `${glyph.x_percent}%`, top: `${glyph.y_percent}%` });
-      }
-    }
-    const cursorKey = `${position.number}-${page.dataset.page}`;
-    if (cursorKey !== lastCursorMeasure && page.clientWidth > 0) {
-      const horizontalPercent = glyph?.x_percent ?? layout.left;
-      const verticalPercent = glyph?.y_percent ?? layout.top;
-      const desiredLeft = scoreView === 'original'
-        ? 0
-        : page.offsetLeft + (horizontalPercent / 100) * page.clientWidth - els.scoreViewport.clientWidth * 0.28;
-      const desiredTop = scoreView === 'original'
-        ? page.offsetTop
-        : page.offsetTop + (verticalPercent / 100) * page.clientHeight - 28;
-      els.scoreViewport.scrollTo({ left: Math.max(0, desiredLeft), top: Math.max(0, desiredTop), behavior: 'smooth' });
-      lastCursorMeasure = cursorKey;
-    }
-  });
-}
-
-function renderScoreRuntime(nowMs = performance.now()) {
-  const snapshot = performanceClock.snapshot(nowMs);
-  const totalBeats = Math.max(1, scoreDurationBeats());
-  const safeBeat = Math.min(snapshot.beat, totalBeats);
-  const positionBeat = Math.min(safeBeat, Math.max(0, totalBeats - 0.001));
-  const position = scoreRuntime.measureAt(positionBeat);
-  activeRuntimeTarget = scoreRuntime.targetAt(safeBeat);
-  const expectedName = activeRuntimeTarget ? midiToItalianName(activeRuntimeTarget.midiPitch) : '—';
-
-  els.scorePosition.textContent = `Battuta ${position.number} · movimento ${position.beatInMeasure.toFixed(1)}`;
-  els.targetNote.textContent = expectedName;
-  els.expectedNote.textContent = expectedName;
-  els.targetFrequency.textContent = activeRuntimeTarget ? formatHz(activeRuntimeTarget.frequencyHz) : 'Pausa';
-  els.tempoLabel.textContent = scoreRuntime.measures[0]?.timeSignatureDenominator === 8
-    ? `♩. = ${Math.round(scoreRuntime.tempoBpm / 2)}`
-    : `${Math.round(scoreRuntime.tempoBpm)} BPM`;
-  els.scoreProgress.style.width = `${Math.min(100, (safeBeat / totalBeats) * 100)}%`;
-  updateScoreCursor(position);
-  return snapshot;
-}
-
-async function loadScoreDocument() {
-  try {
-    const response = await fetch('score-fixtures/gloria-frisina-draft.json', { cache: 'no-store' });
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const payload = await response.json();
-    const glyphResponse = await fetch('score-assets/gloria-parts/glyph-map.json', { cache: 'no-store' });
-    scoreGlyphMap = glyphResponse.ok ? await glyphResponse.json() : {};
-    const loadedRuntime = NormalizedScoreRuntime.fromNormalizedScore(payload);
-    if (loadedRuntime.targetEvents.length === 0) throw new Error('Lo spartito non contiene eventi target');
-    scoreRuntime = loadedRuntime;
-    performanceClock = new PerformanceClock({ tempoBpm: scoreRuntime.tempoBpm });
-    activeRuntimeTarget = scoreRuntime.targetAt(0);
-    els.scoreTitle.textContent = scoreRuntime.title;
-    els.partSelector.value = scoreRuntime.selectedPartId;
-    renderScorePages();
-    renderScoreRuntime();
-    drawGraph();
-  } catch (error) {
-    console.warn('Uso della sequenza simbolica di riserva:', error);
-    els.scoreTitle.textContent = 'Esercizio simbolico di riserva';
-    renderScorePages();
-    renderScoreRuntime();
-  }
-}
-
-function setStatus(text, state = '') {
-  els.engineStatus.textContent = text;
-  els.engineStatus.dataset.state = state;
-}
-
-function showSessionAlert(title, copy, tone = 'warning') {
-  els.sessionAlertTitle.textContent = title;
-  els.sessionAlertCopy.textContent = copy;
-  els.sessionAlert.dataset.tone = tone;
-  els.sessionAlert.hidden = false;
-}
-
-function hideSessionAlert() {
-  els.sessionAlert.hidden = true;
-  els.sessionAlert.dataset.tone = '';
-}
-
-function renderTrackState(event) {
-  const observedTrack = event?.currentTarget ?? track;
-  if (!observedTrack) return;
-  if (observedTrack.readyState === 'ended' && !intentionallyStoppedTracks.has(observedTrack)) {
-    interruptSession('Microfono scollegato', 'La prova è stata messa in pausa. Ricollega il microfono e premi “Riprendi la prova”.');
-  } else if (observedTrack.muted) {
-    setStatus('Microfono disattivato', 'error');
-    els.pitchState.textContent = 'Il microfono è disattivato dal browser o da Windows.';
-    els.micHint.lastChild.textContent = ' Controlla privacy, volume d’ingresso e tasto fisico del microfono.';
-    if (sessionState === 'running') {
-      interruptSession('Microfono disattivato', 'Il tempo è stato fermato per non perdere la sincronizzazione. Riattiva l’ingresso e riprendi.');
-    }
-  } else if (observedTrack.readyState === 'live' && sessionState === 'running') {
-    setStatus('In prova', 'active');
-  }
-}
-
-function recordPitchHistory(hz, nowMs) {
-  history.push({ hz, targetHz: activeRuntimeTarget?.frequencyHz ?? null, timeMs: nowMs });
-  history = history.filter((point) => nowMs - point.timeMs <= HISTORY_WINDOW_MS + 250);
-}
-
-function drawGraph(nowMs = performance.now()) {
-  const width = els.canvas.width;
-  const height = els.canvas.height;
-  const plot = { left: 76, right: width - 18, top: 16, bottom: height - 25 };
-  const recent = history.filter((point) => nowMs - point.timeMs <= HISTORY_WINDOW_MS);
-  const frequencies = recent.flatMap((point) => [point.hz, point.targetHz]).filter((value) => value > 0);
-  const currentTargetHz = activeRuntimeTarget?.frequencyHz ?? null;
-  if (currentTargetHz) frequencies.push(currentTargetHz / 2, currentTargetHz * 2);
-  if (frequencies.length === 0) frequencies.push(110, 880);
-
-  let minHz = Math.max(MIN_HZ, Math.min(...frequencies) / 1.12);
-  let maxHz = Math.min(MAX_HZ, Math.max(...frequencies) * 1.12);
-  if (maxHz / minHz < 2) {
-    const center = Math.sqrt(minHz * maxHz);
-    minHz = Math.max(MIN_HZ, center / Math.sqrt(2));
-    maxHz = Math.min(MAX_HZ, center * Math.sqrt(2));
-  }
-  const minLog = Math.log(minHz);
-  const maxLog = Math.log(maxHz);
-  const xForTime = (timeMs) => plot.right - ((nowMs - timeMs) / HISTORY_WINDOW_MS) * (plot.right - plot.left);
-  const yForHz = (hz) => plot.bottom - ((Math.log(hz) - minLog) / (maxLog - minLog)) * (plot.bottom - plot.top);
-
-  graphContext.clearRect(0, 0, width, height);
-  graphContext.fillStyle = '#061016';
-  graphContext.fillRect(0, 0, width, height);
-  graphContext.font = '20px Inter, sans-serif';
-  graphContext.textAlign = 'right';
-  graphContext.textBaseline = 'middle';
-  for (let index = 0; index < 5; index += 1) {
-    const ratio = index / 4;
-    const hz = Math.exp(maxLog - ratio * (maxLog - minLog));
-    const y = plot.top + ratio * (plot.bottom - plot.top);
-    graphContext.strokeStyle = index === 2 ? 'rgba(178,211,211,.18)' : 'rgba(178,211,211,.10)';
-    graphContext.lineWidth = 1;
-    graphContext.beginPath();
-    graphContext.moveTo(plot.left, y);
-    graphContext.lineTo(plot.right, y);
-    graphContext.stroke();
-    graphContext.fillStyle = '#89a2a2';
-    graphContext.fillText(`${Math.round(hz)} Hz`, plot.left - 10, y);
-  }
-  graphContext.textAlign = 'center';
-  graphContext.textBaseline = 'top';
-  [8, 6, 4, 2, 0].forEach((secondsAgo, index) => {
-    const x = plot.left + (index / 4) * (plot.right - plot.left);
-    graphContext.fillStyle = '#70898a';
-    graphContext.fillText(secondsAgo === 0 ? 'ora' : `−${secondsAgo}s`, x, plot.bottom + 5);
+  ctx.restore(); ctx.setLineDash([]);
+  state.runtime.targetEvents.forEach((event) => {
+    if (event.onsetBeat + event.durationBeats < visibleStart || event.onsetBeat > visibleEnd) return;
+    const x = timeToX(event.onsetBeat, beat, plot.left, plot.right, UI_CONFIG.historyBeats, UI_CONFIG.futureBeats);
+    const endX = timeToX(event.onsetBeat + event.durationBeats, beat, plot.left, plot.right, UI_CONFIG.historyBeats, UI_CONFIG.futureBeats);
+    const y = pitchToY(event.midiPitch, bounds.min, bounds.max, plot.top, plot.bottom);
+    const blockHeight = Math.max(7, rowHeight * .43);
+    const toleranceHeight = rowHeight * (UI_CONFIG.targetToleranceCents / 50);
+    ctx.fillStyle = 'rgba(217,168,91,.10)';
+    roundedRect(ctx, x, y - toleranceHeight / 2, endX - x, toleranceHeight, 3); ctx.fill();
+    ctx.fillStyle = event.onsetBeat <= beat && beat < event.onsetBeat + event.durationBeats ? '#e4b665' : '#bd8e4c';
+    roundedRect(ctx, x, y - blockHeight / 2, Math.max(2, endX - x - 2), blockHeight, 3); ctx.fill();
+    const graceEnd = timeToX(event.onsetBeat + event.attackGraceBeats, beat, plot.left, plot.right, UI_CONFIG.historyBeats, UI_CONFIG.futureBeats);
+    ctx.fillStyle = 'rgba(7,19,25,.24)'; ctx.fillRect(x, y - blockHeight / 2, Math.max(0, graceEnd - x), blockHeight);
+    const lyric = event.lyric ?? '';
+    if (lyric && endX - x > 18) { ctx.fillStyle = '#d6cbb6'; ctx.textAlign = 'left'; ctx.font = `${rect.width < 700 ? 9 : 11}px Georgia, serif`; ctx.fillText(lyric, x + 2, y - Math.max(9, blockHeight)); }
   });
 
-  const targetPoints = recent.length > 0
-    ? recent.map((point) => ({ timeMs: point.timeMs, targetHz: point.targetHz }))
-    : [];
-  if (targetPoints[0]?.targetHz && targetPoints[0].timeMs > nowMs - HISTORY_WINDOW_MS) {
-    targetPoints.unshift({ timeMs: nowMs - HISTORY_WINDOW_MS, targetHz: targetPoints[0].targetHz });
-  }
-  if (targetPoints.some((point) => point.targetHz) || currentTargetHz) {
-    const points = targetPoints.some((point) => point.targetHz)
-      ? targetPoints
-      : [{ timeMs: nowMs - HISTORY_WINDOW_MS, targetHz: currentTargetHz }, { timeMs: nowMs, targetHz: currentTargetHz }];
-    graphContext.strokeStyle = '#e7ad62';
-    graphContext.lineWidth = 3;
-    graphContext.setLineDash([12, 8]);
-    graphContext.beginPath();
-    let previousTarget = null;
-    let targetDrawing = false;
-    points.forEach((point) => {
-      const x = Math.max(plot.left, xForTime(point.timeMs));
-      if (!point.targetHz) {
-        targetDrawing = false;
-        previousTarget = null;
-        return;
-      }
-      const y = yForHz(point.targetHz);
-      if (!targetDrawing) graphContext.moveTo(x, y);
-      else {
-        const previousY = yForHz(previousTarget);
-        graphContext.lineTo(x, previousY);
-        graphContext.lineTo(x, y);
-      }
-      targetDrawing = true;
-      previousTarget = point.targetHz;
-    });
-    if (targetDrawing && previousTarget) graphContext.lineTo(plot.right, yForHz(previousTarget));
-    graphContext.stroke();
-    graphContext.setLineDash([]);
-  }
-
-  graphContext.strokeStyle = '#74d8cb';
-  graphContext.lineWidth = 5;
-  graphContext.lineJoin = 'round';
-  graphContext.lineCap = 'round';
-  graphContext.shadowColor = 'rgba(116,216,203,.28)';
-  graphContext.shadowBlur = 9;
-  graphContext.beginPath();
+  ctx.save();
+  ctx.beginPath(); ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top); ctx.clip();
+  ctx.strokeStyle = '#68d1cb'; ctx.lineWidth = rect.width < 700 ? 2.2 : 3; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
+  ctx.shadowColor = 'rgba(99,200,194,.3)'; ctx.shadowBlur = 6; ctx.beginPath();
   let drawing = false;
-  recent.forEach((point) => {
-    const x = Math.max(plot.left, xForTime(point.timeMs));
-    if (!point.hz) {
-      drawing = false;
-      return;
-    }
-    const y = yForHz(point.hz);
-    if (!drawing) graphContext.moveTo(x, y);
-    else graphContext.lineTo(x, y);
+  for (const sample of state.pitchSamples) {
+    if (sample.beat < visibleStart || sample.beat > Math.min(beat, visibleEnd)) { drawing = false; continue; }
+    const x = timeToX(sample.beat, beat, plot.left, plot.right, UI_CONFIG.historyBeats, UI_CONFIG.futureBeats);
+    const y = pitchToY(sample.pitch, bounds.min, bounds.max, plot.top, plot.bottom);
+    if (drawing) ctx.lineTo(x, y); else ctx.moveTo(x, y);
     drawing = true;
-  });
-  graphContext.stroke();
-  graphContext.shadowBlur = 0;
-  els.plotRange.textContent = `Scala ${Math.round(minHz)}–${Math.round(maxHz)} Hz`;
+  }
+  ctx.stroke(); ctx.restore(); ctx.shadowBlur = 0;
+
+  ctx.strokeStyle = '#f0cf8f'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(Math.round(nowX) + .5, plot.top); ctx.lineTo(Math.round(nowX) + .5, plot.bottom); ctx.stroke();
+  ctx.fillStyle = '#f0cf8f'; ctx.font = '700 9px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText('ORA', nowX, 1);
+  ctx.fillStyle = '#718788'; ctx.font = '9px Inter, sans-serif'; ctx.textAlign = 'left'; ctx.fillText('PASSATO', plot.left + 3, plot.bottom + 8); ctx.textAlign = 'right'; ctx.fillText('PROSSIME NOTE', plot.right - 3, plot.bottom + 8);
 }
 
-function renderEstimate(estimate, nowMs = performance.now()) {
-  const { hz, rms, clarity } = estimate;
-  const currentTarget = activeRuntimeTarget?.frequencyHz ?? null;
-  els.rms.textContent = rms.toFixed(3).replace('.', ',');
-  recordPitchHistory(hz, nowMs);
-
-  if (hz == null) {
-    const silent = rms < 0.004;
-    silenceStartedMs = silent ? (silenceStartedMs ?? nowMs) : null;
-    const longSilence = silent && nowMs - silenceStartedMs >= 3000;
-    const targetMissing = !activeRuntimeTarget;
-    els.confidence.textContent = targetMissing ? 'Pausa nello spartito' : silent ? 'In ascolto' : 'Segnale instabile';
-    els.detectedHz.textContent = '—';
-    els.cents.textContent = '—';
-    els.heardNote.textContent = '—';
-    els.voiceFrequency.textContent = '—';
-    els.voiceRangeState.textContent = targetMissing
-      ? 'Nessun target in questo istante'
-      : longSilence ? 'Non sento ancora la voce' : silent ? 'Nessun suono stabile rilevato' : 'Mantieni il suono più a lungo';
-    els.voiceValue.dataset.range = '';
-    els.rangeAlert.hidden = true;
-    els.intonationMarker.style.left = '50%';
-    els.intonationMarker.style.background = 'var(--text)';
-    els.pitchState.textContent = targetMissing
-      ? 'Pausa musicale: preparati all’ingresso successivo.'
-      : longSilence ? 'Non sento ancora la voce. Controlla il microfono oppure canta un suono stabile.'
-        : silent ? 'Canta la nota indicata nello spartito.' : 'Il segnale è presente, ma non è ancora abbastanza stabile.';
-    drawGraph(nowMs);
+function renderReadout(beat, running) {
+  const target = state.runtime.targetAt(beat);
+  const singerPitch = state.livePitch;
+  if (!target || singerPitch == null) {
+    els.liveNote.textContent = target?.noteName ?? '—';
+    els.liveCents.textContent = '— ¢';
+    els.liveNote.textContent = '—';
+    els.liveState.textContent = state.microphoneStatus === 'active'
+      ? (running ? 'in ascolto' : 'microfono pronto')
+      : state.microphoneStatus === 'denied' ? 'permesso negato' : 'attiva il microfono';
+    els.intonationReadout.dataset.state = '';
     return;
   }
-
-  silenceStartedMs = null;
-  els.heardNote.textContent = hzToName(hz);
-  els.voiceFrequency.textContent = formatHz(hz);
-  els.detectedHz.textContent = formatHz(hz);
-  if (!currentTarget) {
-    els.confidence.textContent = 'Pausa nello spartito';
-    els.cents.textContent = '—';
-    els.voiceRangeState.textContent = 'Nessun target in questo istante';
-    els.voiceValue.dataset.range = '';
-    els.rangeAlert.hidden = true;
-    els.intonationMarker.style.left = '50%';
-    els.intonationMarker.style.background = 'var(--text)';
-    els.pitchState.textContent = 'Qui non c’è una nota da intonare: preparati all’ingresso successivo.';
-    drawGraph(nowMs);
-    return;
-  }
-
-  const cents = centsBetween(hz, currentTarget);
-  const semitones = cents / 100;
-  const absoluteCents = Math.abs(cents);
-  const confidence = estimate.confidence ?? clarity;
-  const markerPosition = 50 + Math.max(-100, Math.min(100, cents)) / 2;
-  els.confidence.textContent = confidence >= 0.7 ? 'Segnale chiaro' : confidence >= 0.4 ? 'Segnale discreto' : 'Segnale debole';
-  els.cents.textContent = `${formatSigned(cents)} ¢`;
-  els.voiceRangeState.textContent = `${formatSigned(semitones)} semitoni dal target`;
-  els.intonationMarker.style.left = `${markerPosition}%`;
-  els.voiceValue.dataset.range = absoluteCents > 200 ? 'far' : '';
-
-  if (absoluteCents <= 25) {
-    els.intonationMarker.style.background = 'var(--teal)';
-    els.pitchState.textContent = 'Intonazione centrata.';
-    els.rangeAlert.hidden = true;
-  } else if (absoluteCents <= 100) {
-    els.intonationMarker.style.background = 'var(--amber)';
-    els.pitchState.textContent = cents > 0 ? 'Leggermente alta: scendi un poco.' : 'Leggermente bassa: sali un poco.';
-    els.rangeAlert.hidden = true;
-  } else {
-    els.intonationMarker.style.background = 'var(--coral)';
-    const direction = cents > 0 ? 'sopra' : 'sotto';
-    els.pitchState.textContent = absoluteCents >= 700
-      ? `La voce è ${Math.abs(semitones).toFixed(1).replace('.', ',')} semitoni ${direction} il target: verifica l’ottava.`
-      : `La voce è molto ${cents > 0 ? 'alta' : 'bassa'} rispetto al target.`;
-    els.rangeAlert.textContent = `${cents > 0 ? '↑' : '↓'} ${formatSigned(semitones)} semitoni`;
-    els.rangeAlert.hidden = absoluteCents <= 200;
-  }
-  drawGraph(nowMs);
+  const cents = centsBetween(pitchToHz(singerPitch), target.frequencyHz);
+  const rounded = Math.round(cents);
+  const abs = Math.abs(rounded);
+  const label = abs <= UI_CONFIG.centeredCents ? 'centrato' : rounded > 0 ? 'leggermente crescente' : 'leggermente calante';
+  els.liveNote.textContent = pitchToName(singerPitch);
+  els.liveCents.textContent = `${rounded > 0 ? '+' : rounded < 0 ? '−' : ''}${Math.abs(rounded)} ¢`;
+  els.liveState.textContent = label;
+  els.intonationReadout.dataset.state = abs > UI_CONFIG.acceptableCents ? 'outside' : 'inside';
+  if (label !== state.lastAnnouncedState) state.lastAnnouncedState = label;
 }
 
-function tick(nowMs) {
-  if (!analyser || !samples) return;
-  const snapshot = renderScoreRuntime(nowMs);
-  if (sessionState === 'running' && snapshot.beat >= scoreDurationBeats()) {
-    completeSession(nowMs);
-    return;
+function render() {
+  if (!state.runtime) return;
+  let snapshot = state.clock.snapshot();
+  if (snapshot.beat >= totalBeats()) {
+    state.clock.pause(); state.clock.seekBeat(totalBeats()); snapshot = state.clock.snapshot(); updatePlaybackButton();
   }
-  if (nowMs - lastAnalysisMs >= ANALYSIS_INTERVAL_MS) {
-    analyser.getFloatTimeDomainData(samples);
-    analyser.getByteTimeDomainData(byteSamples);
-    let bytePeak = 0;
-    for (const value of byteSamples) bytePeak = Math.max(bytePeak, Math.abs(value - 128));
-    const floatRms = rmsOf(samples);
-    if (floatRms < 0.0001 && bytePeak > 0) {
-      for (let index = 0; index < samples.length; index += 1) {
-        samples[index] = (byteSamples[index] - 128) / 128;
-      }
-    }
-    if (track) {
-      els.debugInfo.textContent = `Ingresso: ${audioContext.sampleRate} Hz · ${track.label || 'senza nome'} · ${track.readyState} · attivo=${track.enabled} · disattivato=${track.muted} · picco=${bytePeak}`;
-      renderTrackState();
-    }
-    renderEstimate(pitchSmoother.update(detectPitch(samples, audioContext.sampleRate), nowMs), nowMs);
-    lastAnalysisMs = nowMs;
-  }
-  animationId = requestAnimationFrame(tick);
+  state.lastSnapshot = snapshot;
+  renderMetronome(snapshot);
+  sampleMicrophone(snapshot.beat, snapshot.running);
+  const index = measureIndexAt(snapshot.beat);
+  const measure = state.occurrenceMeasures[index];
+  els.scoreMeasureLabel.textContent = `Battuta ${measure?.number ?? '—'}`;
+  els.measureCounter.textContent = `Battuta ${measure?.number ?? '—'} / ${state.occurrenceMeasures.length}`;
+  renderScore(snapshot.beat);
+  drawPitchLane(snapshot.beat);
+  renderReadout(snapshot.beat, snapshot.running);
+  renderSyncDebug(snapshot);
+  if (snapshot.running || state.microphoneStatus === 'active' || state.pitchViewport?.animating) state.rafId = requestAnimationFrame(render); else state.rafId = null;
 }
 
-async function startMicrophone() {
-  if (!navigator.mediaDevices?.getUserMedia) {
-    throw new Error('Questo browser non consente l’accesso al microfono. Usa localhost oppure HTTPS.');
-  }
-  stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false },
-    video: false,
-  });
+function updateMetronomeControl() {
+  const active = Number(els.metronomeVolume.value) > 0;
+  els.metronomeToggle.setAttribute('aria-pressed', String(active));
+  els.metronomeToggle.setAttribute('aria-label', active ? 'Disattiva metronomo' : 'Attiva metronomo');
+}
+
+function playMetronomeClick(accented) {
+  const volume = Number(els.metronomeVolume.value) / 100;
+  if (volume <= 0) return;
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextClass) throw new Error('Questo browser non supporta l’elaborazione audio richiesta.');
-  audioContext = new AudioContextClass();
-  audioContext.addEventListener('statechange', () => {
-    if (audioContext?.state === 'suspended' && sessionState === 'running' && document.visibilityState === 'visible') {
-      interruptSession('Audio sospeso', 'Il browser ha sospeso l’ascolto. Il tempo è fermo: premi “Riprendi la prova”.');
+  if (!AudioContextClass) return;
+  state.metronomeContext ??= new AudioContextClass({ latencyHint: 'interactive' });
+  const context = state.metronomeContext;
+  if (context.state === 'suspended') context.resume();
+  const now = context.currentTime;
+  const oscillator = context.createOscillator();
+  const gain = context.createGain();
+  oscillator.type = 'sine';
+  oscillator.frequency.setValueAtTime(accented ? 1120 : 820, now);
+  oscillator.frequency.exponentialRampToValueAtTime(accented ? 760 : 570, now + 0.045);
+  gain.gain.setValueAtTime(Math.max(0.0001, volume * (accented ? 0.5 : 0.34)), now);
+  gain.gain.exponentialRampToValueAtTime(0.0001, now + (accented ? 0.075 : 0.055));
+  oscillator.connect(gain).connect(context.destination);
+  oscillator.start(now); oscillator.stop(now + 0.08);
+}
+
+function renderMetronome(snapshot) {
+  if (!snapshot.running) { state.lastMetronomeBeat = null; return; }
+  const measureIndex = measureIndexAt(snapshot.beat);
+  const measure = state.occurrenceMeasures[measureIndex];
+  const metronomeBeatLength = 4 / (measure?.timeSignatureDenominator ?? 4);
+  const beatInMeasure = Math.max(0, Math.floor(((snapshot.beat - (measure?.startBeat ?? 0)) / metronomeBeatLength) + 0.015));
+  const beatToken = `${measureIndex}:${beatInMeasure}`;
+  if (state.lastMetronomeBeat == null) {
+    state.lastMetronomeBeat = beatToken;
+    const nearestPulse = (measure?.startBeat ?? 0) + Math.round((snapshot.beat - (measure?.startBeat ?? 0)) / metronomeBeatLength) * metronomeBeatLength;
+    if (Math.abs(snapshot.beat - nearestPulse) < 0.06) {
+      playMetronomeClick(beatInMeasure === 0);
     }
-  });
-  source = audioContext.createMediaStreamSource(stream);
-  analyser = audioContext.createAnalyser();
-  analyser.fftSize = 4096;
-  analyser.smoothingTimeConstant = 0;
-  samples = new Float32Array(analyser.fftSize);
-  byteSamples = new Uint8Array(analyser.fftSize);
-  source.connect(analyser);
-  silentMonitor = audioContext.createGain();
-  silentMonitor.gain.value = 0;
-  analyser.connect(silentMonitor);
-  silentMonitor.connect(audioContext.destination);
-  history = [];
-  pitchSmoother.reset();
-  await audioContext.resume();
-  track = stream.getAudioTracks()[0];
-  track.addEventListener('mute', renderTrackState);
-  track.addEventListener('unmute', renderTrackState);
-  track.addEventListener('ended', renderTrackState);
-  const settings = track.getSettings?.() ?? {};
-  els.debugInfo.textContent = `Ingresso: ${audioContext.sampleRate} Hz · ${settings.channelCount ?? '?'} canale/i · ${track.label || 'senza nome'} · pronto=${track.readyState} · disattivato=${track.muted}`;
-  lastAnalysisMs = 0;
-  animationId = requestAnimationFrame(tick);
+    return;
+  }
+  if (beatToken === state.lastMetronomeBeat) return;
+  state.lastMetronomeBeat = beatToken;
+  playMetronomeClick(beatInMeasure === 0);
 }
 
-function releaseMicrophone() {
-  if (animationId) cancelAnimationFrame(animationId);
-  animationId = null;
-  if (source) source.disconnect();
-  if (analyser) analyser.disconnect();
-  if (silentMonitor) silentMonitor.disconnect();
-  if (stream) stream.getTracks().forEach((mediaTrack) => {
-    intentionallyStoppedTracks.add(mediaTrack);
-    mediaTrack.stop();
-  });
-  if (audioContext) audioContext.close();
-  source = null;
-  analyser = null;
-  silentMonitor = null;
-  stream = null;
-  track = null;
-  audioContext = null;
-  samples = null;
-  byteSamples = null;
-  pitchSmoother.reset();
+function renderSyncDebug(snapshot) {
+  if (!state.syncDebug || !els.syncDebugPanel) return;
+  const position = state.runtime.measureAt(snapshot.beat);
+  const target = state.runtime.targetAt(snapshot.beat);
+  const drift = snapshot.performanceTime - snapshot.mediaTime;
+  els.syncDebugPanel.innerHTML = [
+    `<span>AUDIO/MEDIA</span><b>${snapshot.mediaTime.toFixed(3)} s</b>`,
+    `<span>PERFORMANCE</span><b>${snapshot.performanceTime.toFixed(3)} s</b>`,
+    `<span>NOW</span><b>${snapshot.performanceTime.toFixed(3)} s</b>`,
+    `<span>TARGET</span><b>m. ${target?.measureNumber ?? position.number} · beat ${position.beatInMeasure.toFixed(2)}</b>`,
+    `<span>SCORE CURSOR</span><b>m. ${state.lastScoreEvent?.measureNumber ?? position.number} · beat ${position.beatInMeasure.toFixed(2)}</b>`,
+    `<span>DRIFT</span><b>${drift >= 0 ? '+' : ''}${drift.toFixed(3)} s</b>`,
+    `<span>RATE</span><b>${snapshot.speed.toFixed(2)}x</b>`,
+  ].join('');
 }
 
-function microphoneErrorMessage(error) {
-  if (error?.name === 'NotAllowedError') return 'Permesso microfono negato. Abilitalo dalle impostazioni del sito.';
-  if (error?.name === 'NotFoundError') return 'Non trovo un microfono collegato al dispositivo.';
-  return error?.message || 'Non riesco ad avviare il microfono.';
+function updatePlaybackButton() {
+  const running = state.clock?.running ?? false;
+  els.togglePlayback.querySelector('span').textContent = running ? 'Ⅱ' : '▶';
+  els.togglePlayback.setAttribute('aria-label', running ? 'Metti in pausa' : 'Avvia la prova');
+  els.togglePlayback.setAttribute('aria-pressed', String(running));
 }
 
-async function startOrResumeSession() {
-  els.toggleSession.disabled = true;
-  setStatus('Attivazione…');
-  hideSessionAlert();
+function seekToMeasure(index, autoPlay = false) {
+  const seek = measureSeekState(state.occurrenceMeasures, index);
+  state.selectedMeasureIndex = seek.selectedIndex;
+  state.scoringStartBeat = seek.scoringStart;
+  state.clock.seekBeat(seek.playbackStart);
+  state.lastMetronomeBeat = null;
+  state.pitchSamples = [];
+  const playbackNumber = state.occurrenceMeasures[Math.max(0, seek.selectedIndex - 1)]?.number ?? 1;
+  const scoringNumber = state.occurrenceMeasures[seek.selectedIndex]?.number ?? 1;
+  els.scoringCue.textContent = seek.playbackStart === seek.scoringStart ? `Ingresso da ${scoringNumber}` : `Preascolto ${playbackNumber} · ingresso ${scoringNumber}`;
+  if (autoPlay && !state.clock.running) state.clock.play().then(() => { updatePlaybackButton(); requestAnimationFrame(render); });
+  updatePlaybackButton(); render();
+}
+
+async function togglePlayback() {
+  if (state.fullScore) { showToast('Torna a “Mia parte” per avviare la prova.'); return; }
+  if (!state.bundleApproved) { showToast('Serve l’approvazione admin di questo bundle.'); return; }
+  if (els.accompanimentMode.value !== 'guide') { showToast('Questa modalità audio non è ancora disponibile.'); return; }
+  if (state.clock.snapshot().beat >= totalBeats()) state.clock.seekBeat(0);
+  if (state.clock.running) {
+    state.clock.pause();
+  } else {
+    try { await state.clock.play(); }
+    catch (error) { console.error('Audio playback failed', error, els.backingAudio.error); showToast(`Audio non avviato: ${error?.message || 'sorgente non disponibile'}`); }
+  }
+  updatePlaybackButton();
+  if (state.clock.running && !state.rafId) state.rafId = requestAnimationFrame(render); else render();
+}
+
+function showToast(message) {
+  els.toast.textContent = message; els.toast.hidden = false;
+  clearTimeout(showToast.timeout); showToast.timeout = setTimeout(() => { els.toast.hidden = true; }, 2400);
+}
+
+function updateMicrophoneButton() {
+  const active = state.microphoneStatus === 'active';
+  els.microphone.setAttribute('aria-pressed', String(active));
+  els.microphone.disabled = state.microphoneStatus === 'requesting';
+  els.microphone.textContent = state.microphoneStatus === 'requesting' ? 'Connessione…' : active ? 'Mic attivo' : 'Microfono';
+}
+
+async function stopMicrophone() {
+  state.microphoneStream?.getTracks().forEach((track) => track.stop());
+  if (state.microphoneContext && state.microphoneContext.state !== 'closed') await state.microphoneContext.close();
+  state.microphoneStream = null; state.microphoneContext = null; state.microphoneAnalyser = null; state.microphoneBuffer = null;
+  state.microphoneStatus = 'idle'; state.livePitch = null; state.pitchSmoother.reset();
+  updateMicrophoneButton(); render();
+}
+
+async function toggleMicrophone() {
+  if (state.microphoneStatus === 'active') { await stopMicrophone(); return; }
+  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+    state.microphoneStatus = 'error'; updateMicrophoneButton();
+    showToast('Il microfono richiede localhost o HTTPS e un browser compatibile.'); render(); return;
+  }
+  state.microphoneStatus = 'requesting'; updateMicrophoneButton();
   try {
-    if (sessionState === 'complete' || performanceClock.currentBeat >= scoreDurationBeats()) {
-      performanceClock.reset();
-      history = [];
-    }
-    if (!stream) await startMicrophone();
-    performanceClock.start(performance.now());
-    sessionState = 'running';
-    silenceStartedMs = null;
-    setStatus('In prova', 'active');
-    els.sessionLabel.textContent = 'Metti in pausa';
-    els.toggleSession.querySelector('.play-icon').textContent = 'Ⅱ';
-    els.pitchState.textContent = 'Ascolto la tua voce…';
-    els.voiceRangeState.textContent = 'In ascolto';
-    els.micHint.lastChild.textContent = ' Il microfono viene elaborato solo in questa scheda: non registriamo né inviamo la tua voce.';
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: false, channelCount: 1 }, video: false });
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+    const context = new AudioContextClass({ latencyHint: 'interactive' }); await context.resume();
+    const analyser = context.createAnalyser(); analyser.fftSize = 4096; analyser.smoothingTimeConstant = 0;
+    context.createMediaStreamSource(stream).connect(analyser);
+    state.microphoneStream = stream; state.microphoneContext = context; state.microphoneAnalyser = analyser;
+    state.microphoneBuffer = new Float32Array(analyser.fftSize); state.pitchSmoother.reset(); state.pitchSamples = [];
+    state.microphoneStatus = 'active'; updateMicrophoneButton();
+    showToast('Microfono attivo. Per risultati migliori usa le cuffie.');
+    if (!state.rafId) state.rafId = requestAnimationFrame(render);
   } catch (error) {
-    releaseMicrophone();
-    sessionState = 'idle';
-    setStatus('Microfono non disponibile', 'error');
-    els.pitchState.textContent = microphoneErrorMessage(error);
-  } finally {
-    els.toggleSession.disabled = false;
+    state.microphoneStatus = error?.name === 'NotAllowedError' ? 'denied' : 'error';
+    updateMicrophoneButton(); showToast(state.microphoneStatus === 'denied' ? 'Permesso microfono negato.' : 'Impossibile avviare il microfono.'); render();
   }
 }
 
-function pauseSession(interruption = null) {
-  const nowMs = performance.now();
-  performanceClock.stop(nowMs);
-  renderScoreRuntime(nowMs);
-  releaseMicrophone();
-  sessionState = interruption ? 'interrupted' : 'paused';
-  setStatus(interruption ? 'Interrotta' : 'In pausa', interruption ? 'error' : '');
-  els.sessionLabel.textContent = 'Riprendi la prova';
-  els.toggleSession.querySelector('.play-icon').textContent = '▶';
-  els.pitchState.textContent = interruption ? 'La prova è interrotta: la posizione è stata conservata.' : 'Prova in pausa.';
-  els.confidence.textContent = interruption ? 'Interrotta' : 'In pausa';
-  els.voiceRangeState.textContent = interruption ? 'Ascolto interrotto' : 'Prova in pausa';
-  if (interruption) showSessionAlert(interruption.title, interruption.copy, interruption.tone);
-  else hideSessionAlert();
+function changePart(partId) {
+  if (state.clock.running) state.clock.pause();
+  state.runtime.selectPart(partId);
+  const part = state.runtime.parts.find((item) => item.id === partId);
+  els.scorePartLabel.textContent = part?.name ?? 'Parte';
+  state.scorePage = 0;
+  state.pitchViewport = null;
+  buildScoreGeometry(partId);
+  configureBacking();
+  seekToMeasure(0);
 }
 
-function interruptSession(title, copy, tone = 'warning') {
-  if (sessionState !== 'running') return;
-  pauseSession({ title, copy, tone });
-}
-
-function completeSession(nowMs) {
-  performanceClock.stop(nowMs);
-  performanceClock.seek(scoreDurationBeats(), nowMs);
-  renderScoreRuntime(nowMs);
-  releaseMicrophone();
-  sessionState = 'complete';
-  setStatus('Completata', 'complete');
-  els.sessionLabel.textContent = 'Ripeti la prova';
-  els.toggleSession.querySelector('.play-icon').textContent = '↻';
-  els.pitchState.textContent = 'Prova completata. Puoi ripeterla quando vuoi.';
-  els.confidence.textContent = 'Completata';
-  els.voiceRangeState.textContent = 'Prova completata';
-}
-
-function resetSession() {
-  const wasRunning = sessionState === 'running';
-  performanceClock.reset();
-  if (wasRunning) performanceClock.start(performance.now());
-  history = [];
-  silenceStartedMs = null;
-  pitchSmoother.reset();
-  activeRuntimeTarget = scoreRuntime.targetAt(0);
-  sessionState = wasRunning ? 'running' : 'idle';
-  els.heardNote.textContent = '—';
-  els.voiceFrequency.textContent = '—';
-  els.voiceRangeState.textContent = wasRunning ? 'In ascolto' : 'In attesa del microfono';
-  els.voiceValue.dataset.range = '';
-  els.rangeAlert.hidden = true;
-  hideSessionAlert();
-  els.detectedHz.textContent = '—';
-  els.cents.textContent = '—';
-  els.rms.textContent = '—';
-  els.intonationMarker.style.left = '50%';
-  els.pitchState.textContent = wasRunning ? 'Ripartiamo dall’inizio.' : 'Avvia la prova quando sei pronta o pronto.';
-  els.confidence.textContent = wasRunning ? 'In ascolto' : 'In attesa';
-  if (!wasRunning) {
-    setStatus('Pronto');
-    els.sessionLabel.textContent = 'Avvia la prova';
-    els.toggleSession.querySelector('.play-icon').textContent = '▶';
-  }
-  renderScoreRuntime();
-  drawGraph();
-}
-
-els.toggleSession.addEventListener('click', () => {
-  if (sessionState === 'running') pauseSession();
-  else startOrResumeSession();
-});
-els.resetSession.addEventListener('click', resetSession);
-document.querySelectorAll('[data-score-view]').forEach((button) => {
-  button.addEventListener('click', () => {
-    scoreView = button.dataset.scoreView;
-    document.querySelectorAll('[data-score-view]').forEach((item) => {
-      item.setAttribute('aria-pressed', String(item === button));
-    });
-    renderScorePages();
-    renderScoreRuntime();
+function bindControls() {
+  els.togglePlayback.addEventListener('click', togglePlayback);
+  els.microphone.addEventListener('click', toggleMicrophone);
+  els.previousMeasure.addEventListener('click', () => seekToMeasure(Math.max(0, measureIndexAt(state.clock.snapshot().beat) - 1)));
+  els.nextMeasure.addEventListener('click', () => seekToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(state.clock.snapshot().beat) + 1)));
+  els.partSelector.addEventListener('change', () => changePart(els.partSelector.value));
+  els.playbackSpeed.addEventListener('change', async () => {
+    const speed = Number(els.playbackSpeed.value);
+    const snapshot = state.clock.snapshot();
+    const wasRunning = state.clock.running;
+    state.clock.pause();
+    configureBacking();
+    if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(speed); else state.clock.setSpeed(speed);
+    state.clock.seekPerformanceTime(snapshot.performanceTime);
+    state.lastMetronomeBeat = null;
+    if (wasRunning) await state.clock.play();
+    updatePlaybackButton();
+    render();
   });
-});
-els.partSelector.addEventListener('change', () => {
-  if (sessionState === 'running') pauseSession();
-  scoreRuntime.selectPart(els.partSelector.value);
-  performanceClock.reset();
-  activeRuntimeTarget = scoreRuntime.targetAt(0);
-  sessionState = 'idle';
-  setStatus('Pronto');
-  els.sessionLabel.textContent = 'Avvia la prova';
-  els.toggleSession.querySelector('.play-icon').textContent = '▶';
-  els.pitchState.textContent = 'Parte cambiata. Avvia la prova quando sei pronta o pronto.';
-  renderScorePages();
-  renderScoreRuntime();
-  drawGraph();
-});
+  els.scoreMode.addEventListener('click', () => {
+    if (state.clock.running) { showToast('Metti in pausa per consultare la partitura completa.'); return; }
+    state.fullScore = !state.fullScore;
+    els.scoreMode.setAttribute('aria-pressed', String(state.fullScore));
+    els.scoreMode.textContent = state.fullScore ? 'Mia parte' : 'Partitura';
+    document.querySelector('.score-region').classList.toggle('full-score', state.fullScore);
+    state.scorePage = 0; render();
+  });
+  els.accompanimentMode.addEventListener('change', () => {
+    if (state.clock.running) { state.clock.pause(); updatePlaybackButton(); }
+    showToast('Guida melodica derivata dallo score selezionato.');
+    render();
+  });
+  els.volume.addEventListener('input', () => { els.backingAudio.volume = Number(els.volume.value) / 100; });
+  els.metronomeVolume.addEventListener('input', () => {
+    const value = Number(els.metronomeVolume.value);
+    if (value > 0) state.rememberedMetronomeVolume = value;
+    updateMetronomeControl();
+  });
+  els.metronomeToggle.addEventListener('click', () => {
+    els.metronomeVolume.value = Number(els.metronomeVolume.value) > 0 ? 0 : state.rememberedMetronomeVolume;
+    state.lastMetronomeBeat = null;
+    updateMetronomeControl();
+  });
+  els.backingAudio.addEventListener('ended', () => { updatePlaybackButton(); render(); });
+  els.backingAudio.addEventListener('pause', () => { updatePlaybackButton(); if (!state.clock.running) render(); });
+  els.backingAudio.addEventListener('error', () => showToast(`Errore audio (${els.backingAudio.error?.code ?? 'sconosciuto'}).`));
+  els.settings.addEventListener('click', () => window.open('admin-review.html', 'choir-admin-review'));
+  document.getElementById('exit-practice').addEventListener('click', () => showToast('Nessuna schermata repertorio collegata.'));
+  window.addEventListener('resize', () => { state.activeScoreSegment = null; render(); });
+  window.addEventListener('beforeunload', () => state.microphoneStream?.getTracks().forEach((track) => track.stop()));
+  document.addEventListener('keydown', (event) => {
+    if (event.code === 'Space' && !['SELECT', 'INPUT', 'BUTTON'].includes(document.activeElement?.tagName)) { event.preventDefault(); togglePlayback(); }
+    if (event.code === 'ArrowLeft' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) - 1);
+    if (event.code === 'ArrowRight' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) + 1);
+  });
+  els.scoreImage.addEventListener('load', () => { state.activeScoreSegment = null; els.scoreLoading.hidden = true; render(); });
+  els.scoreImage.addEventListener('error', () => { els.scoreLoading.hidden = false; els.scoreLoading.textContent = 'Spartito non disponibile'; });
+}
 
-document.addEventListener('visibilitychange', () => {
-  if (document.visibilityState === 'hidden') {
-    interruptSession('Prova sospesa', 'L’app non era più in primo piano. Il tempo è stato fermato sulla battuta corrente.');
+async function initialize() {
+  const bundleResponse = await fetch('practice-piece.json', { cache: 'no-store' });
+  if (!bundleResponse.ok) throw new Error('Manifest del brano non disponibile');
+  const bundleManifest = await bundleResponse.json();
+  const [scoreResponse, glyphResponse, backingResponse] = await Promise.all([
+    fetch(bundleManifest.assets.score),
+    fetch(bundleManifest.assets.glyph_map),
+    fetch(bundleManifest.assets.audio_manifest),
+  ]);
+  if (!scoreResponse.ok || !glyphResponse.ok || !backingResponse.ok) throw new Error('Asset di prova non disponibili');
+  const [payload, glyphMap, backingManifest] = await Promise.all([scoreResponse.json(), glyphResponse.json(), backingResponse.json()]);
+  state.glyphMap = glyphMap;
+  state.backingManifest = backingManifest;
+  state.bundleManifest = bundleManifest;
+  state.runtime = NormalizedScoreRuntime.fromNormalizedScore(payload);
+  if (!bundleManifest || bundleManifest.score_version_id !== state.runtime.scoreVersionId) {
+    throw new Error('Bundle musicale incoerente: versione score/runtime non corrispondente');
   }
-});
+  const approvalKey = `choir-approval:${bundleManifest.bundle_fingerprint}`;
+  try {
+    const approval = JSON.parse(localStorage.getItem(approvalKey));
+    state.bundleApproved = approval?.bundleFingerprint === bundleManifest.bundle_fingerprint
+      && approval?.scoreVersionId === bundleManifest.score_version_id
+      && Boolean(approval?.reviewer)
+      && bundleManifest.checks.every((check) => approval?.checks?.includes(check.id));
+  } catch (_) { state.bundleApproved = false; }
+  els.assetStatus.textContent = state.bundleApproved
+    ? 'APPROVATO LOCALMENTE · bundle coerente'
+    : 'PENDING REVIEW · apri la revisione admin dal menu ⋯';
+  const parts = vocalParts(state.runtime, glyphMap);
+  els.partSelector.replaceChildren(...parts.map((part) => new Option(part.name, part.id)));
+  state.runtime.selectPart(parts.find((part) => part.name.toLowerCase().includes('tenor'))?.id ?? parts[0]?.id);
+  els.partSelector.value = state.runtime.selectedPartId;
+  state.occurrenceMeasures = buildOccurrenceMeasures(state.runtime);
+  configureBacking();
+  state.clock = new MediaPlaybackClock({ mediaElement: els.backingAudio, scoreRuntime: state.runtime });
+  if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(Number(els.playbackSpeed.value));
+  else state.clock.setSpeed(Number(els.playbackSpeed.value));
+  buildScoreGeometry(state.runtime.selectedPartId);
+  if (state.syncDebug) {
+    els.syncDebugPanel = document.createElement('aside');
+    els.syncDebugPanel.className = 'sync-debug';
+    els.syncDebugPanel.setAttribute('aria-label', 'Diagnostica sincronizzazione');
+    document.body.append(els.syncDebugPanel);
+  }
+  const titleParts = state.runtime.title.split('·');
+  els.pieceTitle.textContent = titleParts[0].trim();
+  els.scorePartLabel.textContent = parts.find((part) => part.id === state.runtime.selectedPartId)?.name ?? 'Parte';
+  bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(0); updatePlaybackButton();
+  window.addEventListener('message', (event) => {
+    if (event.origin === location.origin && event.data?.type === 'choir-bundle-approval') location.reload();
+  });
+}
 
-window.addEventListener('pagehide', () => {
-  if (sessionState === 'running') performanceClock.stop(performance.now());
-  releaseMicrophone();
+initialize().catch((error) => {
+  els.pieceTitle.textContent = 'Prova non disponibile';
+  els.scoreLoading.hidden = false;
+  els.scoreLoading.textContent = error.message;
+  console.error(error);
 });
-
-window.addEventListener('resize', () => {
-  lastCursorMeasure = null;
-  updateScoreCursor(scoreRuntime.measureAt(performanceClock.snapshot(performance.now()).beat));
-});
-
-els.scoreTitle.textContent = 'Caricamento di Gloria…';
-renderScorePages();
-renderScoreRuntime();
-drawGraph();
-loadScoreDocument();

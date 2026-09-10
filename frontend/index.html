@@ -3,137 +3,60 @@
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
-    <meta name="theme-color" content="#09161d" />
-    <title>Coro Vivo · Prova guidata</title>
+    <meta name="theme-color" content="#081419" />
+    <title>Vocal Coach</title>
     <link rel="stylesheet" href="styles.css" />
-    <script src="pitch_detector.js" defer></script>
-    <script src="score_runtime.js" defer></script>
-    <script src="app.js" defer></script>
+    <script src="practice_math.js?v=20260909-smooth-pitch" defer></script>
+    <script src="score_runtime.js?v=20260909-playback-fix" defer></script>
+    <script src="pitch_detector.js?v=20260909-real-pitch" defer></script>
+    <script src="app.js?v=20260909-metronome" defer></script>
   </head>
   <body>
-    <main class="app-shell">
-      <header class="app-header">
-        <a class="brand" href="#" aria-label="Coro Vivo, pagina iniziale">
-          <span class="brand-mark" aria-hidden="true">♪</span>
-          <span><strong>Coro Vivo</strong><small>La tua voce, insieme</small></span>
-        </a>
-        <span class="status-pill" id="engine-status" aria-live="polite">Pronto</span>
+    <main class="practice-shell" aria-label="Strumento di prova">
+      <header class="practice-toolbar">
+        <button class="icon-button" id="exit-practice" type="button" aria-label="Esci dalla prova" title="Esci">←</button>
+        <div class="piece-identity" aria-live="polite">
+          <strong id="piece-title">Caricamento…</strong><span aria-hidden="true">·</span>
+          <label class="part-control"><span class="sr-only">Parte vocale</span><select id="part-selector" aria-label="Parte vocale"></select></label>
+        </div>
+        <div class="toolbar-actions">
+          <label class="compact-select"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità"><option value="0.5">50%</option><option value="0.75" selected>75%</option><option value="1">100%</option></select></label>
+          <label class="compact-select accompaniment-select"><span class="sr-only">Accompagnamento</span><select id="accompaniment-mode" aria-label="Accompagnamento"><option value="guide" selected>Guida melodica</option></select></label>
+          <button class="mode-button" id="score-mode" type="button" aria-pressed="false">Partitura</button>
+          <button class="mode-button microphone-button" id="microphone" type="button" aria-pressed="false">Microfono</button>
+          <button class="mode-button" id="settings" type="button" aria-label="Apri revisione admin">Revisione</button>
+        </div>
       </header>
 
-      <aside class="session-alert" id="session-alert" role="status" aria-live="polite" hidden>
-        <span class="session-alert-icon" aria-hidden="true">!</span>
-        <p><strong id="session-alert-title">Prova interrotta</strong><span id="session-alert-copy"></span></p>
-      </aside>
+      <aside class="asset-status" id="asset-status" role="alert">Gloria · revisione musicale in corso</aside>
 
-      <section class="rehearsal-card" aria-labelledby="rehearsal-title">
-        <div class="rehearsal-heading">
-          <div>
-            <p class="eyebrow">PROVA GUIDATA</p>
-            <h1 id="rehearsal-title">Segui la tua parte</h1>
-            <p class="score-name" id="score-title">Caricamento dell’esercizio…</p>
-          </div>
-          <label class="part-picker" for="part-selector">
-            <span>La tua parte</span>
-            <select id="part-selector" aria-label="Scegli la tua parte">
-              <option value="P1">Soprano</option>
-              <option value="P2">Contralto</option>
-              <option value="P3">Tenore</option>
-              <option value="P4">Basso</option>
-            </select>
-          </label>
-        </div>
+      <aside class="orientation-hint" role="note"><span aria-hidden="true">↻</span><p><strong>Ruota il dispositivo</strong><small>per la modalità di prova completa</small></p></aside>
 
-        <div class="score-toolbar">
-          <span id="score-position">Battuta 1 · movimento 1</span>
-          <span><strong id="target-note">La4</strong> · <span id="tempo-label">80 BPM</span></span>
+      <section class="score-region" aria-label="Spartito della parte selezionata">
+        <div class="score-meta"><span id="score-part-label">Parte</span><span id="score-measure-label">Battuta 1</span></div>
+        <div class="score-viewport" id="score-viewport">
+          <div class="score-sheet" id="score-sheet"><img id="score-image" alt="Spartito della parte selezionata" /><div class="score-cursor" id="score-cursor" aria-hidden="true"><span></span></div></div>
+          <div class="score-loading" id="score-loading" role="status">Preparazione spartito…</div>
         </div>
-
-        <div class="score-view-switch" aria-label="Vista dello spartito">
-          <button type="button" data-score-view="original" aria-pressed="true">Partitura completa</button>
-          <button type="button" data-score-view="part" aria-pressed="false">Solo la mia parte <small>bozza</small></button>
-        </div>
-
-        <div class="score-viewport" id="score-viewport" aria-label="Spartito della parte scelta con battuta evidenziata">
-          <div class="score-pages" id="score-pages" aria-live="polite"></div>
-        </div>
-        <div class="progress-track" aria-hidden="true"><span id="score-progress"></span></div>
-        <p class="score-caption"><strong>Partitura originale:</strong> il target segue la parte scelta. La vista isolata è una bozza OMR da verificare e approvare.</p>
       </section>
 
-      <section class="feedback-card" aria-labelledby="feedback-title">
-        <div class="feedback-heading">
-          <div>
-            <p class="eyebrow">ASCOLTO DELLA VOCE</p>
-            <h2 id="feedback-title">Intonazione in tempo reale</h2>
-          </div>
-          <span class="confidence" id="confidence">In attesa</span>
-        </div>
-
-        <div class="signal-summary">
-          <div class="signal-value target-value">
-            <span>Obiettivo simbolico</span>
-            <strong id="expected-note">La4</strong>
-            <small id="target-frequency">440,0 Hz</small>
-          </div>
-          <div class="signal-divider" aria-hidden="true"></div>
-          <div class="signal-value voice-value">
-            <span>Frequenza della tua voce</span>
-            <strong id="voice-frequency">—</strong>
-            <small id="voice-range-state">In attesa del microfono</small>
-          </div>
-        </div>
-
-        <section class="pitch-plot" aria-labelledby="pitch-plot-title">
-          <header>
-            <div>
-              <h3 id="pitch-plot-title">Traccia continua</h3>
-              <p>Gli ultimi 8 secondi, senza trasformare la voce in note.</p>
-            </div>
-            <div class="plot-legend" aria-label="Legenda">
-              <span><i class="target-swatch"></i>Target</span>
-              <span><i class="voice-swatch"></i>Voce</span>
-            </div>
-          </header>
-          <div class="plot-stage">
-            <canvas id="pitch-canvas" width="1000" height="320" aria-label="Frequenza della voce e frequenza target negli ultimi otto secondi"></canvas>
-            <span class="range-alert" id="range-alert" hidden></span>
-          </div>
-          <footer><span id="plot-range">Scala in preparazione</span><span>asse logaritmico · Hz</span></footer>
-        </section>
-
-        <div class="intonation-meter" aria-label="Indicatore di intonazione">
-          <div class="meter-labels"><span>Più bassa</span><span>Centrata</span><span>Più alta</span></div>
-          <div class="meter-rail">
-            <span class="tuned-zone"></span>
-            <span class="meter-marker" id="intonation-marker"></span>
-          </div>
-        </div>
-        <p class="feedback-copy" id="pitch-state" aria-live="polite">Avvia la prova quando sei pronta o pronto.</p>
-
-        <details class="technical-details">
-          <summary>Dettagli tecnici</summary>
-          <div class="metrics">
-            <div><span>Frequenza rilevata</span><strong id="detected-hz">—</strong></div>
-            <div><span>Scarto</span><strong id="cents">—</strong></div>
-            <div><span>Livello ingresso</span><strong id="rms">—</strong></div>
-            <div><span>Nota temperata più vicina</span><strong id="heard-note">—</strong></div>
-          </div>
-          <p class="debug" id="debug-info">Ingresso audio non ancora attivato.</p>
-        </details>
+      <section class="pitch-region" aria-label="Intonazione e tempo">
+        <canvas id="pitch-lane" role="img" aria-describedby="pitch-description"></canvas>
+        <p class="sr-only" id="pitch-description">Le note target scorrono da destra verso la linea Ora fissa. La traiettoria mostra l’intonazione rilevata dal microfono.</p>
+        <div class="intonation-readout" id="intonation-readout" aria-live="polite"><strong id="live-note">—</strong><span id="live-cents">— ¢</span><small id="live-state">in attesa</small></div>
+        <div class="lane-legend" aria-hidden="true"><span class="voice-key">Voce rilevata</span><span class="target-key">Target reale</span></div>
       </section>
 
-      <aside class="privacy-note" id="mic-hint">
-        <span aria-hidden="true">●</span>
-        Il microfono viene elaborato solo in questa scheda: non registriamo né inviamo la tua voce.
-      </aside>
-
-      <div class="transport" aria-label="Controlli della prova">
-        <button class="reset-button" id="reset-session" type="button" aria-label="Torna all’inizio">↺</button>
-        <button class="primary-button" id="toggle-session" type="button">
-          <span class="play-icon" aria-hidden="true">▶</span>
-          <span id="session-label">Avvia la prova</span>
-        </button>
-      </div>
+      <footer class="practice-transport">
+        <div class="transport-position"><span id="measure-counter">Battuta 1 / 12</span><span class="scoring-cue" id="scoring-cue">Ingresso da 1</span></div>
+        <div class="transport-controls" role="group" aria-label="Trasporto"><button class="transport-button" id="previous-measure" type="button" aria-label="Battuta precedente" title="Battuta precedente">|‹</button><button class="play-button" id="toggle-playback" type="button" aria-label="Avvia la prova" aria-pressed="false"><span aria-hidden="true">▶</span></button><button class="transport-button" id="next-measure" type="button" aria-label="Battuta successiva" title="Battuta successiva">›|</button></div>
+        <div class="mixer-controls">
+          <label class="volume-control"><span aria-hidden="true">◖</span><span class="sr-only">Volume accompagnamento</span><input id="volume" type="range" min="0" max="100" value="62" aria-label="Volume accompagnamento" /></label>
+          <label class="volume-control metronome-control"><button id="metronome-toggle" type="button" aria-label="Attiva metronomo" aria-pressed="false" title="Metronomo">♩</button><span class="sr-only">Volume metronomo</span><input id="metronome-volume" type="range" min="0" max="100" value="0" aria-label="Volume metronomo" /></label>
+        </div>
+      </footer>
+      <audio id="backing-audio" preload="auto"></audio>
+      <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
     </main>
   </body>
 </html>

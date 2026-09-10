@@ -2,3 +2,12 @@ FlutterPitchGame-main/*
 data/
 __pycache__/
 *.py[cod]
+automate_mscz/.work/
+automate_mscz/job-state.json
+automate_mscz/output/
+automate_mscz/reports/
+automate_mscz/.worker.lock
+
+artifacts/
+frontend/score-assets/
+frontend/audio/

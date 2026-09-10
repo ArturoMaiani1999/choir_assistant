@@ -93,7 +93,7 @@ Priorità: critica per il prodotto, non bloccante per il prototipo UX.
 
 ## Direzione visiva proposta
 
-Nome di lavoro: **Coro Vivo**.
+Nome di lavoro: **Intona**.
 
 Principi:
 

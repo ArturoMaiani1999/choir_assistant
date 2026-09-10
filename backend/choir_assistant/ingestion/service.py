@@ -28,11 +28,13 @@ def discover_capabilities() -> dict[str, Any]:
     audiveris = shutil.which("audiveris") or shutil.which("audiveris.bat")
     java = shutil.which("java")
     ffmpeg = shutil.which("ffmpeg")
+    codex = shutil.which("codex")
     return {
         "musescore": _executable_info(musescore),
         "omr": {"adapter": "audiveris", **_executable_info(audiveris)},
         "java": _executable_info(java),
         "ffmpeg": _executable_info(ffmpeg),
+        "codex": _executable_info(codex),
     }
 
 

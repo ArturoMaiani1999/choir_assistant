@@ -66,9 +66,16 @@ def _midi_pitch(note: ET.Element) -> int | None:
     return (int(octave) + 1) * 12 + _STEP_TO_SEMITONE[step] + alter
 
 
-def _lyric(note: ET.Element) -> str | None:
+def _lyric(note: ET.Element) -> tuple[str | None, str | None, bool]:
     lyric = _child(note, "lyric")
-    return _text(lyric, "text")
+    if lyric is None:
+        return None, None, False
+    return _text(lyric, "text"), _text(lyric, "syllabic"), _child(lyric, "extend") is not None
+
+
+def _ties(note: ET.Element) -> tuple[bool, bool]:
+    tie_types = {tie.get("type") for tie in _children(note, "tie")}
+    return "start" in tie_types, "stop" in tie_types
 
 
 def _tempo_from_direction(direction: ET.Element) -> float | None:
@@ -254,7 +261,10 @@ def compile_musicxml(
                 midi_pitch = None if is_rest else _midi_pitch(child)
                 voice_text = _text(child, "voice")
                 voice = int(voice_text) if voice_text and voice_text.isdigit() else None
-                event_id = f"{part_id}-event-{len(events) + 1}"
+                source_note_id = child.get("id")
+                event_id = source_note_id or f"{part_id}-event-{len(events) + 1}"
+                lyric, lyric_syllabic, lyric_extend = _lyric(child)
+                tie_start, tie_stop = _ties(child)
                 events.append(
                     MusicalEvent(
                         id=event_id,
@@ -264,7 +274,11 @@ def compile_musicxml(
                         onset_beats=onset,
                         duration_beats=duration_beats,
                         midi_pitch=midi_pitch,
-                        lyric=_lyric(child),
+                        lyric=lyric,
+                        lyric_syllabic=lyric_syllabic,
+                        lyric_extend=lyric_extend,
+                        tie_start=tie_start,
+                        tie_stop=tie_stop,
                         voice=voice,
                     )
                 )
@@ -280,7 +294,12 @@ def compile_musicxml(
                         duration_seconds=0.0,
                         midi_pitch=midi_pitch,
                         frequency_hz=(440.0 * 2 ** ((midi_pitch - 69) / 12)) if midi_pitch is not None else None,
-                        lyric=_lyric(child),
+                        source_event_id=event_id,
+                        lyric=lyric,
+                        lyric_syllabic=lyric_syllabic,
+                        lyric_extend=lyric_extend,
+                        tie_start=tie_start,
+                        tie_stop=tie_stop,
                         is_rest=is_rest,
                     )
                 )

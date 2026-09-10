@@ -45,6 +45,10 @@ class MusicalEvent:
     duration_beats: float
     midi_pitch: int | None = None
     lyric: str | None = None
+    lyric_syllabic: str | None = None
+    lyric_extend: bool = False
+    tie_start: bool = False
+    tie_stop: bool = False
     voice: int | None = None
 
 
@@ -71,7 +75,12 @@ class TargetEvent:
     duration_seconds: float
     midi_pitch: int | None
     frequency_hz: float | None
+    source_event_id: str
     lyric: str | None = None
+    lyric_syllabic: str | None = None
+    lyric_extend: bool = False
+    tie_start: bool = False
+    tie_stop: bool = False
     is_rest: bool = False
 
 

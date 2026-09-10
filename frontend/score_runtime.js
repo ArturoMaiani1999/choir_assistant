@@ -12,9 +12,11 @@
   }
 
   class NormalizedScoreRuntime {
-    constructor({ title, tempoBpm, beatsPerMeasure, measures = [], parts = [], performanceOccurrences = [], targetEvents }) {
+    constructor({ title, scoreVersionId = null, tempoBpm, tempoMap = [], beatsPerMeasure, measures = [], parts = [], performanceOccurrences = [], targetEvents }) {
       this.title = title;
+      this.scoreVersionId = scoreVersionId;
       this.tempoBpm = tempoBpm;
+      this.tempoMap = tempoMap.length ? tempoMap : [{ beat: 0, bpm: tempoBpm }];
       this.beatsPerMeasure = beatsPerMeasure;
       this.measures = measures;
       this.parts = parts;
@@ -23,6 +25,7 @@
         ...event,
         frequencyHz: event.frequencyHz ?? midiToHz(event.midiPitch),
         noteName: event.noteName ?? midiToName(event.midiPitch),
+        attackGraceBeats: event.attackGraceBeats ?? 0.18,
       }));
       this.selectedPartId = parts[0]?.id ?? this.allTargetEvents[0]?.partId ?? null;
       this.selectPart(this.selectedPartId);
@@ -72,8 +75,35 @@
       };
     }
 
+    secondsAtBeat(beat) {
+      const safeBeat = Math.max(0, beat);
+      let seconds = 0;
+      for (let index = 0; index < this.tempoMap.length; index += 1) {
+        const tempo = this.tempoMap[index];
+        const nextBeat = this.tempoMap[index + 1]?.beat ?? safeBeat;
+        const segmentEnd = Math.min(safeBeat, nextBeat);
+        if (segmentEnd > tempo.beat) seconds += (segmentEnd - tempo.beat) * 60 / tempo.bpm;
+        if (safeBeat <= nextBeat) break;
+      }
+      return seconds;
+    }
+
+    beatAtSeconds(seconds) {
+      let remaining = Math.max(0, seconds);
+      for (let index = 0; index < this.tempoMap.length; index += 1) {
+        const tempo = this.tempoMap[index];
+        const nextBeat = this.tempoMap[index + 1]?.beat;
+        if (nextBeat == null) return tempo.beat + remaining * tempo.bpm / 60;
+        const segmentSeconds = (nextBeat - tempo.beat) * 60 / tempo.bpm;
+        if (remaining <= segmentSeconds) return tempo.beat + remaining * tempo.bpm / 60;
+        remaining -= segmentSeconds;
+      }
+      return 0;
+    }
+
     static fromNormalizedScore(payload) {
-      const firstTempo = payload.tempo_map?.[0]?.bpm ?? 80;
+      const tempoMap = (payload.tempo_map ?? []).map((tempo) => ({ beat: tempo.beat, bpm: tempo.bpm }));
+      const firstTempo = tempoMap[0]?.bpm ?? 80;
       const sourceMeasures = payload.measures ?? [];
       const measures = sourceMeasures.map((measure) => ({
         id: measure.id,
@@ -94,7 +124,8 @@
         startBeat: occurrence.start_beat,
         endBeat: occurrence.end_beat,
       }));
-      const targetEvents = (payload.target_events ?? []).map((event) => ({
+      const targetEvents = (payload.target_events ?? []).map((event) => {
+        return ({
         id: event.id,
         partId: event.part_id,
         measureNumber: sourceMeasures.find((measure) => measure.id === event.written_measure_id)?.number,
@@ -103,10 +134,23 @@
         midiPitch: event.midi_pitch,
         frequencyHz: event.frequency_hz,
         isRest: event.is_rest,
-      }));
+        lyric: event.lyric ?? null,
+        lyricSyllabic: event.lyric_syllabic ?? null,
+        lyricExtend: event.lyric_extend ?? false,
+        tieStart: event.tie_start ?? false,
+        tieStop: event.tie_stop ?? false,
+        sourceEventId: event.source_event_id ?? null,
+        attackGraceBeats: event.attack_grace_beats ?? 0.18,
+      });
+      });
+      if (targetEvents.some((event) => !event.sourceEventId)) {
+        throw new Error('Runtime target event is missing stable source-event provenance');
+      }
       return new NormalizedScoreRuntime({
         title: payload.title,
+        scoreVersionId: payload.score_version_id,
         tempoBpm: firstTempo,
+        tempoMap,
         beatsPerMeasure,
         measures,
         parts,
@@ -117,8 +161,9 @@
   }
 
   class PerformanceClock {
-    constructor({ tempoBpm }) {
+    constructor({ tempoBpm, speed = 1 }) {
       this.tempoBpm = tempoBpm;
+      this.speed = speed;
       this.currentBeat = 0;
       this.running = false;
       this.startedAtMs = null;
@@ -152,14 +197,96 @@
       this.startedAtMs = this.running ? nowMs : null;
     }
 
+    setSpeed(speed, nowMs) {
+      const nextSpeed = Number(speed);
+      if (!(nextSpeed > 0)) return;
+      if (this.running) {
+        this.currentBeat = this.beatAt(nowMs);
+        this.startBeat = this.currentBeat;
+        this.startedAtMs = nowMs;
+      }
+      this.speed = nextSpeed;
+    }
+
     beatAt(nowMs) {
       if (!this.running || this.startedAtMs == null) return this.currentBeat;
-      return this.startBeat + ((nowMs - this.startedAtMs) / 60000) * this.tempoBpm;
+      return this.startBeat + ((nowMs - this.startedAtMs) / 60000) * this.tempoBpm * this.speed;
     }
 
     snapshot(nowMs) {
       const beat = this.beatAt(nowMs);
-      return { beat, elapsedSeconds: (beat * 60) / this.tempoBpm, running: this.running };
+      return { beat, elapsedSeconds: (beat * 60) / this.tempoBpm, running: this.running, speed: this.speed };
+    }
+  }
+
+  class MediaPlaybackClock {
+    constructor({ mediaElement, scoreRuntime }) {
+      this.media = mediaElement;
+      this.scoreRuntime = scoreRuntime;
+      this.preRenderedSpeed = null;
+    }
+
+    get running() {
+      return !this.media.paused && !this.media.ended;
+    }
+
+    get speed() {
+      return this.media.playbackRate;
+    }
+
+    async play() {
+      if (this.running) return this.snapshot();
+      await this.media.play();
+      return this.snapshot();
+    }
+
+    pause() {
+      this.media.pause();
+      return this.snapshot();
+    }
+
+    seekPerformanceTime(seconds) {
+      const mediaSeconds = this.preRenderedSpeed ? seconds / this.preRenderedSpeed : seconds;
+      this.media.currentTime = Math.max(0, Math.min(Number.isFinite(this.media.duration) ? this.media.duration : Infinity, mediaSeconds));
+      return this.snapshot();
+    }
+
+    seekBeat(beat) {
+      return this.seekPerformanceTime(this.scoreRuntime.secondsAtBeat(beat));
+    }
+
+    setSpeed(speed) {
+      const nextSpeed = Number(speed);
+      if (nextSpeed > 0) {
+        this.preRenderedSpeed = null;
+        this.media.defaultPlaybackRate = nextSpeed;
+        this.media.playbackRate = nextSpeed;
+        this.media.preservesPitch = true;
+      }
+      return this.snapshot();
+    }
+
+    setPreRenderedSpeed(speed) {
+      const nextSpeed = Number(speed);
+      if (nextSpeed > 0) {
+        this.preRenderedSpeed = nextSpeed;
+        this.media.defaultPlaybackRate = 1;
+        this.media.playbackRate = 1;
+        this.media.preservesPitch = true;
+      }
+      return this.snapshot();
+    }
+
+    snapshot() {
+      const mediaTime = this.media.currentTime || 0;
+      const performanceTime = mediaTime * (this.preRenderedSpeed || 1);
+      return {
+        mediaTime,
+        performanceTime,
+        beat: this.scoreRuntime.beatAtSeconds(performanceTime),
+        running: this.running,
+        speed: this.preRenderedSpeed || this.speed,
+      };
     }
   }
 
@@ -185,6 +312,7 @@
   global.ChoirScore = {
     NormalizedScoreRuntime,
     PerformanceClock,
+    MediaPlaybackClock,
     createDemoScore,
     midiToHz,
     midiToName,

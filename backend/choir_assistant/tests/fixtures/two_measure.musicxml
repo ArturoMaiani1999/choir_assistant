@@ -15,9 +15,9 @@
       <direction placement="above">
         <direction-type><metronome><beat-unit>quarter</beat-unit><per-minute>60</per-minute></metronome></direction-type>
       </direction>
-      <note>
+      <note id="P1-m1-n1">
         <pitch><step>C</step><octave>4</octave></pitch>
-        <duration>2</duration><type>quarter</type><voice>1</voice><lyric><text>La</text></lyric>
+        <duration>2</duration><type>quarter</type><voice>1</voice><lyric><syllabic>single</syllabic><text>La</text><extend/></lyric>
       </note>
       <note>
         <pitch><step>D</step><octave>4</octave></pitch>

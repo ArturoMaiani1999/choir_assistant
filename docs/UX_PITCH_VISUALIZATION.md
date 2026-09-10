@@ -1,5 +1,7 @@
 # Visualizzazione dell'intonazione
 
+> Historical decision record. The active Practice redesign supersedes the rolling Hz-chart hierarchy with the equal-semitone, fixed-NOW lane specified in `docs/PRACTICE_UX_SPEC.md`.
+
 ## Decisione
 
 Lo spartito e il segnale del cantante hanno due ruoli diversi e non devono

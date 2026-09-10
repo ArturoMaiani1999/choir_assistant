@@ -1,0 +1,21 @@
+:root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #071319; color: #eaf1ed; }
+* { box-sizing: border-box; }
+body { margin: 0; }
+header { position: sticky; top: 0; z-index: 5; display: flex; justify-content: space-between; gap: 2rem; align-items: center; padding: 1rem clamp(1rem, 4vw, 4rem); border-bottom: 1px solid #284047; background: rgba(7,19,25,.96); }
+h1, h2, p { margin-top: 0; } h1 { margin-bottom: .25rem; font-family: Georgia, serif; } h2 { font-size: 1rem; }
+header a { color: #e5b766; } .eyebrow { margin-bottom: .25rem; color: #75cbc5; font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; }
+main { width: min(1500px, 96vw); margin: 1.5rem auto 4rem; display: grid; gap: 1rem; }
+section, .status-card { border: 1px solid #29434a; border-radius: 10px; padding: 1rem; background: #0d2027; }
+.status-card { display: flex; justify-content: space-between; gap: 1rem; align-items: center; }
+.status-card div { display: flex; align-items: center; gap: .8rem; } #status-badge { padding: .35rem .55rem; border-radius: 4px; background: #4b3218; color: #f2ce89; font-size: .72rem; font-weight: 800; }
+code { color: #91aaa9; font-size: .7rem; overflow-wrap: anywhere; }
+.comparison { display: grid; grid-template-columns: 1fr 1fr; gap: .8rem; } figure { min-width: 0; margin: 0; } figcaption { margin-bottom: .4rem; color: #aac0bd; font-size: .75rem; }
+.image-frame { height: 440px; overflow: auto; border-radius: 6px; background: white; } .image-frame img { display: block; width: 100%; height: auto; }
+audio { width: min(760px, 100%); } .audio-review p { color: #91aaa9; }
+#checks { display: grid; gap: .55rem; } #checks label { display: flex; gap: .7rem; align-items: flex-start; padding: .7rem; border: 1px solid #29434a; border-radius: 6px; }
+.reviewer, .notes, #new-score-form > label:first-child { display: grid; gap: .35rem; margin-top: 1rem; color: #b8cac7; } input, textarea { width: min(760px, 100%); border: 1px solid #426068; border-radius: 5px; padding: .7rem; background: #07161c; color: white; }
+.actions { display: flex; flex-wrap: wrap; gap: .6rem; margin-top: 1rem; } button { border: 1px solid #537078; border-radius: 5px; padding: .65rem .9rem; background: #152e36; color: white; cursor: pointer; } #approve { border-color: #c59245; background: #b57b28; color: #111; font-weight: 800; } button:disabled { opacity: .45; cursor: not-allowed; }
+#decision { margin: 1rem 0 0; color: #79d0c9; }
+.file-picker { border: 1px solid #c59245; border-radius: 5px; padding: .65rem .9rem; background: #b57b28; color: #111; cursor: pointer; font-weight: 800; }
+.source-edit { background: #10272e; }
+@media (max-width: 800px) { .comparison { grid-template-columns: 1fr; } .image-frame { height: 320px; } .status-card { align-items: flex-start; flex-direction: column; } }

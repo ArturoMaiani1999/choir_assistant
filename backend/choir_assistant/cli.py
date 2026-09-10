@@ -9,6 +9,7 @@ from pathlib import Path
 from .ingestion.job_store import JobStore
 from .ingestion.musicxml import compile_musicxml
 from .ingestion.service import submit_ingestion
+from .ingestion.codex_musescore import run_codex_draft
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -25,6 +26,8 @@ def build_parser() -> argparse.ArgumentParser:
     status.add_argument("job_id")
     report = ingest_commands.add_parser("report")
     report.add_argument("job_id")
+    draft = ingest_commands.add_parser("create-draft")
+    draft.add_argument("job_id")
 
     score = commands.add_parser("score")
     score_commands = score.add_subparsers(dest="score_command", required=True)
@@ -47,6 +50,11 @@ def main() -> int:
         manifest = JobStore(args.data_root).get(args.job_id)
         print(json.dumps(manifest, indent=2, ensure_ascii=False))
         return 0
+
+    if args.command == "ingest" and args.ingest_command == "create-draft":
+        manifest = run_codex_draft(args.job_id, args.data_root)
+        print(json.dumps(manifest, indent=2, ensure_ascii=False))
+        return 0 if manifest["status"] == "pending_admin_review" else 1
 
     if args.command == "score" and args.score_command == "compile-musicxml":
         score = compile_musicxml(

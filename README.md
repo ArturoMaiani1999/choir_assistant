@@ -4,7 +4,7 @@ Private choir rehearsal platform: the legacy Flutter prototype is kept as refere
 
 ## Project status
 
-The repository is currently in the technical-audit phase. No production web application has been generated yet and the legacy Flutter project has intentionally not been modified.
+The repository now includes a frontend-first Practice UX milestone alongside the ingestion foundation. It is not a production application: notation is still a draft asset, singer pitch/scoring are mocked, and the legacy Flutter project remains unchanged.
 
 The future product must support a repeatable admin workflow:
 
@@ -21,16 +21,21 @@ An unreviewed transcription is never authoritative and is never exposed to singe
 - [Agentic PDF ingestion pipeline](docs/INGESTION_PIPELINE.md)
 - [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
 - [Legacy pitch-tracking audit](docs/LEGACY_PITCH_TRACKING_AUDIT.md)
+- [Practice UX specification](docs/PRACTICE_UX_SPEC.md)
+- [Practice redesign plan](docs/PRACTICE_REDESIGN_PLAN.md)
+- [Practice redesign progress](docs/PRACTICE_REDESIGN_PROGRESS.md)
+- [Playback synchronization audit](docs/PLAYBACK_SYNC_AUDIT.md)
+- [Score reconstruction policy](docs/SCORE_RECONSTRUCTION_POLICY.md)
 
-## First runnable slice
+## Runnable Practice milestone
 
-The first browser slice is a dependency-free local pitch lab. It runs the YIN-style detector in the browser and does not upload microphone audio.
+The browser slice is a dependency-free rehearsal interface with deterministic mock pitch feedback. The existing part-specific backing mix remains connected; microphone capture is intentionally not connected in this visual milestone.
 
 ```powershell
-python -m http.server 5173 --directory frontend
+python scripts/serve_frontend.py
 ```
 
-Then open `http://localhost:5173` and allow microphone access.
+Then open `http://localhost:5173`. Landscape is recommended for active rehearsal.
 
 The ingestion foundation can be exercised against the real benchmark PDF:
 

@@ -81,6 +81,21 @@ class JobStore:
         self.append_event(job_dir, {"event": "job_created", "status": status})
         return manifest
 
+    def job_dir(self, job_id: str) -> Path:
+        if not job_id or Path(job_id).name != job_id:
+            raise ValueError("Invalid job id")
+        path = self.root / "ingestions" / job_id
+        if not path.is_dir():
+            raise FileNotFoundError(job_id)
+        return path
+
+    def update(self, job_id: str, **changes: Any) -> dict[str, Any]:
+        job_dir = self.job_dir(job_id)
+        manifest = self.get(job_id)
+        manifest.update(changes, updated_at=utc_now())
+        self.write_manifest(job_dir, manifest)
+        return manifest
+
     @staticmethod
     def write_manifest(job_dir: Path, manifest: dict[str, Any]) -> None:
         (job_dir / "manifest.json").write_text(
@@ -95,7 +110,7 @@ class JobStore:
             stream.write(json.dumps(record, ensure_ascii=False) + "\n")
 
     def get(self, job_id: str) -> dict[str, Any]:
-        path = self.root / "ingestions" / job_id / "manifest.json"
+        path = self.job_dir(job_id) / "manifest.json"
         if not path.is_file():
             raise FileNotFoundError(job_id)
         return json.loads(path.read_text(encoding="utf-8"))

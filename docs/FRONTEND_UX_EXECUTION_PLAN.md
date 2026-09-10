@@ -1,5 +1,7 @@
 # Piano di esecuzione frontend e UX
 
+> Historical execution plan for the earlier prototype. Current Practice status and limitations are tracked in `docs/PRACTICE_REDESIGN_PROGRESS.md`.
+
 ## Obiettivo
 
 Portare il prototipo tecnico verso una webapp mobile-first per coristi, nella quale lo spartito approvato, il cursore musicale e la propria parte siano il centro della prova. Il feedback vocale deve aiutare senza trasformare l’esperienza in un videogioco.
@@ -17,7 +19,7 @@ Portare il prototipo tecnico verso una webapp mobile-first per coristi, nella qu
 
 Stato: implementata nella prima tranche UX.
 
-- identità visiva provvisoria “Coro Vivo”;
+- identità visiva provvisoria “Intona”;
 - spartito simbolico dominante;
 - playhead verticale ambra e nota attiva evidenziata;
 - confronto nota attesa/voce;
@@ -88,3 +90,14 @@ Stato: continuativa.
 ## Prossimo incremento consigliato
 
 Introdurre conto alla rovescia, selezione della battuta iniziale e un clock audio unico. In parallelo, completare la revisione amministrativa del MusicXML di Gloria prima di abilitare valutazioni persistenti.
+# Stato tranche accompagnamento (2026-09-09)
+
+- [x] Quattro mix specifici per ruolo: organo + voci non selezionate.
+- [x] Controlli italiani per modalità di ascolto, velocità e volume.
+- [x] Clock della base condiviso da spartito, target e pitch tracking.
+- [x] Pitch preservation a 75% e 50%.
+- [x] Pausa coordinata in caso di buffering, perdita del microfono o scheda nascosta.
+- [x] Modalità cuffie ad alta fedeltà e modalità altoparlante con cancellazione eco del browser.
+- [ ] Calibrazione automatica della latenza round-trip.
+- [ ] Mixer di volume separato per organo e ciascuna voce.
+- [ ] Sostituzione degli asset bozza con rendering dello spartito approvato.

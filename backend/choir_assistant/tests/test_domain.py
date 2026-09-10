@@ -27,6 +27,7 @@ class RuntimeScoreTests(unittest.TestCase):
                     duration_seconds=0.5,
                     midi_pitch=64,
                     frequency_hz=329.6276,
+                    source_event_id="source-1",
                 )
             ],
         )
@@ -55,6 +56,11 @@ class RuntimeScoreTests(unittest.TestCase):
         self.assertEqual(len(score.measures), 2)
         self.assertEqual(len(score.target_events), 5)
         self.assertEqual(score.target_events[0].midi_pitch, 60)
+        self.assertEqual(score.target_events[0].source_event_id, score.events[0].id)
+        self.assertEqual(score.target_events[0].source_event_id, "P1-m1-n1")
+        self.assertEqual(score.target_events[0].lyric, "La")
+        self.assertEqual(score.target_events[0].lyric_syllabic, "single")
+        self.assertTrue(score.target_events[0].lyric_extend)
         self.assertAlmostEqual(score.target_events[0].onset_seconds, 0.0)
         self.assertAlmostEqual(score.target_events[1].onset_seconds, 1.0)
         self.assertTrue(score.target_events[2].is_rest)

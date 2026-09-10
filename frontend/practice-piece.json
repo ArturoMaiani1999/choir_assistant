@@ -1,0 +1,68 @@
+{
+  "piece_id": "ecco-quel-che-abbiamo-mvp",
+  "title": "Ecco quel che abbiamo · frase MVP",
+  "scope": "Source measures 3–10 (first complete lyric phrase)",
+  "publication_status": "pending_review",
+  "review_readiness": "ready",
+  "score_version_id": "ecco-mvp-review-8dc6d6f029d376f3",
+  "bundle_fingerprint": "59ac57743cd0a564838c2ce7463d8af98bd6c8ec17c0d3f6b7b2657cbdf0acef",
+  "generated_at": "2026-09-09T22:06:38.411265+00:00",
+  "assets": {
+    "score": "score-fixtures/ecco-mvp.json",
+    "glyph_map": "score-assets/ecco-mvp/glyph-map.json",
+    "audio_manifest": "audio/ecco-mvp/manifest.json",
+    "audio_root": "audio/ecco-mvp",
+    "score_pages": {
+      "P1": [
+        "score-assets/ecco-mvp/melodia-1.svg"
+      ]
+    },
+    "full_score_pages": [
+      "score-assets/ecco-mvp/full-score-1.svg"
+    ]
+  },
+  "review_pairs": [
+    {
+      "label": "First phrase · source measures 3–10",
+      "source": "score-assets/ecco-mvp/source-measures-3-10.png",
+      "rendered": "score-assets/ecco-mvp/full-score-1.svg"
+    }
+  ],
+  "checks": [
+    {
+      "id": "pitch",
+      "label": "Pitch and accidentals match the PDF"
+    },
+    {
+      "id": "rhythm",
+      "label": "Rhythm, rests, ties, meter and bar boundaries match"
+    },
+    {
+      "id": "lyrics",
+      "label": "Lyrics and syllabic/melisma alignment match"
+    },
+    {
+      "id": "render",
+      "label": "Rendered notation is legible and faithful"
+    },
+    {
+      "id": "audio",
+      "label": "Guide audio matches the notation and cursor"
+    }
+  ],
+  "integrity": {
+    "consistent": true,
+    "hashes": {
+      "review_musicxml": "dadfeae99e650616a1e43c0e5e7739f437eed0a23cfaf7f2f393b71406ccc911",
+      "musescore": "8dc6d6f029d376f33163ba16f935135ee54465ae71497543812d6154abc8f715",
+      "timeline": "43d5be1fafb3252bd40ff993e2e79bf4a6db308364211849c5830d2e6dadc204",
+      "geometry": "09721ff5f5c8604ef1db433fbc6c41ad9f2ccccb0844cf9ee7e54e3eddbc3671",
+      "rendered_score": "e13a9a76ce8939f97cfc7f065b25af5c811ff6a38244eb4e74582366cb539a53",
+      "guide_audio": "3eebc91765dd59d476e144cf2c25da8f2c522f80fb346340582598acfe7dbf1a",
+      "audio_manifest": "097e4d49b7908a28afbcf283ff605553db8cbbfee9478584cd4e33216799e3c6"
+    },
+    "event_count": 70,
+    "target_count": 70,
+    "lyric_attack_count": 29
+  }
+}

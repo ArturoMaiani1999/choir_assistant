@@ -1,8 +1,8 @@
-"""Apply the human-known metadata missing from the Gloria OMR draft.
+"""Create the reviewable Gloria MusicXML from the raw Audiveris hypothesis.
 
-This does not approve or silently correct recognised notes. It only names the
-five staves and restores the printed tempo/navigation text so the normalised
-runtime can be exercised before editorial review.
+Every musical repair in this file is tied to visible PDF evidence.  Ambiguous
+material is deliberately left unresolved and must keep the piece in
+``pending_review``.
 """
 
 from __future__ import annotations
@@ -21,6 +21,36 @@ PART_NAMES = {
     "P5": "Organo",
 }
 
+# (part, one-based measure, one-based note ordinal) -> corrected duration in
+# MusicXML divisions.  The PDF shows conventional quarter/eighth groupings and
+# no printed tuplet numbers in these locations.
+FALSE_TUPLET_DURATIONS = {
+    ("P2", 1, 2): 3,  # eighth
+    ("P2", 1, 3): 6,  # quarter
+    ("P3", 1, 4): 3,
+    ("P3", 1, 5): 3,
+    ("P3", 1, 6): 3,
+    ("P3", 3, 2): 3,
+    ("P3", 3, 3): 3,
+    ("P3", 3, 4): 3,
+}
+
+# The printed SATB recitative tones in measures 9--12 use stemless whole-note
+# heads as a visual convention, but each occupies one complete 6/8 bar.  Keep
+# the printed ``whole`` type while giving the playback duration six eighths.
+VOCAL_RECITATIVE_MEASURES = range(9, 13)
+
+UNSUPPORTED_NOTATIONS = {
+    "articulations",
+    "arpeggiate",
+    "dynamics",
+    "fermata",
+    "non-arpeggiate",
+    "ornaments",
+    "technical",
+    "tuplet",
+}
+
 
 def _direction(words: str | None = None, tempo: float | None = None) -> ET.Element:
     direction = ET.Element("direction", {"placement": "above"})
@@ -32,9 +62,61 @@ def _direction(words: str | None = None, tempo: float | None = None) -> ET.Eleme
     return direction
 
 
+def _normalize_omr_noise(root: ET.Element) -> None:
+    """Remove unsupported OMR expression guesses and proven false tuplets."""
+
+    for part in root.findall("part"):
+        part_id = part.get("id") or "unknown"
+        for measure_index, measure in enumerate(part.findall("measure"), start=1):
+            # No OMR direction in this draft has positive PDF evidence.  The
+            # three verified semantic directions are inserted below on P1.
+            for direction in list(measure.findall("direction")):
+                measure.remove(direction)
+
+            notes = measure.findall("note")
+            divisions_node = measure.find("./attributes/divisions")
+            if divisions_node is not None:
+                divisions = int(divisions_node.text or "1")
+            elif measure_index == 1:
+                divisions = 1
+            for note_ordinal, note in enumerate(notes, start=1):
+                note.set("id", f"{part_id}-m{measure_index}-n{note_ordinal}")
+                correction = FALSE_TUPLET_DURATIONS.get(
+                    (part_id, measure_index, note_ordinal)
+                )
+                if correction is not None:
+                    duration = note.find("duration")
+                    if duration is None:
+                        raise ValueError(
+                            f"Missing duration for corrected note {part_id} "
+                            f"measure {measure_index} note {note_ordinal}"
+                        )
+                    duration.text = str(correction)
+                if (
+                    part_id in {"P1", "P2", "P3", "P4"}
+                    and measure_index in VOCAL_RECITATIVE_MEASURES
+                    and note.find("rest") is None
+                ):
+                    duration = note.find("duration")
+                    if duration is not None:
+                        duration.text = str(divisions * 3)
+                time_modification = note.find("time-modification")
+                if time_modification is not None:
+                    note.remove(time_modification)
+                notations = note.find("notations")
+                if notations is not None:
+                    for child in list(notations):
+                        if child.tag in UNSUPPORTED_NOTATIONS:
+                            notations.remove(child)
+                    if not list(notations):
+                        note.remove(notations)
+
+
 def prepare(source: Path, destination: Path) -> None:
     tree = ET.parse(source)
     root = tree.getroot()
+
+    _normalize_omr_noise(root)
 
     work = root.find("work")
     if work is None:

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Score artifact review</title>
+    <link rel="stylesheet" href="admin-review.css" />
+    <script src="admin-review.js" defer></script>
+  </head>
+  <body>
+    <header><div><p class="eyebrow">Choir Assistant · Admin</p><h1 id="title">Loading review bundle…</h1><p id="scope"></p></div><a href="index.html">Back to Practice</a></header>
+    <main>
+      <section class="source-edit"><h2>Registra un nuovo spartito</h2><p>Carica il PDF: Codex CLI preparerà una bozza MuseScore minimale con testo e organo, riprodotto con un suono di archi MuseScore Basic. La bozza non sarà pubblicata prima della revisione admin.</p><form id="new-score-form"><label>ID brano<input id="new-piece-id" required pattern="[a-z0-9][a-z0-9-]{1,63}" placeholder="es. ave-maria" /></label><label class="file-picker">Scegli PDF<input id="new-score-pdf" type="file" accept="application/pdf,.pdf" required hidden /></label><div class="actions"><button id="create-draft" type="submit">Registra e crea bozza</button></div></form><p id="ingestion-status" role="status"></p><div id="draft-actions" class="actions" hidden><button id="download-draft" type="button">Scarica bozza .mscz</button><label class="file-picker">Carica .mscz revisionato<input id="revision-file" type="file" accept=".mscz,application/octet-stream" hidden /></label></div></section>
+      <section class="status-card"><div><span id="status-badge">PENDING REVIEW</span><strong id="integrity">Checking hashes…</strong></div><code id="fingerprint"></code></section>
+      <section class="source-edit"><h2>Correggi in MuseScore</h2><p>Scarica il file sorgente, correggilo in MuseScore, salvalo come nuova versione e importalo qui. L’importazione rigenera automaticamente gli artefatti e invalida l’approvazione precedente.</p><div class="actions"><button id="download-mscz" type="button">Scarica .mscz</button><label class="file-picker">Importa .mscz corretto<input id="mscz-file" type="file" accept=".mscz,application/octet-stream" hidden /></label></div><p id="import-status" role="status"></p></section>
+      <section><h2>Source ↔ reconstructed score</h2><div id="comparisons"></div></section>
+      <section class="audio-review"><h2>Audio synchronization review</h2><audio id="review-audio" controls></audio><p>Listen while comparing note attacks, ties, lyric attacks, and bar transitions.</p></section>
+      <section class="approval"><h2>Approval checklist</h2><form id="approval-form"><div id="checks"></div><label class="reviewer">Reviewer name<input id="reviewer" required autocomplete="name" /></label><label class="notes">Review notes<textarea id="notes" rows="4"></textarea></label><div class="actions"><button id="approve" type="submit">Approve this exact bundle</button><button id="revoke" type="button">Revoke local approval</button><button id="export" type="button">Export review record</button></div></form><p id="decision" role="status"></p></section>
+    </main>
+  </body>
+</html>
