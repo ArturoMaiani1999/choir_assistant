@@ -5,24 +5,29 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#081419" />
     <title>Vocal Coach</title>
-    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="styles.css?v=20260918-practice" />
     <script src="practice_math.js?v=20260909-smooth-pitch" defer></script>
     <script src="score_runtime.js?v=20260909-playback-fix" defer></script>
-    <script src="pitch_detector.js?v=20260909-real-pitch" defer></script>
-    <script src="app.js?v=20260909-metronome" defer></script>
+    <script src="pitch_detector.js?v=20260918-octave-guard" defer></script>
+    <script src="app.js?v=20260918-transpose" defer></script>
   </head>
   <body>
     <main class="practice-shell" aria-label="Strumento di prova">
       <header class="practice-toolbar">
         <button class="icon-button" id="exit-practice" type="button" aria-label="Esci dalla prova" title="Esci">←</button>
         <div class="piece-identity" aria-live="polite">
-          <strong id="piece-title">Caricamento…</strong><span aria-hidden="true">·</span>
+          <button class="piece-picker-button" id="piece-picker" type="button" aria-label="Scegli un brano"><strong id="piece-title">Caricamento…</strong></button><span aria-hidden="true">·</span>
           <label class="part-control"><span class="sr-only">Parte vocale</span><select id="part-selector" aria-label="Parte vocale"></select></label>
         </div>
         <div class="toolbar-actions">
-          <label class="compact-select"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità"><option value="0.5">50%</option><option value="0.75" selected>75%</option><option value="1">100%</option></select></label>
+          <label class="compact-select"><span class="sr-only">Trasposizione</span><select id="transpose" aria-label="Trasposizione"></select></label>
+          <label class="compact-select"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
           <label class="compact-select accompaniment-select"><span class="sr-only">Accompagnamento</span><select id="accompaniment-mode" aria-label="Accompagnamento"><option value="guide" selected>Guida melodica</option></select></label>
+          <button class="mode-button library-button" id="library" type="button">Brani</button>
+          <button class="mode-button" id="restart-practice" type="button" title="Ricomincia il brano">Ricomincia</button>
+          <button class="mode-button" id="ground-truth" type="button">Campione</button>
           <button class="mode-button" id="score-mode" type="button" aria-pressed="false">Partitura</button>
+          <button class="mode-button" id="exercise" type="button">Esercizio</button>
           <button class="mode-button microphone-button" id="microphone" type="button" aria-pressed="false">Microfono</button>
           <button class="mode-button" id="settings" type="button" aria-label="Apri revisione admin">Revisione</button>
         </div>
@@ -33,7 +38,7 @@
       <aside class="orientation-hint" role="note"><span aria-hidden="true">↻</span><p><strong>Ruota il dispositivo</strong><small>per la modalità di prova completa</small></p></aside>
 
       <section class="score-region" aria-label="Spartito della parte selezionata">
-        <div class="score-meta"><span id="score-part-label">Parte</span><span id="score-measure-label">Battuta 1</span></div>
+        <div class="score-meta"><span id="score-part-label">Parte</span><span id="score-measure-label">Battuta 1</span><span id="score-transpose-label" hidden>Spartito originale</span></div>
         <div class="score-viewport" id="score-viewport">
           <div class="score-sheet" id="score-sheet"><img id="score-image" alt="Spartito della parte selezionata" /><div class="score-cursor" id="score-cursor" aria-hidden="true"><span></span></div></div>
           <div class="score-loading" id="score-loading" role="status">Preparazione spartito…</div>
@@ -45,11 +50,12 @@
         <p class="sr-only" id="pitch-description">Le note target scorrono da destra verso la linea Ora fissa. La traiettoria mostra l’intonazione rilevata dal microfono.</p>
         <div class="intonation-readout" id="intonation-readout" aria-live="polite"><strong id="live-note">—</strong><span id="live-cents">— ¢</span><small id="live-state">in attesa</small></div>
         <div class="lane-legend" aria-hidden="true"><span class="voice-key">Voce rilevata</span><span class="target-key">Target reale</span></div>
+        <meter id="microphone-level" min="0" max="0.08" value="0" aria-label="Livello del microfono" title="Livello del microfono"></meter>
       </section>
 
       <footer class="practice-transport">
         <div class="transport-position"><span id="measure-counter">Battuta 1 / 12</span><span class="scoring-cue" id="scoring-cue">Ingresso da 1</span></div>
-        <div class="transport-controls" role="group" aria-label="Trasporto"><button class="transport-button" id="previous-measure" type="button" aria-label="Battuta precedente" title="Battuta precedente">|‹</button><button class="play-button" id="toggle-playback" type="button" aria-label="Avvia la prova" aria-pressed="false"><span aria-hidden="true">▶</span></button><button class="transport-button" id="next-measure" type="button" aria-label="Battuta successiva" title="Battuta successiva">›|</button></div>
+        <div class="transport-controls" role="group" aria-label="Trasporto"><button class="transport-button restart-transport" id="restart-transport" type="button" aria-label="Ricomincia il brano dalla battuta uno" title="Ricomincia il brano">↺</button><button class="transport-button" id="previous-measure" type="button" aria-label="Battuta precedente" title="Battuta precedente">|‹</button><button class="play-button" id="toggle-playback" type="button" aria-label="Avvia la prova" aria-pressed="false"><span aria-hidden="true">▶</span></button><button class="transport-button" id="next-measure" type="button" aria-label="Battuta successiva" title="Battuta successiva">›|</button></div>
         <div class="mixer-controls">
           <label class="volume-control"><span aria-hidden="true">◖</span><span class="sr-only">Volume accompagnamento</span><input id="volume" type="range" min="0" max="100" value="62" aria-label="Volume accompagnamento" /></label>
           <label class="volume-control metronome-control"><button id="metronome-toggle" type="button" aria-label="Attiva metronomo" aria-pressed="false" title="Metronomo">♩</button><span class="sr-only">Volume metronomo</span><input id="metronome-volume" type="range" min="0" max="100" value="0" aria-label="Volume metronomo" /></label>
@@ -58,5 +64,36 @@
       <audio id="backing-audio" preload="auto"></audio>
       <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
     </main>
+    <dialog id="exercise-dialog" class="practice-dialog">
+      <h2>Una frase alla volta</h2>
+      <p>Scegli le battute da studiare. La prova termina alla fine della frase.</p>
+      <label>Da <select id="phrase-start" aria-label="Battuta iniziale"></select></label>
+      <label>A <select id="phrase-end" aria-label="Battuta finale"></select></label>
+      <label><input id="phrase-loop" type="checkbox" /> Ripeti automaticamente con preascolto</label>
+      <label>Nomi delle note <select id="note-names"><option value="international">C, D, E…</option><option value="italian">Do, Re, Mi…</option></select></label>
+      <p id="microphone-help">Prima di iniziare, attiva il microfono e canta una nota: l’indicatore di livello deve muoversi.</p>
+      <button id="test-microphone" class="mode-button" type="button">Attiva / disattiva microfono</button>
+      <meter id="test-microphone-level" min="0" max="0.08" value="0" aria-label="Livello del microfono nella preparazione"></meter>
+      <div class="dialog-actions"><button id="phrase-apply" type="button">Studia questa frase</button><button id="phrase-clear" type="button">Brano intero</button><button id="exercise-close" type="button">Chiudi</button></div>
+    </dialog>
+    <dialog id="result-dialog" class="practice-dialog">
+      <h2>Prova completata</h2><p id="result-text"></p><p id="result-progress"></p>
+      <div class="dialog-actions"><button id="retry" type="button">Riprova</button><button id="next-phrase" type="button">Prossima frase</button><button id="result-close" type="button">Chiudi</button></div>
+    </dialog>
+    <dialog id="piece-picker-dialog" class="practice-dialog piece-picker-dialog" aria-labelledby="piece-picker-heading">
+      <h2 id="piece-picker-heading">Scegli il brano e la parte</h2>
+      <p>Mostra solo i brani per cui è presente un file MuseScore modificabile (`.mscz`).</p>
+      <label>Brano <select id="library-piece" aria-label="Brano"></select></label>
+      <label>Parte da cantare <select id="library-part" aria-label="Parte da cantare"></select></label>
+      <p id="library-note" class="library-note" hidden></p>
+      <div class="dialog-actions"><button id="library-open" type="button">Apri prova</button></div>
+    </dialog>
+    <dialog id="ground-truth-dialog" class="practice-dialog" aria-labelledby="ground-truth-heading">
+      <h2 id="ground-truth-heading">Campione di riferimento</h2>
+      <p>Registra una porzione che ritieni eseguita correttamente. L’approvazione salva audio, pitch rilevato e note attese solo nel database locale di questo browser.</p>
+      <p id="ground-truth-status" class="library-note">Microfono richiesto.</p>
+      <p id="ground-truth-count" class="ground-truth-count"></p>
+      <div class="dialog-actions"><button id="ground-truth-start" type="button">Avvia acquisizione qui</button><button id="ground-truth-approve" type="button" disabled>Interrompi e approva</button><button id="ground-truth-close" type="button">Chiudi</button></div>
+    </dialog>
   </body>
 </html>

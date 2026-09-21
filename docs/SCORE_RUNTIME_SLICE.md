@@ -16,6 +16,6 @@ This increment connects the browser pitch lab to the first data-driven target ti
 
 ## Deliberate limitation
 
-The JSON fixture is not derived from `sheets/Gloria Frisina.pdf`. Gloria Frisina is still waiting for the PDF ingestion/OMR pipeline and administrative approval. Repeats, endings, D.C., D.S., Coda, and real score navigation are therefore not implemented in this browser fixture yet.
+The JSON fixture is not derived from `sheets/gloria-frisina/gloria-frisina.pdf`. Gloria Frisina is still waiting for the PDF ingestion/OMR pipeline and administrative approval. Repeats, endings, D.C., D.S., Coda, and real score navigation are therefore not implemented in this browser fixture yet.
 
 The clock currently advances while the microphone analysis loop is active. This is a development runtime, not yet synchronized to guide audio or a score renderer. The intended next step is to replace the fixture with the backend `NormalizedScore` JSON produced from an approved symbolic score, retaining the same event/clock contract.

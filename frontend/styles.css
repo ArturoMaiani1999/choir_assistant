@@ -107,7 +107,8 @@ select option { background: #102229; color: var(--text); }
 .score-region.full-score .score-cursor { display: none; }
 
 .pitch-region { min-height: 0; position: relative; overflow: hidden; background: #0a181e; }
-#pitch-lane { width: 100%; height: 100%; display: block; }
+#pitch-lane { width: 100%; height: 100%; display: block; touch-action: none; cursor: grab; }
+#pitch-lane.is-panning { cursor: grabbing; }
 .intonation-readout {
   position: absolute;
   top: 12px;
@@ -157,6 +158,23 @@ select option { background: #102229; color: var(--text); }
 .sync-debug b { color: #edf3ef; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
 .orientation-hint { display: none; }
 
+#transpose { max-width: 125px; }
+#microphone-level { position: absolute; left: 64px; top: 25px; width: 110px; height: 8px; accent-color: var(--cyan); }
+.practice-dialog { max-width: min(480px, 92vw); max-height: 85dvh; overflow: auto; color: var(--text); background: var(--surface); border: 1px solid var(--line); border-radius: 12px; padding: 24px; }
+.practice-dialog::backdrop { background: rgba(0,0,0,.65); }
+.practice-dialog h2 { margin-top: 0; font-size: 1.2rem; }
+.practice-dialog p { color: var(--muted); line-height: 1.5; }
+.practice-dialog label { display: block; margin: 12px 0; }
+.practice-dialog select { padding: 6px; margin-left: 8px; background: var(--surface-raised); border: 1px solid var(--line); border-radius: 6px; }
+.piece-picker-button { max-width: 300px; padding: 0; border: 0; background: transparent; color: inherit; text-align: left; cursor: pointer; }
+.piece-picker-button strong { overflow: hidden; display: block; text-overflow: ellipsis; white-space: nowrap; }
+.piece-picker-dialog { min-width: min(470px, 92vw); }
+.piece-picker-dialog select { width: min(100%, 320px); }
+.library-note { border-left: 2px solid var(--amber); padding-left: 10px; font-size: .82rem; }
+.dialog-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.dialog-actions button { cursor: pointer; padding: 10px 14px; border: 1px solid var(--line); border-radius: 6px; background: var(--surface-raised); color: var(--text); }
+.dialog-actions button:first-child { background: var(--amber); color: var(--ink); }
+
 :focus-visible { outline: 3px solid #f0c77d; outline-offset: 2px; }
 .sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0; }
 
@@ -204,4 +222,15 @@ select option { background: #102229; color: var(--text); }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; }
+}
+
+@media (max-width: 960px) { .toolbar-actions { gap: 3px; } #score-mode { display: none; } #settings { display: block; } .piece-identity strong { max-width: 100px; } #transpose { max-width: 105px; } }
+@media (max-width: 600px) { #exercise { display: block; padding-inline: 7px; } .piece-identity strong { max-width: 60px; } #transpose { max-width: 82px; } #microphone-level { left: 12px; } }
+@media (max-width: 600px) and (orientation: portrait) {
+  #settings { display: none; }
+  .piece-identity strong { display: none; }
+  #microphone { display: block; font-size: 0; padding-inline: 8px; }
+  #microphone::after { content: 'Mic'; font-size: 12px; }
+  #exercise { font-size: 0; min-width: 32px; padding-inline: 5px; }
+  #exercise::after { content: '⋯'; font-size: 20px; }
 }

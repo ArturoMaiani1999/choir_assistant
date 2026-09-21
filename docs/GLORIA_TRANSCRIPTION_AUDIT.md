@@ -1,7 +1,7 @@
 # Gloria transcription audit
 
 Status: **PENDING_REVIEW**  
-Benchmark source: `sheets/Gloria Frisina.pdf` (visually inspected pages 1–3; PDF page 4 is blank)  
+Benchmark source: `sheets/gloria-frisina/gloria-frisina.pdf` (visually inspected pages 1–3; PDF page 4 is blank)  
 Current review score: `gloria-frisina-review-2caad6da075f0252`  
 Approval: **not granted**
 
@@ -11,7 +11,7 @@ The PDF is the evidence. The Audiveris MusicXML is retained as a raw hypothesis.
 
 | Stage | Artifact | Finding |
 |---|---|---|
-| Source | `sheets/Gloria Frisina.pdf` | SATB score in 6/8; no printed tuplets in the affected opening passages; no dynamics or ornamental marks represented by the OMR noise below. |
+| Source | `sheets/gloria-frisina/gloria-frisina.pdf` | SATB score in 6/8; no printed tuplets in the affected opening passages; no dynamics or ornamental marks represented by the OMR noise below. |
 | Raw OMR | `data/omr-gloria/mxl-extracted/Gloria Frisina.xml` | Eight `<time-modification>` notes forming three false tuplet groups; expression noise; zero lyrics; structurally inconsistent organ durations in measures 9–12. |
 | Normalizer | `scripts/prepare_gloria_musicxml.py` | Applies only enumerated PDF-backed rhythm repairs, strips unsupported expression guesses, assigns deterministic source-note IDs, and restores verified tempo/Fine/D.C. text. |
 | Review MusicXML | `frontend/score-assets/gloria-frisina-draft.musicxml` | Zero tuplets/noise; every SATB measure spans 3 quarter-note beats; no lyrics are asserted because none has yet passed editorial transcription review. |

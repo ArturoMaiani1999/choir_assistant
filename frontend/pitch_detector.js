@@ -4,7 +4,9 @@
 (function exposeChoirPitch(global) {
   const MIN_HZ = 70;
   const MAX_HZ = 1000;
-  const YIN_THRESHOLD = 0.28;
+  // Laptop microphones and untreated rooms rarely produce the nearly-perfect
+  // periodic waveform assumed by the original threshold.
+  const YIN_THRESHOLD = 0.42;
 
   function rmsOf(buffer) {
     let sum = 0;
@@ -27,7 +29,7 @@
   // YIN-style difference and cumulative mean normalized difference.
   function detectPitch(buffer, sampleRate) {
     const rms = rmsOf(buffer);
-    if (rms < 0.004) return { hz: null, rms, clarity: 0, confidence: 0 };
+    if (rms < 0.001) return { hz: null, rms, clarity: 0, confidence: 0 };
 
     let mean = 0;
     for (const sample of buffer) mean += sample;
@@ -91,14 +93,39 @@
   }
 
   class PitchSmoother {
-    constructor({ releaseFrames = 3, fastAlpha = 0.65, slowAlpha = 0.3 } = {}) {
+    constructor({
+      releaseFrames = 3,
+      fastAlpha = 0.65,
+      slowAlpha = 0.3,
+      minClarity = 0.45,
+      minConfidence = 0.30,
+      medianWindowFrames = 3,
+      smallJumpCents = 300,
+      octaveCenterCents = 1200,
+      octaveToleranceCents = 180,
+      octaveConfirmFrames = 5,
+      largeJumpConfirmFrames = 3,
+      candidateConsistencyCents = 100,
+    } = {}) {
       this.releaseFrames = releaseFrames;
       this.fastAlpha = fastAlpha;
       this.slowAlpha = slowAlpha;
+      this.minClarity = minClarity;
+      this.minConfidence = minConfidence;
+      this.medianWindowFrames = medianWindowFrames;
+      this.smallJumpCents = smallJumpCents;
+      this.octaveCenterCents = octaveCenterCents;
+      this.octaveToleranceCents = octaveToleranceCents;
+      this.octaveConfirmFrames = octaveConfirmFrames;
+      this.largeJumpConfirmFrames = largeJumpConfirmFrames;
+      this.candidateConsistencyCents = candidateConsistencyCents;
       this.hz = null;
       this.voicedFrames = 0;
       this.unvoicedFrames = 0;
       this.lastTimestampMs = null;
+      this.rawSemitones = [];
+      this.candidateSemitone = null;
+      this.candidateFrames = 0;
     }
 
     reset() {
@@ -106,42 +133,122 @@
       this.voicedFrames = 0;
       this.unvoicedFrames = 0;
       this.lastTimestampMs = null;
+      this.rawSemitones = [];
+      this.candidateSemitone = null;
+      this.candidateFrames = 0;
     }
 
     update(estimate, timestampMs) {
-      if (estimate.hz == null) {
+      const rawHz = estimate.hz;
+      const hasReliablePitch = rawHz != null
+        && estimate.clarity >= this.minClarity
+        && estimate.confidence >= this.minConfidence;
+      if (!hasReliablePitch) {
         this.unvoicedFrames += 1;
         this.voicedFrames = 0;
         if (this.unvoicedFrames >= this.releaseFrames) this.hz = null;
+        this.rawSemitones = [];
+        this.candidateSemitone = null;
+        this.candidateFrames = 0;
         this.lastTimestampMs = timestampMs;
         return {
           ...estimate,
           hz: this.hz,
+          displayHz: this.hz,
+          rawHz,
           stable: false,
+          accepted: false,
+          rejectionReason: rawHz == null ? 'unvoiced' : 'low-confidence',
+          candidateFrames: 0,
           confidence: 0,
         };
       }
 
       this.unvoicedFrames = 0;
       this.voicedFrames += 1;
-      const previous = this.hz;
+      const rawSemitone = semitoneIndex(rawHz);
+      this.rawSemitones.push(rawSemitone);
+      if (this.rawSemitones.length > this.medianWindowFrames) this.rawSemitones.shift();
+      const filteredSemitone = this.medianSemitone();
+      const previous = this.hz == null ? null : semitoneIndex(this.hz);
+      let accepted = false;
+      let rejectionReason = null;
+
       if (previous == null) {
-        this.hz = estimate.hz;
+        this.hz = hzFromSemitone(filteredSemitone);
+        this.clearCandidate();
+        accepted = this.voicedFrames >= 3;
+        if (!accepted) rejectionReason = 'warm-up';
       } else {
-        const alpha = this.voicedFrames <= 2 ? this.fastAlpha : this.slowAlpha;
-        const smoothedSemitone = semitoneIndex(previous) * (1 - alpha)
-          + semitoneIndex(estimate.hz) * alpha;
-        this.hz = hzFromSemitone(smoothedSemitone);
+        // Continuity decisions deliberately use the raw estimate. A three-frame
+        // median would hide a single octave spike before the state machine saw
+        // it, making the frame look trustworthy to scoring diagnostics.
+        const deltaCents = (rawSemitone - previous) * 100;
+        const isOctaveJump = Math.abs(Math.abs(deltaCents) - this.octaveCenterCents)
+          <= this.octaveToleranceCents;
+        if (Math.abs(deltaCents) <= this.smallJumpCents) {
+          this.clearCandidate();
+          this.hz = hzFromSemitone(this.smoothSemitone(previous, filteredSemitone));
+          accepted = this.voicedFrames >= 3;
+          if (!accepted) rejectionReason = 'warm-up';
+        } else {
+          this.updateCandidate(rawSemitone);
+          const requiredFrames = isOctaveJump ? this.octaveConfirmFrames : this.largeJumpConfirmFrames;
+          if (this.candidateFrames >= requiredFrames) {
+            this.hz = hzFromSemitone(this.candidateSemitone);
+            this.rawSemitones = [this.candidateSemitone];
+            this.clearCandidate();
+            accepted = this.voicedFrames >= 3;
+            if (!accepted) rejectionReason = 'warm-up';
+          } else {
+            rejectionReason = isOctaveJump ? 'octave-transition' : 'large-jump-transition';
+          }
+        }
       }
       this.lastTimestampMs = timestampMs;
 
       return {
         ...estimate,
         hz: this.hz,
-        rawHz: estimate.hz,
+        displayHz: this.hz,
+        rawHz,
+        rawSemitone,
         stable: this.voicedFrames >= 3,
-        confidence: Math.max(0, Math.min(1, estimate.confidence * (this.stableFactor()))),
+        accepted,
+        rejectionReason,
+        candidateFrames: this.candidateFrames,
+        confidence: accepted ? Math.max(0, Math.min(1, estimate.confidence * this.stableFactor())) : 0,
       };
+    }
+
+    medianSemitone() {
+      const values = [...this.rawSemitones].sort((a, b) => a - b);
+      // For the short start-up window use the newest value. Once the window is
+      // full, a true median rejects a one-frame octave spike.
+      if (values.length < this.medianWindowFrames) return this.rawSemitones.at(-1);
+      return values[Math.floor(values.length / 2)];
+    }
+
+    smoothSemitone(previous, next) {
+      const alpha = this.voicedFrames <= 2 ? this.fastAlpha : this.slowAlpha;
+      return previous * (1 - alpha) + next * alpha;
+    }
+
+    updateCandidate(semitone) {
+      if (this.candidateSemitone != null
+        && Math.abs((semitone - this.candidateSemitone) * 100) <= this.candidateConsistencyCents) {
+        this.candidateSemitone = (this.candidateSemitone * this.candidateFrames + semitone)
+          / (this.candidateFrames + 1);
+        this.candidateFrames += 1;
+      } else {
+        this.candidateSemitone = semitone;
+        this.candidateFrames = 1;
+      }
+    }
+
+    clearCandidate() {
+      this.candidateSemitone = null;
+      this.candidateFrames = 0;
     }
 
     stableFactor() {

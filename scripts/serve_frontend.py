@@ -10,11 +10,16 @@ import tempfile
 import threading
 import re
 import sys
+import math
+import hashlib
+import time
+from urllib.parse import urlparse, parse_qs
 from email.parser import BytesParser
 from email.policy import default
 from http import HTTPStatus
 from http.server import SimpleHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from xml.etree import ElementTree as ET
 
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
@@ -22,19 +27,171 @@ sys.path.insert(0, str(ROOT))
 from backend.choir_assistant.ingestion.codex_musescore import run_codex_draft
 from backend.choir_assistant.ingestion.job_store import JobStore, sha256_file
 from backend.choir_assistant.ingestion.service import submit_ingestion
+from backend.choir_assistant.ingestion.musicxml import compile_musicxml
 
 DATA_ROOT = ROOT / "data"
+SHEETS_ROOT = ROOT / "sheets"
+LIBRARY_ASSETS_ROOT = ROOT / "frontend" / "library-assets"
+MUSESCORE_CANDIDATES = (
+    Path(r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe"),
+)
+_library_lock = threading.Lock()
+LIBRARY_ASSET_LAYOUT_VERSION = 2
+
+
+def _musescore() -> str:
+    executable = shutil.which("MuseScore4") or shutil.which("musescore4")
+    if executable:
+        return executable
+    candidate = next((path for path in MUSESCORE_CANDIDATES if path.is_file()), None)
+    if candidate:
+        return str(candidate)
+    raise RuntimeError("MuseScore 4 non disponibile: non posso preparare il brano selezionato")
+
+
+def _is_accompaniment(name: str) -> bool:
+    return bool(re.search(r"\b(organo|organ|piano|accompagnamento|accompaniment)\b", name, re.I))
+
+
+def _library_sources() -> list[Path]:
+    return sorted(path for path in SHEETS_ROOT.glob("*/*.mscz") if path.is_file())
+
+
+def _piece_id(value: str) -> str:
+    return value.lower().replace("_", "-")
+
+
+def _wait_for_file(path: Path, timeout: float = 8.0) -> None:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.is_file() and path.stat().st_size:
+            return
+        time.sleep(.1)
+    raise RuntimeError(f"MuseScore non ha prodotto {path.name}")
+
+
+def _export_part_svg(musicxml: Path, destination: Path, part_id: str, executable: str) -> list[str]:
+    """Render one vocal staff, never the SATB/organ full-score page."""
+    tree = ET.parse(musicxml)
+    root = tree.getroot()
+    part_list = root.find("part-list")
+    if part_list is None:
+        raise RuntimeError("MusicXML senza elenco parti")
+    for score_part in list(part_list.findall("score-part")):
+        if score_part.get("id") != part_id:
+            part_list.remove(score_part)
+    for part in list(root.findall("part")):
+        if part.get("id") != part_id:
+            root.remove(part)
+    source = destination / f"part-{part_id}.musicxml"
+    tree.write(source, encoding="utf-8", xml_declaration=True)
+    output = destination / f"part-{part_id}.svg"
+    for old in destination.glob(f"part-{part_id}-*.svg"):
+        old.unlink(missing_ok=True)
+    result = subprocess.run([executable, "-f", "-o", str(output), str(source)],
+                            capture_output=True, text=True, timeout=180, check=False)
+    if result.returncode:
+        raise RuntimeError((result.stderr or result.stdout or "MuseScore part export failed").strip()[-600:])
+    first_page = destination / f"part-{part_id}-1.svg"
+    _wait_for_file(first_page)
+    return [path.name for path in sorted(destination.glob(f"part-{part_id}-*.svg"))]
+
+
+def _build_library_piece(source: Path) -> dict:
+    """Build browser-only derivatives of a user-owned MSCZ source on demand."""
+    piece_id = _piece_id(source.parent.name)
+    destination = LIBRARY_ASSETS_ROOT / piece_id
+    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
+    metadata_path = destination / "metadata.json"
+    with _library_lock:
+        if metadata_path.is_file():
+            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+            if (metadata.get("source_sha256") == source_hash
+                    and metadata.get("layout_version") == LIBRARY_ASSET_LAYOUT_VERSION):
+                return metadata
+        destination.mkdir(parents=True, exist_ok=True)
+        musicxml = destination / "score.musicxml"
+        score_svg = destination / "score.svg"
+        score_audio = destination / "score.mp3"
+        executable = _musescore()
+        for output in (musicxml, score_audio):
+            output.unlink(missing_ok=True)
+        for old_svg in destination.glob("score-*.svg"):
+            old_svg.unlink(missing_ok=True)
+        for output in (musicxml, score_svg, score_audio):
+            result = subprocess.run(
+                [executable, "-f", "-o", str(output), str(source)],
+                capture_output=True, text=True, timeout=180, check=False,
+            )
+            if result.returncode:
+                raise RuntimeError((result.stderr or result.stdout or "MuseScore export failed").strip()[-600:])
+            # MuseScore names multipage SVG output score-1.svg, score-2.svg…
+            # rather than the requested score.svg.
+            _wait_for_file(destination / "score-1.svg" if output == score_svg else output)
+        score_version_id = f"local-{piece_id}-{source_hash[:12]}"
+        score = compile_musicxml(musicxml, score_version_id=score_version_id)
+        payload = score.to_dict()
+        score_json = destination / "score.json"
+        score_json.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        vocal_parts = [part for part in payload["parts"] if not _is_accompaniment(part["name"])]
+        part_pages = {
+            part["id"]: _export_part_svg(musicxml, destination, part["id"], executable)
+            for part in vocal_parts
+        }
+        metadata = {
+            "layout_version": LIBRARY_ASSET_LAYOUT_VERSION,
+            "piece_id": piece_id,
+            "title": payload["title"],
+            "source_sha256": source_hash,
+            "score_version_id": score_version_id,
+            "parts": vocal_parts,
+            "monodic": len(vocal_parts) == 1,
+            "score_pages": [path.name for path in sorted(destination.glob("score-*.svg"))],
+            "part_pages": part_pages,
+        }
+        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+        return metadata
+
+
+def _library_listing() -> list[dict]:
+    items = []
+    for source in _library_sources():
+        piece_id = _piece_id(source.parent.name)
+        cached = LIBRARY_ASSETS_ROOT / piece_id / "metadata.json"
+        if cached.is_file():
+            try:
+                metadata = json.loads(cached.read_text(encoding="utf-8"))
+                if (metadata.get("source_sha256") == hashlib.sha256(source.read_bytes()).hexdigest()
+                        and metadata.get("layout_version") == LIBRARY_ASSET_LAYOUT_VERSION):
+                    items.append({key: metadata[key] for key in ("piece_id", "title", "parts", "monodic")})
+                    continue
+            except (OSError, ValueError, KeyError):
+                pass
+        # The full build happens only after the singer chooses the piece.
+        items.append({"piece_id": piece_id, "title": source.stem.replace("-", " ").title(), "parts": [], "monodic": False})
+    return items
 
 
 class RangeRequestHandler(SimpleHTTPRequestHandler):
     _range: tuple[int, int] | None = None
 
     def end_headers(self):
-        if self.path.split("?", 1)[0].endswith((".html", ".js", ".json")):
+        request_path = self.path.split("?", 1)[0]
+        # `/` resolves to index.html but does not have an .html suffix.  It
+        # must not be cached independently from the versionless application
+        # scripts, otherwise a new app.js can run against an old DOM.
+        if request_path == "/" or request_path.endswith((".html", ".js", ".json")):
             self.send_header("Cache-Control", "no-store")
         super().end_headers()
 
     def do_GET(self):
+        parsed = urlparse(self.path)
+        if parsed.path == "/api/library":
+            return self._send_json({"pieces": _library_listing()})
+        if parsed.path.startswith("/api/library/") and parsed.path.endswith("/bundle"):
+            return self._library_bundle(parsed.path)
+        if self.path.startswith('/api/transpose?'):
+            return self._transpose_audio()
         if self.path.startswith("/api/ingestions/"):
             parts = self.path.split("?", 1)[0].strip("/").split("/")
             try:
@@ -64,6 +221,108 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
             self.wfile.write(payload)
             return
         return super().do_GET()
+
+    def _library_bundle(self, path: str):
+        piece_id = path.removeprefix("/api/library/").removesuffix("/bundle").strip("/")
+        source = next((item for item in _library_sources() if _piece_id(item.parent.name) == piece_id), None)
+        if source is None:
+            self._send_json({"error": "Brano non trovato"}, HTTPStatus.NOT_FOUND)
+            return
+        try:
+            metadata = _build_library_piece(source)
+            root = f"library-assets/{piece_id}"
+            timeline_hash = hashlib.sha256((LIBRARY_ASSETS_ROOT / piece_id / "score.json").read_bytes()).hexdigest()
+            part_ids = (["mono-soprano", "mono-contralto", "mono-tenore", "mono-basso"]
+                        if metadata["monodic"] else [part["id"] for part in metadata["parts"]])
+            practice_parts = ([
+                {"id": "mono-soprano", "name": "Soprano"}, {"id": "mono-contralto", "name": "Contralto"},
+                {"id": "mono-tenore", "name": "Tenore"}, {"id": "mono-basso", "name": "Basso"},
+            ] if metadata["monodic"] else metadata["parts"])
+            score_pages = [f"{root}/{name}" for name in metadata["score_pages"]]
+            part_pages = {
+                part_id: [f"{root}/{name}" for name in metadata["part_pages"][part_id]]
+                for part_id in metadata["part_pages"]
+            }
+            if metadata["monodic"]:
+                written_pages = next(iter(part_pages.values()))
+                part_pages = {part_id: written_pages for part_id in part_ids}
+            asset_root = LIBRARY_ASSETS_ROOT / piece_id
+            (asset_root / "glyph-map.json").write_text("{}", encoding="utf-8")
+            (asset_root / "audio-manifest.json").write_text(json.dumps({
+                "score_version_id": metadata["score_version_id"], "timeline_hash": timeline_hash,
+                "mixes": {part_id: {"file": "score.mp3", "files_by_speed": {}} for part_id in part_ids},
+            }), encoding="utf-8")
+            self._send_json({
+                "piece_id": piece_id,
+                "score_version_id": metadata["score_version_id"],
+                "local_source": True,
+                "monodic": metadata["monodic"],
+                "parts": practice_parts,
+                "integrity": {"consistent": True, "hashes": {"timeline": timeline_hash}},
+                "checks": [],
+                "assets": {
+                    "score": f"{root}/score.json",
+                    "glyph_map": f"{root}/glyph-map.json",
+                    "audio_manifest": f"{root}/audio-manifest.json",
+                    "audio_root": root,
+                    "full_score_pages": score_pages,
+                    "score_pages": part_pages,
+                },
+            })
+        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+            self._send_json({"error": str(error)}, HTTPStatus.UNPROCESSABLE_ENTITY)
+
+    def _transpose_audio(self):
+        try:
+            query = parse_qs(urlparse(self.path).query)
+            semitones = int(query['semitones'][0])
+            if not -12 <= semitones <= 12:
+                raise ValueError('Invalid transposition')
+            frontend_root = (ROOT / 'frontend').resolve()
+            source = (frontend_root / query['file'][0]).resolve()
+            if not source.is_relative_to(frontend_root) or source.suffix.lower() not in ('.mp3', '.wav', '.ogg') or not source.is_file():
+                raise ValueError('Invalid audio source')
+            executable = shutil.which('ffmpeg')
+            fallback = Path(r'C:\Program Files\FFmpeg\Providers\org.buanzo.ffmpeg8.1\bin\ffmpeg.exe')
+            if not executable and fallback.is_file():
+                executable = str(fallback)
+            if not executable:
+                raise ValueError('FFmpeg unavailable: transposition requires FFmpeg')
+            ratio = math.pow(2, semitones / 12)
+            result = subprocess.run([
+                executable, '-v', 'error', '-i', str(source), '-af',
+                f'aresample=48000,asetrate={48000 * ratio},aresample=48000,atempo={1 / ratio}',
+                '-f', 'wav', '-acodec', 'pcm_s16le', 'pipe:1'
+            ], capture_output=True, timeout=60, check=True)
+            # FFmpeg cannot finalize WAV sizes on a pipe. Replace the streaming
+            # placeholders so HTMLMediaElement can buffer and seek normally.
+            payload = bytearray(result.stdout)
+            payload[4:8] = (len(payload) - 8).to_bytes(4, 'little')
+            offset = 12
+            while offset + 8 <= len(payload):
+                size = int.from_bytes(payload[offset + 4:offset + 8], 'little')
+                if payload[offset:offset + 4] == b'data':
+                    payload[offset + 4:offset + 8] = (len(payload) - offset - 8).to_bytes(4, 'little')
+                    break
+                offset += 8 + size + size % 2
+            start, end = 0, len(payload) - 1
+            range_header = self.headers.get('Range', '')
+            if range_header.startswith('bytes='):
+                first, _, last = range_header[6:].split(',', 1)[0].partition('-')
+                start = int(first or 0)
+                end = min(int(last) if last else end, end)
+                if start > end or start < 0:
+                    raise ValueError('Invalid byte range')
+            self.send_response(HTTPStatus.PARTIAL_CONTENT if range_header else HTTPStatus.OK)
+            self.send_header('Content-Type', 'audio/wav')
+            self.send_header('Accept-Ranges', 'bytes')
+            if range_header:
+                self.send_header('Content-Range', f'bytes {start}-{end}/{len(payload)}')
+            self.send_header('Content-Length', str(end - start + 1))
+            self.end_headers()
+            self.wfile.write(payload[start:end + 1])
+        except (KeyError, ValueError, OSError, subprocess.SubprocessError) as error:
+            self._send_json({'error': str(error)}, HTTPStatus.UNPROCESSABLE_ENTITY)
 
     def _send_json(self, payload, status=HTTPStatus.OK):
         encoded = json.dumps(payload, ensure_ascii=False).encode("utf-8")

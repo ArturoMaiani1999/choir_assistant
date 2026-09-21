@@ -7,7 +7,7 @@ This first backend slice intentionally uses only the Python standard library. It
 From the repository root:
 
 ```powershell
-python -m backend.choir_assistant.cli ingest submit "sheets/Gloria Frisina.pdf" --piece-id gloria-frisina
+python -m backend.choir_assistant.cli ingest submit "sheets/gloria-frisina/gloria-frisina.pdf" --piece-id gloria-frisina
 ```
 
 The command creates a versioned job under `data/ingestions/<job-id>/`. It preserves the source PDF by copying it into the job directory, records its SHA-256, discovers local tooling, and stops with an explicit capability status if Audiveris is unavailable. It never creates fake MusicXML or MuseScore output.

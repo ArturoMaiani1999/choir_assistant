@@ -3,7 +3,7 @@
 ## Obiettivo della tranche
 
 Sostituire il pentagramma dimostrativo disegnato nel browser con una prima
-trascrizione reale di `sheets/Gloria Frisina.pdf`, rendere disponibili le
+trascrizione reale di `sheets/gloria-frisina/gloria-frisina.pdf`, rendere disponibili le
 quattro parti vocali e collegare il ruolo scelto al target simbolico usato dal
 pitch tracking.
 

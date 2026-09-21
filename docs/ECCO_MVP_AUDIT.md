@@ -10,7 +10,7 @@ It is a lead-sheet melody with a generated organ realization in 2/2 at quarter-n
 
 ## Derivation
 
-`sheets/Ecco quel che abbiamo.pdf` → raw Audiveris MXL → `scripts/prepare_ecco_mvp.py` → review MusicXML → runtime JSON, MuseScore SVG/MSCZ, guide audio → `frontend/practice-piece.json`.
+`sheets/ecco-quel-che-abbiamo/ecco-quel-che-abbiamo.pdf` → raw Audiveris MXL → `scripts/prepare_ecco_mvp.py` → review MusicXML → runtime JSON, MuseScore SVG/MSCZ, guide audio → `frontend/practice-piece.json`.
 
 Once an administrator uploads a corrected MSCZ, that file becomes the canonical musical source. The import records `data/omr-ecco/admin-canonical.json`; from then on `prepare_ecco_mvp.py` refuses to replace the production MusicXML from OMR unless an intentional reset uses `--force-overwrite-admin-revision`. Player, audio and interface work must rebuild derived assets from the canonical MSCZ without touching the notation.
 

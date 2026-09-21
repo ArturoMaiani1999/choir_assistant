@@ -7,7 +7,9 @@ automate_mscz/job-state.json
 automate_mscz/output/
 automate_mscz/reports/
 automate_mscz/.worker.lock
+data/omr-consensus/
 
 artifacts/
 frontend/score-assets/
 frontend/audio/
+frontend/library-assets/
