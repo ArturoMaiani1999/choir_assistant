@@ -36,7 +36,7 @@ MUSESCORE_CANDIDATES = (
     Path(r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe"),
 )
 _library_lock = threading.Lock()
-LIBRARY_ASSET_LAYOUT_VERSION = 2
+LIBRARY_ASSET_LAYOUT_VERSION = 3
 
 
 def _musescore() -> str:

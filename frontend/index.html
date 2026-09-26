@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#081419" />
     <title>Vocal Coach</title>
-    <link rel="stylesheet" href="styles.css?v=20260918-practice" />
+    <link rel="stylesheet" href="styles.css?v=20260926-library-titles" />
     <script src="practice_math.js?v=20260909-smooth-pitch" defer></script>
     <script src="score_runtime.js?v=20260909-playback-fix" defer></script>
     <script src="pitch_detector.js?v=20260918-octave-guard" defer></script>
-    <script src="app.js?v=20260918-transpose" defer></script>
+    <script src="app.js?v=20260926-library-titles" defer></script>
   </head>
   <body>
     <main class="practice-shell" aria-label="Strumento di prova">
@@ -40,10 +40,12 @@
       <section class="score-region" aria-label="Spartito della parte selezionata">
         <div class="score-meta"><span id="score-part-label">Parte</span><span id="score-measure-label">Battuta 1</span><span id="score-transpose-label" hidden>Spartito originale</span></div>
         <div class="score-viewport" id="score-viewport">
-          <div class="score-sheet" id="score-sheet"><img id="score-image" alt="Spartito della parte selezionata" /><div class="score-cursor" id="score-cursor" aria-hidden="true"><span></span></div></div>
+          <div class="score-sheet" id="score-sheet"><img id="score-image" alt="Spartito della parte selezionata" /><div class="score-cursor" id="score-cursor" aria-hidden="true"><span>ORA</span></div></div>
           <div class="score-loading" id="score-loading" role="status">Preparazione spartito…</div>
         </div>
       </section>
+
+      <div class="score-pitch-divider" id="score-pitch-divider" role="separator" aria-orientation="horizontal" aria-label="Regola altezza spartito" aria-valuemin="96" tabindex="0"><span class="sr-only">Trascina verso il basso per ingrandire lo spartito, verso l'alto per ingrandire il piano roll.</span></div>
 
       <section class="pitch-region" aria-label="Intonazione e tempo">
         <canvas id="pitch-lane" role="img" aria-describedby="pitch-description"></canvas>
@@ -70,7 +72,7 @@
       <label>Da <select id="phrase-start" aria-label="Battuta iniziale"></select></label>
       <label>A <select id="phrase-end" aria-label="Battuta finale"></select></label>
       <label><input id="phrase-loop" type="checkbox" /> Ripeti automaticamente con preascolto</label>
-      <label>Nomi delle note <select id="note-names"><option value="international">C, D, E…</option><option value="italian">Do, Re, Mi…</option></select></label>
+      <label>Nomi delle note <select id="note-names"><option value="italian">Do, Re, Mi…</option><option value="international">C, D, E…</option></select></label>
       <p id="microphone-help">Prima di iniziare, attiva il microfono e canta una nota: l’indicatore di livello deve muoversi.</p>
       <button id="test-microphone" class="mode-button" type="button">Attiva / disattiva microfono</button>
       <meter id="test-microphone-level" min="0" max="0.08" value="0" aria-label="Livello del microfono nella preparazione"></meter>
@@ -84,9 +86,11 @@
       <h2 id="piece-picker-heading">Scegli il brano e la parte</h2>
       <p>Mostra solo i brani per cui è presente un file MuseScore modificabile (`.mscz`).</p>
       <label>Brano <select id="library-piece" aria-label="Brano"></select></label>
+      <label>Nome nel mio elenco <input id="library-title" type="text" maxlength="80" autocomplete="off" aria-describedby="library-title-help" /></label>
+      <small id="library-title-help">Puoi usare un nome più riconoscibile. Lascia vuoto e salva per ripristinare il nome proposto.</small>
       <label>Parte da cantare <select id="library-part" aria-label="Parte da cantare"></select></label>
       <p id="library-note" class="library-note" hidden></p>
-      <div class="dialog-actions"><button id="library-open" type="button">Apri prova</button></div>
+      <div class="dialog-actions"><button id="library-title-save" type="button">Salva nome</button><button id="library-open" type="button">Apri prova</button></div>
     </dialog>
     <dialog id="ground-truth-dialog" class="practice-dialog" aria-labelledby="ground-truth-heading">
       <h2 id="ground-truth-heading">Campione di riferimento</h2>

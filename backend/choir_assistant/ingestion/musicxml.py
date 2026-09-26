@@ -205,6 +205,7 @@ def compile_musicxml(
         divisions = 1.0
         numerator = 4
         denominator = 4
+        key_fifths = 0
         part_beat = 0.0
 
         for measure_index, measure in enumerate(_children(xml_part, "measure")):
@@ -217,6 +218,9 @@ def compile_musicxml(
                 if time is not None:
                     numerator = int(float(_text(time, "beats") or numerator))
                     denominator = int(float(_text(time, "beat-type") or denominator))
+                key = _child(attributes, "key")
+                if key is not None:
+                    key_fifths = int(float(_text(key, "fifths") or key_fifths))
             measure_beats = numerator * (4.0 / denominator)
             measure_start = part_beat
             measure_spans.setdefault(measure_id, (measure_start, measure_start + measure_beats))
@@ -229,6 +233,7 @@ def compile_musicxml(
                         index=measure_index,
                         time_signature_numerator=numerator,
                         time_signature_denominator=denominator,
+                        key_fifths=key_fifths,
                     )
                 )
 

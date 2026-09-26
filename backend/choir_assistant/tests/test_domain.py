@@ -67,6 +67,8 @@ class RuntimeScoreTests(unittest.TestCase):
         self.assertEqual(score.target_events[3].midi_pitch, 64)
         self.assertEqual(score.target_events[4].midi_pitch, 66)
         self.assertEqual(score.tempo_map[0].bpm, 60)
+        self.assertEqual(score.measures[0].key_fifths, 0)
+        self.assertEqual(score.measures[1].key_fifths, -1)
 
     def test_musicxml_flattens_repeat_with_second_ending(self) -> None:
         fixture = Path(__file__).parent / "fixtures" / "repeat_endings.musicxml"

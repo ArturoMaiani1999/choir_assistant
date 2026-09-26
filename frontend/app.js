@@ -16,9 +16,9 @@ const els = Object.fromEntries([
   'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close',
   'result-dialog', 'result-text', 'result-progress', 'retry', 'next-phrase', 'result-close',
   'phrase-loop', 'note-names',
-  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-part', 'library-note', 'library-open', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-mode', 'settings',
+  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-title', 'library-title-save', 'library-part', 'library-note', 'library-open', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-mode', 'settings',
   'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
-  'score-loading', 'pitch-lane', 'intonation-readout', 'live-note', 'live-cents', 'live-state',
+  'score-loading', 'score-pitch-divider', 'pitch-lane', 'intonation-readout', 'live-note', 'live-cents', 'live-state',
   'measure-counter', 'scoring-cue', 'previous-measure', 'toggle-playback', 'next-measure', 'volume', 'metronome-toggle', 'metronome-volume', 'backing-audio', 'toast', 'asset-status', 'microphone',
 ].map((id) => [id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]));
 
@@ -26,7 +26,7 @@ const state = {
   transpose: 0,
   phrase: null,
   autoLoop: false,
-  noteNames: 'international',
+  noteNames: 'italian',
   attemptActive: false,
   attempt: { voicedMs: 0, insideMs: 0 },
   lastSampleMs: null,
@@ -45,6 +45,7 @@ const state = {
   bundleManifest: null,
   bundleApproved: false,
   scoreGeometry: new Map(),
+  fallbackScoreSlots: [],
   activeScoreSegment: null,
   pitchViewport: null,
   lastSnapshot: null,
@@ -72,11 +73,40 @@ function normalizeSlug(value) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-function noteLabel(pitch) {
-  if (state.noteNames !== 'italian') return pitchToName(pitch);
+function pieceTitleKey(pieceId) { return `choir-piece-title:${pieceId}`; }
+
+function proposedPieceTitle(piece) {
+  const duplicate = state.library.filter((item) => item.title.trim().toLowerCase() === piece.title.trim().toLowerCase()).length > 1;
+  if (!duplicate) return piece.title;
+  const knownVariants = { animachristi: 'SATB', 'animachristi-strofa-monodico': 'Strofe monodiche' };
+  const inferredVariant = piece.piece_id.replace(normalizeSlug(piece.title), '').replace(/^-+|-+$/g, '').replace(/-/g, ' ')
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+  const variant = (knownVariants[piece.piece_id] ?? inferredVariant) || 'Versione alternativa';
+  return `${piece.title} — ${variant}`;
+}
+
+function pieceDisplayTitle(piece) {
+  try { return localStorage.getItem(pieceTitleKey(piece.piece_id))?.trim() || proposedPieceTitle(piece); }
+  catch (_) { return proposedPieceTitle(piece); }
+}
+
+function populateLibraryPieces(selectedPieceId) {
+  els.libraryPiece.replaceChildren(...state.library.map((piece) => new Option(pieceDisplayTitle(piece), piece.piece_id)));
+  els.libraryPiece.value = state.library.some((piece) => piece.piece_id === selectedPieceId) ? selectedPieceId : state.library[0].piece_id;
+}
+
+function noteLabel(pitch, beat = state.clock?.snapshot().beat ?? 0) {
   if (!Number.isFinite(pitch)) return '—';
   const midi = Math.round(pitch);
-  return ['Do', 'Do♯', 'Re', 'Mi♭', 'Mi', 'Fa', 'Fa♯', 'Sol', 'La♭', 'La', 'Si♭', 'Si'][((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
+  const flatKey = state.runtime?.keyFifthsAt(beat) < 0;
+  const names = state.noteNames === 'italian'
+    ? flatKey
+      ? ['Do', 'Re♭', 'Re', 'Mi♭', 'Mi', 'Fa', 'Sol♭', 'Sol', 'La♭', 'La', 'Si♭', 'Si']
+      : ['Do', 'Do♯', 'Re', 'Re♯', 'Mi', 'Fa', 'Fa♯', 'Sol', 'Sol♯', 'La', 'La♯', 'Si']
+    : flatKey
+      ? ['C', 'Db', 'D', 'Eb', 'E', 'F', 'Gb', 'G', 'Ab', 'A', 'Bb', 'B']
+      : ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
+  return names[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
 }
 
 function vocalParts(runtime) {
@@ -130,6 +160,23 @@ function measureIndexAt(beat) {
 
 function sourceGlyph(event) {
   return event ? state.scoreGeometry.get(event.sourceEventId) ?? null : null;
+}
+
+function fallbackScorePosition(beat) {
+  const index = measureIndexAt(beat);
+  const measure = state.occurrenceMeasures[index];
+  const defaultMeasureWidths = [[13, 32], [32, 55], [55, 73], [73, 93]];
+  const pages = state.bundleManifest?.assets?.score_pages?.[state.runtime.selectedPartId]
+    ?? state.bundleManifest?.assets?.full_score_pages ?? [];
+  const slot = state.fallbackScoreSlots[index] ?? (pages.length ? (() => {
+    const [startX, endX] = defaultMeasureWidths[index % defaultMeasureWidths.length];
+    return { page: Math.min(pages.length, Math.floor(index / defaultMeasureWidths.length) + 1),
+      systemId: `estimated-p${Math.floor(index / defaultMeasureWidths.length) + 1}`, startX, endX,
+      y_percent: 17.4, systemCenterY: 17.4 };
+  })() : null);
+  if (!measure || !slot) return null;
+  const progress = Math.max(0, Math.min(1, (beat - measure.startBeat) / Math.max(.01, measure.endBeat - measure.startBeat)));
+  return { ...slot, x_percent: slot.startX + (slot.endX - slot.startX) * progress };
 }
 
 function closestScoreEvent(beat) {
@@ -202,14 +249,68 @@ function buildScoreGeometry(partId) {
   state.activeScoreSegment = null;
 }
 
+function scorePageFallbackSlots(svg, page) {
+  const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
+  const [, , width = 0, height = 0] = (document.documentElement.getAttribute('viewBox') ?? '').trim().split(/\s+/).map(Number);
+  if (!width || !height) return [];
+  const staffLines = [...document.querySelectorAll('.StaffLines')].map((line) => {
+    const points = (line.getAttribute('points') ?? '').trim().split(/[\s,]+/).map(Number);
+    return { x1: points[0], y: points[1], x2: points[2] };
+  }).filter((line) => line.x1 != null && line.y != null && line.x2 != null).sort((a, b) => a.y - b.y);
+  const barLines = [...document.querySelectorAll('.BarLine')].map((line) => {
+    const points = (line.getAttribute('points') ?? '').trim().split(/[\s,]+/).map(Number);
+    return { x: points[0], y1: points[1], y2: points[3] };
+  }).filter((line) => line.x != null && line.y1 != null && line.y2 != null);
+  const slots = [];
+  for (let offset = 0, systemIndex = 0; offset + 4 < staffLines.length; offset += 5, systemIndex += 1) {
+    const lines = staffLines.slice(offset, offset + 5);
+    const startX = Math.min(...lines.map((line) => line.x1));
+    const endX = Math.max(...lines.map((line) => line.x2));
+    const centerY = lines.reduce((sum, line) => sum + line.y, 0) / lines.length;
+    const barXs = [...new Set(barLines.filter((line) => Math.abs((line.y1 + line.y2) / 2 - centerY) < 420
+      && line.x > startX + 20 && line.x <= endX + 25).map((line) => Math.round(line.x)).sort((a, b) => a - b))];
+    let left = startX;
+    for (const right of barXs) {
+      if (right - left > 40) slots.push({ page, systemId: `fallback-p${page}-s${systemIndex}`, startX: left / width * 100,
+        endX: right / width * 100, y_percent: centerY / height * 100, systemCenterY: centerY / height * 100 });
+      left = right;
+    }
+  }
+  return slots;
+}
+
+async function buildFallbackScoreGeometry(partId) {
+  const pages = state.bundleManifest.assets.score_pages[partId] ?? state.bundleManifest.assets.full_score_pages;
+  if (!pages?.length) { state.fallbackScoreSlots = []; return; }
+  try {
+    const contents = await Promise.all(pages.map(async (page) => {
+      const response = await fetch(page, { cache: 'force-cache' });
+      if (!response.ok) throw new Error(`pagina spartito non disponibile (${response.status})`);
+      return response.text();
+    }));
+    if (state.runtime.selectedPartId !== partId) return;
+    state.fallbackScoreSlots = contents.flatMap((svg, index) => scorePageFallbackSlots(svg, index + 1));
+    if (!state.scoreGeometry.size && state.fallbackScoreSlots.length !== state.occurrenceMeasures.length) {
+      console.warn('Mappa di fallback spartito incompleta', { slots: state.fallbackScoreSlots.length, measures: state.occurrenceMeasures.length });
+    }
+  } catch (error) {
+    state.fallbackScoreSlots = [];
+    console.warn('Impossibile costruire il cursore di fallback dello spartito', error);
+    return;
+  }
+  render();
+}
+
 function renderScore(beat) {
   const event = closestScoreEvent(beat);
   const glyph = sourceGlyph(event);
-  const page = glyph?.page ?? Math.min(3, Math.floor(measureIndexAt(beat) / 7) + 1);
+  const fallback = glyph ? null : fallbackScorePosition(beat);
+  const activeGlyph = glyph ?? fallback;
+  const page = activeGlyph?.page ?? Math.min(3, Math.floor(measureIndexAt(beat) / 7) + 1);
   if (page !== state.scorePage) state.scorePage = page;
   loadScoreImage(page);
   if (state.fullScore) { els.scoreSheet.style.transform = 'translate(0, 0)'; return; }
-  if (!glyph) {
+  if (!activeGlyph) {
     // Library MSCZ exports currently use complete-score SVG pages.  There is
     // no per-note SVG map yet, so expose the first staff system rather than
     // the large blank top margin of an A4 MuseScore page.
@@ -219,26 +320,29 @@ function renderScore(beat) {
   }
   els.scoreCursor.style.display = '';
 
-  const nextEvent = state.runtime.targetEvents.find((candidate) => {
+  const nextEvent = glyph && state.runtime.targetEvents.find((candidate) => {
     const candidateGlyph = sourceGlyph(candidate);
     return candidate.onsetBeat >= event.onsetBeat + event.durationBeats - 0.001 && candidateGlyph?.systemId === glyph.systemId;
   });
   const candidateNextGlyph = sourceGlyph(nextEvent);
-  const nextGlyph = candidateNextGlyph?.x_percent >= glyph.x_percent ? candidateNextGlyph : null;
+  const nextGlyph = glyph && candidateNextGlyph?.x_percent >= glyph.x_percent ? candidateNextGlyph : null;
   const progress = Math.max(0, Math.min(1, (beat - event.onsetBeat) / Math.max(event.durationBeats, .01)));
-  const x = nextGlyph ? glyph.x_percent + (nextGlyph.x_percent - glyph.x_percent) * progress : glyph.x_percent;
+  const x = glyph ? (nextGlyph ? glyph.x_percent + (nextGlyph.x_percent - glyph.x_percent) * progress : glyph.x_percent) : fallback.x_percent;
   els.scoreCursor.style.left = `${x}%`;
-  els.scoreCursor.style.top = `${glyph.y_percent}%`;
+  els.scoreCursor.style.top = `${activeGlyph.y_percent}%`;
 
   const imageHeight = els.scoreImage.getBoundingClientRect().height;
   const viewportHeight = els.scoreViewport.clientHeight;
   const sheetWidth = els.scoreSheet.getBoundingClientRect().width;
   const viewportWidth = els.scoreViewport.clientWidth;
   if (!imageHeight || !sheetWidth || !viewportWidth) return;
-  const systemY = imageHeight * glyph.systemCenterY / 100;
+  // Keep the current-time bar visible across the whole score window, rather
+  // than limiting it to a small marker around the active note.
+  els.scoreCursor.style.height = `${Math.max(86, viewportHeight)}px`;
+  const systemY = imageHeight * activeGlyph.systemCenterY / 100;
   const panelCount = Math.max(1, Math.ceil(sheetWidth / viewportWidth));
   const panelIndex = Math.min(panelCount - 1, Math.floor(x / 100 * panelCount));
-  const segmentKey = `${glyph.systemId}-panel${panelIndex}`;
+  const segmentKey = `${activeGlyph.systemId}-panel${panelIndex}`;
   if (segmentKey !== state.activeScoreSegment) {
     const offsetY = Math.max(viewportHeight - imageHeight, Math.min(0, viewportHeight * .52 - systemY));
     const offsetX = panelCount > 1 ? -panelIndex * (sheetWidth - viewportWidth) / (panelCount - 1) : 0;
@@ -354,14 +458,21 @@ function drawPitchLane(beat) {
     const y = pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
     const pitchClass = ((pitch % 12) + 12) % 12;
     const isWhiteKey = [0, 2, 4, 5, 7, 9, 11].includes(pitchClass);
-    const isNaturalC = pitchClass === 0;
     // Alternating white-key and black-key lanes make the vertical axis read
     // like a piano keyboard instead of a uniform scientific graph.
     ctx.fillStyle = isWhiteKey ? 'rgba(166,198,193,.075)' : 'rgba(2,10,14,.27)';
     ctx.fillRect(plot.left, y - rowHeight / 2, plot.right - plot.left, rowHeight);
-    ctx.strokeStyle = isNaturalC ? 'rgba(190,215,211,.25)' : (isWhiteKey ? 'rgba(190,215,211,.13)' : 'rgba(190,215,211,.055)');
-    ctx.lineWidth = 1;
-    ctx.beginPath(); ctx.moveTo(plot.left, Math.round(y) + .5); ctx.lineTo(plot.right, Math.round(y) + .5); ctx.stroke();
+    // The only continuous horizontal dividers are where adjacent white keys
+    // touch on a piano: Si–Do and Mi–Fa. Draw the lower edge of Do/Fa, since
+    // higher MIDI pitches are rendered above lower ones.
+    if (pitchClass === 0 || pitchClass === 5) {
+      ctx.strokeStyle = 'rgba(190,215,211,.25)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(plot.left, Math.round(y + rowHeight / 2) + .5);
+      ctx.lineTo(plot.right, Math.round(y + rowHeight / 2) + .5);
+      ctx.stroke();
+    }
   }
 
   const visibleStart = displayBeat - historyBeats - 1;
@@ -390,7 +501,10 @@ function drawPitchLane(beat) {
     const x = timeToX(event.onsetBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
     const endX = timeToX(event.onsetBeat + event.durationBeats, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
     const y = pitchToY(event.midiPitch + state.transpose, bounds.min, bounds.max, plot.top, plot.bottom);
-    const blockHeight = Math.max(7, rowHeight * .43);
+    // A target occupies its complete chromatic lane. Keeping it narrower than
+    // the lane makes it look like a thin indicator rather than the note's
+    // actual pitch region, especially on a tall piano roll.
+    const blockHeight = rowHeight;
     const toleranceHeight = rowHeight * (UI_CONFIG.targetToleranceCents / 50);
     ctx.fillStyle = 'rgba(217,168,91,.10)';
     roundedRect(ctx, x, y - toleranceHeight / 2, endX - x, toleranceHeight, 3); ctx.fill();
@@ -440,7 +554,7 @@ function drawPitchLane(beat) {
     ctx.fillStyle = active ? '#f0cf8f' : '#93a9a8';
     ctx.font = `${active ? '700 ' : ''}${Math.max(8, Math.min(12, rowHeight * .8))}px Inter, sans-serif`;
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    ctx.fillText(noteLabel(pitch), nowX - 8, y);
+    ctx.fillText(noteLabel(pitch, beat), nowX - 8, y);
   }
   if (Number.isFinite(state.livePitch) && (state.livePitch < bounds.min || state.livePitch > bounds.max)) {
     ctx.fillStyle = '#68d1cb'; ctx.textAlign = 'left';
@@ -762,6 +876,13 @@ function beginPitchTake() {
   state.lastSampleMs = null;
 }
 
+function clearPitchHistory() {
+  state.pitchSamples = [];
+  state.pitchTakeId = 1;
+  state.lastSampleMs = null;
+  try { localStorage.removeItem(pitchHistoryKey()); } catch (_) { /* Storage is optional. */ }
+}
+
 function groundTruthStore(mode = 'readonly') {
   return new Promise((resolve, reject) => {
     const request = indexedDB.open('choir-ground-truth', 1);
@@ -853,7 +974,8 @@ function savePreferences() {
     localStorage.setItem(preferenceKey(), JSON.stringify({ transpose: state.transpose,
       speed: els.playbackSpeed.value, volume: els.volume.value, metronome: els.metronomeVolume.value,
       measure: measureIndexAt(state.clock.snapshot().beat), phrase: state.phrase,
-      autoLoop: state.autoLoop, noteNames: state.noteNames }));
+      autoLoop: state.autoLoop, noteNames: state.noteNames, noteNamesPreferenceVersion: 2,
+      scoreHeight: Math.round(els.scoreViewport.clientHeight) }));
     localStorage.setItem(`choir-part:${state.bundleManifest.piece_id ?? state.runtime.title}`, state.runtime.selectedPartId);
   } catch (_) { /* Practice remains usable when storage is unavailable. */ }
 }
@@ -864,7 +986,10 @@ function restorePreferences() {
   state.transpose = Number.isInteger(saved.transpose) && Math.abs(saved.transpose) <= 12 ? saved.transpose : 0;
   els.transpose.value = String(state.transpose);
   state.autoLoop = saved.autoLoop === true; els.phraseLoop.checked = state.autoLoop;
-  state.noteNames = saved.noteNames === 'italian' ? 'italian' : 'international'; els.noteNames.value = state.noteNames;
+  // Existing preferences used English as the implicit default. Migrate those
+  // users to Italian while preserving any deliberate choice made from now on.
+  state.noteNames = saved.noteNamesPreferenceVersion === 2 && saved.noteNames === 'international' ? 'international' : 'italian';
+  els.noteNames.value = state.noteNames;
   const measures = buildOccurrenceMeasures(state.runtime);
   state.selectedMeasureIndex = Number.isInteger(saved.measure) ? Math.max(0, Math.min(measures.length - 1, saved.measure)) : 0;
   state.phrase = saved.phrase && Number.isInteger(saved.phrase.start) && Number.isInteger(saved.phrase.end)
@@ -872,6 +997,58 @@ function restorePreferences() {
   els.playbackSpeed.value = ['0.5', '0.75', '1'].includes(saved.speed) ? saved.speed : '1';
   els.volume.value = Number.isFinite(Number(saved.volume)) ? Math.max(0, Math.min(100, Number(saved.volume))) : 62;
   els.metronomeVolume.value = Number.isFinite(Number(saved.metronome)) ? Math.max(0, Math.min(100, Number(saved.metronome))) : 0;
+  if (Number.isFinite(saved.scoreHeight)) setScoreHeight(saved.scoreHeight);
+}
+
+function scoreHeightLimits() {
+  const shell = document.querySelector('.practice-shell');
+  const scoreRegion = document.querySelector('.score-region');
+  const transportHeight = document.querySelector('.practice-transport').offsetHeight;
+  const minimum = 96;
+  const maximum = Math.max(minimum, shell.clientHeight - scoreRegion.offsetTop - transportHeight - 172);
+  return { minimum, maximum };
+}
+
+function setScoreHeight(height) {
+  const { minimum, maximum } = scoreHeightLimits();
+  const value = Math.round(Math.max(minimum, Math.min(maximum, height)));
+  document.documentElement.style.setProperty('--score-h', `${value}px`);
+  els.scorePitchDivider.setAttribute('aria-valuemax', String(Math.round(maximum)));
+  els.scorePitchDivider.setAttribute('aria-valuenow', String(value));
+}
+
+function bindScorePitchDivider() {
+  let drag = null;
+  setScoreHeight(els.scoreViewport.clientHeight);
+  const finish = () => {
+    if (!drag) return;
+    els.scorePitchDivider.releasePointerCapture?.(drag.pointerId);
+    els.scorePitchDivider.classList.remove('is-resizing');
+    drag = null;
+    savePreferences();
+  };
+  els.scorePitchDivider.addEventListener('pointerdown', (event) => {
+    if (event.button !== 0) return;
+    drag = { pointerId: event.pointerId, startY: event.clientY, startHeight: els.scoreViewport.clientHeight };
+    els.scorePitchDivider.setPointerCapture(event.pointerId);
+    els.scorePitchDivider.classList.add('is-resizing');
+    event.preventDefault();
+  });
+  els.scorePitchDivider.addEventListener('pointermove', (event) => {
+    if (!drag || event.pointerId !== drag.pointerId) return;
+    setScoreHeight(drag.startHeight + event.clientY - drag.startY);
+  });
+  els.scorePitchDivider.addEventListener('pointerup', finish);
+  els.scorePitchDivider.addEventListener('pointercancel', finish);
+  els.scorePitchDivider.addEventListener('keydown', (event) => {
+    const step = event.shiftKey ? 32 : 12;
+    if (event.key === 'ArrowUp') setScoreHeight(els.scoreViewport.clientHeight - step);
+    else if (event.key === 'ArrowDown') setScoreHeight(els.scoreViewport.clientHeight + step);
+    else return;
+    event.preventDefault();
+    savePreferences();
+  });
+  window.addEventListener('resize', () => setScoreHeight(els.scoreViewport.clientHeight));
 }
 
 function changePart(partId) {
@@ -886,6 +1063,7 @@ function changePart(partId) {
   state.scorePage = 0;
   state.pitchViewport = null;
   buildScoreGeometry(partId);
+  buildFallbackScoreGeometry(partId);
   configureBacking();
   if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(Number(els.playbackSpeed.value));
   else state.clock.setSpeed(Number(els.playbackSpeed.value));
@@ -894,6 +1072,7 @@ function changePart(partId) {
 
 function bindControls() {
   bindGridInspection();
+  bindScorePitchDivider();
   document.getElementById('test-microphone').addEventListener('click', toggleMicrophone);
   window.addEventListener('pagehide', savePreferences);
   els.exercise.addEventListener('click', () => {
@@ -1024,15 +1203,15 @@ async function initialize() {
 function openLibraryPicker() {
   if (state.clock?.running) state.clock.pause();
   if (state.clock) updatePlaybackButton();
-  els.libraryPiece.replaceChildren(...state.library.map((piece) => new Option(piece.title, piece.piece_id)));
   const requested = new URLSearchParams(window.location.search).get('piece');
-  els.libraryPiece.value = state.library.some((piece) => piece.piece_id === requested) ? requested : state.library[0].piece_id;
+  populateLibraryPieces(requested);
   updateLibraryParts();
   if (!els.piecePickerDialog.open) els.piecePickerDialog.showModal();
 }
 
 async function updateLibraryParts() {
   const piece = state.library.find((item) => item.piece_id === els.libraryPiece.value);
+  els.libraryTitle.value = piece ? pieceDisplayTitle(piece) : '';
   if (piece && !piece.parts?.length && !piece.loading) {
     piece.loading = true;
     els.libraryOpen.disabled = true;
@@ -1062,6 +1241,19 @@ function bindLibraryPicker() {
   els.piecePicker.addEventListener('click', openLibraryPicker);
   els.library.addEventListener('click', openLibraryPicker);
   els.libraryPiece.addEventListener('change', updateLibraryParts);
+  els.libraryTitleSave.addEventListener('click', () => {
+    const piece = state.library.find((item) => item.piece_id === els.libraryPiece.value);
+    if (!piece) return;
+    const title = els.libraryTitle.value.trim();
+    try {
+      if (title) localStorage.setItem(pieceTitleKey(piece.piece_id), title);
+      else localStorage.removeItem(pieceTitleKey(piece.piece_id));
+    } catch (_) { showToast('Il browser non può salvare il nome del brano.'); return; }
+    populateLibraryPieces(piece.piece_id);
+    els.libraryTitle.value = pieceDisplayTitle(piece);
+    if (state.bundleManifest?.piece_id === piece.piece_id) els.pieceTitle.textContent = pieceDisplayTitle(piece);
+    showToast(title ? 'Nome del brano salvato.' : 'Nome del brano ripristinato.');
+  });
   els.libraryOpen.addEventListener('click', () => {
     const query = new URLSearchParams({ piece: els.libraryPiece.value });
     if (els.libraryPart.value) query.set('part', els.libraryPart.value);
@@ -1071,7 +1263,7 @@ function bindLibraryPicker() {
 
 function restartPractice() {
   state.clock.pause();
-  savePitchHistory();
+  clearPitchHistory();
   state.attemptActive = false;
   state.attempt = { voicedMs: 0, insideMs: 0 };
   state.lastSampleMs = null;
@@ -1135,14 +1327,15 @@ async function loadPracticePiece(pieceId) {
   if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(Number(els.playbackSpeed.value));
   else state.clock.setSpeed(Number(els.playbackSpeed.value));
   buildScoreGeometry(state.runtime.selectedPartId);
+  buildFallbackScoreGeometry(state.runtime.selectedPartId);
   if (state.syncDebug) {
     els.syncDebugPanel = document.createElement('aside');
     els.syncDebugPanel.className = 'sync-debug';
     els.syncDebugPanel.setAttribute('aria-label', 'Diagnostica sincronizzazione');
     document.body.append(els.syncDebugPanel);
   }
-  const titleParts = state.runtime.title.split('·');
-  els.pieceTitle.textContent = titleParts[0].trim();
+  const libraryPiece = state.library.find((piece) => piece.piece_id === bundleManifest.piece_id);
+  els.pieceTitle.textContent = libraryPiece ? pieceDisplayTitle(libraryPiece) : state.runtime.title.split('·')[0].trim();
   els.scorePartLabel.textContent = parts.find((part) => part.id === state.runtime.selectedPartId)?.name ?? 'Parte';
   const restoredMeasure = state.selectedMeasureIndex;
   bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(restoredMeasure); updatePlaybackButton();

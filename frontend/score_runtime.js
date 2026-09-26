@@ -37,6 +37,21 @@
       return this;
     }
 
+    keyFifthsAt(beat) {
+      const safeBeat = Math.max(0, beat);
+      const occurrence = this.performanceOccurrences.find(
+        (item) => item.startBeat <= safeBeat && safeBeat < item.endBeat,
+      );
+      if (occurrence) return this.measures.find((measure) => measure.id === occurrence.writtenMeasureId)?.keyFifths ?? 0;
+      let startBeat = 0;
+      for (const measure of this.measures) {
+        const duration = measure.timeSignatureNumerator * (4 / measure.timeSignatureDenominator);
+        if (safeBeat < startBeat + duration) return measure.keyFifths ?? 0;
+        startBeat += duration;
+      }
+      return this.measures.at(-1)?.keyFifths ?? 0;
+    }
+
     targetAt(beat) {
       return this.targetEvents.find(
         (event) => event.onsetBeat <= beat && beat < event.onsetBeat + event.durationBeats,
@@ -110,6 +125,7 @@
         number: measure.number,
         timeSignatureNumerator: measure.time_signature_numerator,
         timeSignatureDenominator: measure.time_signature_denominator,
+        keyFifths: measure.key_fifths ?? 0,
       }));
       const beatsPerMeasure = measures[0]?.timeSignatureNumerator ?? 4;
       const parts = (payload.parts ?? []).map((part) => ({

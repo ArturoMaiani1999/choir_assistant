@@ -43,6 +43,62 @@ At access, choose one of the folders in `sheets/` that contains its editable
 browser score, full-score preview and rehearsal audio from that MuseScore
 source; it never substitutes an unreviewed PDF/OMR transcription for it.
 
+### Current voice-pitch detection and scoring heuristic
+
+Pitch analysis is entirely local in the browser (`frontend/pitch_detector.js`);
+no microphone audio is sent to a server. It is intended for **one unaccompanied
+voice captured by the microphone**. The backing track should be heard through
+headphones, because the detector has no source separation and can otherwise
+lock on to the accompaniment or room reflections.
+
+The current fundamental-frequency (`F0`) estimator is a small JavaScript
+implementation of the **YIN-style time-domain algorithm**:
+
+- Each animation frame reads a 4,096-sample floating-point microphone buffer
+  from a Web Audio `AnalyserNode` (at the browser's audio sample rate).
+- It rejects very quiet input (RMS below `0.001`), searches periods
+  corresponding to **70–1,000 Hz**, calculates the squared-difference function
+  and its cumulative mean normalized difference (CMND), then chooses the first
+  descending CMND minimum below the YIN threshold `0.42`.
+- A three-point parabolic interpolation around that minimum refines the period,
+  and `F0 = sampleRate / period`. “Clarity” is `1 - CMND(minimum)`; the exposed
+  confidence is clarity multiplied by a level term that saturates at RMS `0.08`.
+
+The raw estimate is then passed through a hand-tuned temporal heuristic before
+it is shown, recorded, or scored:
+
+- Frames require clarity at least `0.45` and confidence at least `0.30`; after
+  three consecutive rejected/unvoiced frames, the displayed pitch is released.
+- Three reliable voiced frames are required before a pitch is accepted. A
+  3-frame median in logarithmic pitch space rejects isolated outliers, followed
+  by exponential smoothing (alpha `0.65` during warm-up, `0.30` afterwards).
+- Changes of at most 300 cents are accepted immediately. Larger changes must
+  be internally consistent within 100 cents for 3 frames; octave-sized changes
+  (1,200 ± 180 cents) require 5 frames. This specifically suppresses common
+  octave flips, but delays legitimate leaps.
+- The accepted `F0` is converted to MIDI pitch relative to A4 = 440 Hz. During
+  playback, it is compared only with the active MusicXML target after that
+  note's configured attack grace period. Time is counted as in tune when the
+  result is within ±30 cents (the display calls ±12 cents “centred”); unvoiced
+  and uncertain frames are excluded from the percentage rather than penalised.
+
+This is a practical prototype, not a robust choir-vocal analysis system. It
+does not model voice type or expected-note priors, vibrato, consonant/onset
+behaviour, reverberation, background speech/noise, accompaniment bleed, or
+multiple simultaneous singers. Its thresholds are empirical rather than
+calibrated against a labelled vocal dataset. The browser currently requests a
+mono microphone with echo cancellation and noise suppression disabled, but
+automatic gain control enabled.
+
+Questions to take to a pitch-detection expert: whether to retain a lightweight
+YIN/pYIN family detector with probabilistic voicing and score-aware tracking,
+or use a modern neural F0 estimator; how to evaluate candidates on the
+self-approved takes described below; and how to distinguish onset, sustained
+pitch, vibrato, octave errors, and accompaniment leakage without making the
+feedback feel laggy. The module API is deliberately separate from the UI so a
+WebAssembly or AudioWorklet-based detector can replace it without rewriting
+the scoring interface.
+
 ### Monodic pieces
 
 For a monodic score, the application exposes four vocal practice choices even

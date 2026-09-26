@@ -33,6 +33,9 @@ class WrittenMeasure:
     index: int
     time_signature_numerator: int
     time_signature_denominator: int
+    # Circle-of-fifths value: negative for flat keys, positive for sharp keys.
+    # The rehearsal UI uses it to preserve the score's enharmonic spelling.
+    key_fifths: int = 0
 
 
 @dataclass(frozen=True, slots=True)
