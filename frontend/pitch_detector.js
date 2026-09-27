@@ -27,9 +27,10 @@
   }
 
   // YIN-style difference and cumulative mean normalized difference.
-  function detectPitch(buffer, sampleRate) {
+  function detectPitch(buffer, sampleRate, { rmsThreshold = 0.001 } = {}) {
     const rms = rmsOf(buffer);
-    if (rms < 0.001) return { hz: null, rms, clarity: 0, confidence: 0 };
+    const effectiveRmsThreshold = Number.isFinite(rmsThreshold) ? Math.max(0, rmsThreshold) : 0.001;
+    if (rms < effectiveRmsThreshold) return { hz: null, rms, clarity: 0, confidence: 0 };
 
     let mean = 0;
     for (const sample of buffer) mean += sample;
@@ -92,6 +93,166 @@
     };
   }
 
+  function refinedTauAt(cmnd, tau) {
+    const left = cmnd[tau - 1] ?? cmnd[tau];
+    const center = cmnd[tau];
+    const right = cmnd[tau + 1] ?? center;
+    const denominator = 2 * (2 * center - left - right);
+    return denominator === 0 ? tau : tau + (right - left) / denominator;
+  }
+
+  // Keeps multiple local CMND minima instead of discarding every candidate
+  // after the first threshold crossing. A temporal decoder can then decide
+  // between fundamental and harmonic hypotheses across the entire take.
+  function yinCandidates(buffer, sampleRate, { maxCandidates = 6, threshold = 0.72 } = {}) {
+    const rms = rmsOf(buffer);
+    if (rms < 0.001) return { rms, candidates: [] };
+    let mean = 0;
+    for (const sample of buffer) mean += sample;
+    mean /= buffer.length;
+    const tauMin = Math.max(2, Math.floor(sampleRate / MAX_HZ));
+    const tauMax = Math.min(Math.floor(sampleRate / MIN_HZ), Math.floor(buffer.length / 2) - 1);
+    if (tauMin >= tauMax) return { rms, candidates: [] };
+    const difference = new Float64Array(tauMax + 1);
+    for (let tau = 1; tau <= tauMax; tau += 1) {
+      let sum = 0;
+      for (let index = 0; index < buffer.length - tau; index += 1) {
+        const delta = (buffer[index] - mean) - (buffer[index + tau] - mean);
+        sum += delta * delta;
+      }
+      difference[tau] = sum;
+    }
+    const cmnd = new Float64Array(tauMax + 1); cmnd[0] = 1;
+    let running = 0;
+    for (let tau = 1; tau <= tauMax; tau += 1) {
+      running += difference[tau];
+      cmnd[tau] = running === 0 ? 1 : difference[tau] * tau / running;
+    }
+    const minima = [];
+    for (let tau = tauMin + 1; tau < tauMax - 1; tau += 1) {
+      if (cmnd[tau] <= threshold && cmnd[tau] <= cmnd[tau - 1] && cmnd[tau] < cmnd[tau + 1]) minima.push(tau);
+    }
+    if (!minima.length) {
+      let bestTau = tauMin;
+      for (let tau = tauMin + 1; tau < tauMax; tau += 1) if (cmnd[tau] < cmnd[bestTau]) bestTau = tau;
+      minima.push(bestTau);
+    }
+    const candidates = minima.map((tau) => {
+      const refinedTau = refinedTauAt(cmnd, tau);
+      const hz = sampleRate / refinedTau;
+      return { hz, cmnd: cmnd[tau], clarity: Math.max(0, Math.min(1, 1 - cmnd[tau])) };
+    }).filter((candidate) => Number.isFinite(candidate.hz) && candidate.hz >= MIN_HZ && candidate.hz <= MAX_HZ)
+      .sort((left, right) => left.cmnd - right.cmnd).slice(0, maxCandidates);
+    return { rms, candidates };
+  }
+
+  // Offline Viterbi-style decoder. The observation term favours periodicity;
+  // the transition term favours a musically plausible continuous path, without
+  // ever using score targets.
+  function decodeYinCandidatePath(candidateFrames, {
+    transitionWeight = 0.085,
+    octaveTransitionPenalty = 0.48,
+    voicedStartPenalty = 0.22,
+    unvoicedCost = 0.72,
+  } = {}) {
+    if (!candidateFrames.length) return [];
+    const states = candidateFrames.map((frame) => [
+      ...frame.candidates.map((candidate) => ({ ...candidate, unvoiced: false, observationCost: candidate.cmnd })),
+      { hz: null, cmnd: 1, clarity: 0, unvoiced: true, observationCost: frame.candidates.length ? unvoicedCost + .25 : unvoicedCost },
+    ]);
+    let previousCosts = states[0].map((state) => state.observationCost + (state.unvoiced ? 0 : voicedStartPenalty));
+    const backPointers = [states[0].map(() => -1)];
+    for (let index = 1; index < states.length; index += 1) {
+      const currentCosts = []; const currentBackPointers = [];
+      for (const current of states[index]) {
+        let bestCost = Infinity, bestIndex = -1;
+        for (let previousIndex = 0; previousIndex < states[index - 1].length; previousIndex += 1) {
+          const previous = states[index - 1][previousIndex];
+          let transitionCost;
+          if (previous.unvoiced && current.unvoiced) transitionCost = .02;
+          else if (previous.unvoiced || current.unvoiced) transitionCost = voicedStartPenalty;
+          else {
+            const distance = Math.abs(centsBetween(current.hz, previous.hz)) / 100;
+            transitionCost = transitionWeight * Math.min(distance, 9);
+            if (Math.abs(distance - 12) <= 2) transitionCost += octaveTransitionPenalty;
+          }
+          const total = previousCosts[previousIndex] + current.observationCost + transitionCost;
+          if (total < bestCost) { bestCost = total; bestIndex = previousIndex; }
+        }
+        currentCosts.push(bestCost); currentBackPointers.push(bestIndex);
+      }
+      previousCosts = currentCosts; backPointers.push(currentBackPointers);
+    }
+    let bestIndex = previousCosts.reduce((best, cost, index) => cost < previousCosts[best] ? index : best, 0);
+    const path = new Array(states.length);
+    for (let index = states.length - 1; index >= 0; index -= 1) {
+      path[index] = states[index][bestIndex];
+      bestIndex = backPointers[index][bestIndex];
+    }
+    return path;
+  }
+
+  // McLeod Pitch Method (NSDF) candidate extraction. This is intentionally a
+  // separate acoustic estimator from YIN: no CMND threshold or YIN candidate
+  // path is reused here.
+  function mpmCandidates(buffer, sampleRate, { maxCandidates = 3, minClarity = 0.78 } = {}) {
+    const rms = rmsOf(buffer);
+    if (rms < 0.001) return { rms, candidates: [] };
+    let mean = 0;
+    for (const sample of buffer) mean += sample;
+    mean /= buffer.length;
+    const tauMin = Math.max(2, Math.floor(sampleRate / MAX_HZ));
+    const tauMax = Math.min(Math.floor(sampleRate / MIN_HZ), Math.floor(buffer.length / 2) - 1);
+    if (tauMin >= tauMax) return { rms, candidates: [] };
+    const nsdf = new Float64Array(tauMax + 1);
+    for (let tau = 1; tau <= tauMax; tau += 1) {
+      let numerator = 0, firstEnergy = 0, secondEnergy = 0;
+      for (let index = 0; index < buffer.length - tau; index += 1) {
+        const first = buffer[index] - mean, second = buffer[index + tau] - mean;
+        numerator += first * second; firstEnergy += first * first; secondEnergy += second * second;
+      }
+      nsdf[tau] = firstEnergy + secondEnergy === 0 ? 0 : 2 * numerator / (firstEnergy + secondEnergy);
+    }
+    const peaks = [];
+    for (let tau = tauMin + 1; tau < tauMax - 1; tau += 1) {
+      if (nsdf[tau] >= minClarity && nsdf[tau] > nsdf[tau - 1] && nsdf[tau] >= nsdf[tau + 1]) peaks.push(tau);
+    }
+    const candidates = peaks.map((tau) => {
+      const left = nsdf[tau - 1], center = nsdf[tau], right = nsdf[tau + 1];
+      const denominator = 2 * (2 * center - left - right);
+      const refinedTau = denominator === 0 ? tau : tau + (right - left) / denominator;
+      return { hz: sampleRate / refinedTau, clarity: center };
+    }).filter((candidate) => Number.isFinite(candidate.hz) && candidate.hz >= MIN_HZ && candidate.hz <= MAX_HZ)
+      .sort((left, right) => right.clarity - left.clarity).slice(0, maxCandidates);
+    return { rms, candidates };
+  }
+
+  // CREPE exposes 360 independent sigmoid activations (not a softmax).  For
+  // an offline benchmark we turn the strongest local neighbourhood into an F0
+  // estimate, while retaining the peak activation as a voicing confidence.
+  // Keeping this decoder here makes its numerical contract testable without
+  // loading an ONNX runtime in the live practice page.
+  function decodeCrepeProbabilities(probabilities, { minConfidence = 0.55, neighbourhood = 4 } = {}) {
+    if (!probabilities?.length) return { hz: null, confidence: 0, cents: null, bin: null };
+    let peak = 0;
+    for (let index = 1; index < probabilities.length; index += 1) {
+      if (probabilities[index] > probabilities[peak]) peak = index;
+    }
+    const confidence = Number(probabilities[peak]) || 0;
+    if (confidence < minConfidence) return { hz: null, confidence, cents: null, bin: peak };
+    let weightedBin = 0, weight = 0;
+    const start = Math.max(0, peak - neighbourhood), end = Math.min(probabilities.length - 1, peak + neighbourhood);
+    for (let index = start; index <= end; index += 1) {
+      const activation = Math.max(0, Number(probabilities[index]) || 0);
+      weightedBin += index * activation;
+      weight += activation;
+    }
+    const bin = weight > 0 ? weightedBin / weight : peak;
+    const cents = 1997.3794084376191 + bin * (7180 / 359);
+    const hz = 10 * Math.pow(2, cents / 1200);
+    return { hz: Number.isFinite(hz) ? hz : null, confidence, cents, bin };
+  }
+
   class PitchSmoother {
     constructor({
       releaseFrames = 3,
@@ -126,6 +287,16 @@
       this.rawSemitones = [];
       this.candidateSemitone = null;
       this.candidateFrames = 0;
+    }
+
+    configure({ fastAlpha = this.fastAlpha, slowAlpha = this.slowAlpha, medianWindowFrames = this.medianWindowFrames } = {}) {
+      const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
+      if (Number.isFinite(fastAlpha)) this.fastAlpha = clamp(fastAlpha, .05, .95);
+      if (Number.isFinite(slowAlpha)) this.slowAlpha = clamp(slowAlpha, .05, .95);
+      if (Number.isFinite(medianWindowFrames)) {
+        this.medianWindowFrames = Math.max(1, Math.min(9, Math.round(medianWindowFrames)));
+        this.rawSemitones = this.rawSemitones.slice(-this.medianWindowFrames);
+      }
     }
 
     reset() {
@@ -256,12 +427,104 @@
     }
   }
 
+  // Experimental offline tracker for benchmark comparison. It deliberately
+  // receives exactly the same raw YIN estimates as v1: it only changes the
+  // temporal decision, never consults the score.
+  class OctaveAwarePitchTracker {
+    constructor({
+      minClarity = 0.45,
+      initialFrames = 3,
+      holdPriorMs = 220,
+      smallJumpCents = 320,
+      largeJumpConfirmFrames = 3,
+      octaveCenterCents = 1200,
+      octaveToleranceCents = 230,
+      octaveConfirmFrames = 6,
+      candidateConsistencyCents = 110,
+      smoothingAlpha = 0.35,
+    } = {}) {
+      Object.assign(this, { minClarity, initialFrames, holdPriorMs, smallJumpCents, largeJumpConfirmFrames, octaveCenterCents, octaveToleranceCents, octaveConfirmFrames, candidateConsistencyCents, smoothingAlpha });
+      this.reset();
+    }
+
+    reset() {
+      this.hz = null;
+      this.lastReliableTimestampMs = null;
+      this.startCandidate = null;
+      this.startFrames = 0;
+      this.transitionCandidate = null;
+      this.transitionFrames = 0;
+    }
+
+    clearTransition() {
+      this.transitionCandidate = null;
+      this.transitionFrames = 0;
+    }
+
+    collectCandidate(hz) {
+      if (this.transitionCandidate != null
+        && Math.abs(centsBetween(hz, this.transitionCandidate)) <= this.candidateConsistencyCents) {
+        this.transitionCandidate = (this.transitionCandidate * this.transitionFrames + hz) / (this.transitionFrames + 1);
+        this.transitionFrames += 1;
+      } else {
+        this.transitionCandidate = hz;
+        this.transitionFrames = 1;
+      }
+    }
+
+    update(estimate, timestampMs) {
+      const rawHz = estimate.hz;
+      const reliable = Number.isFinite(rawHz) && rawHz >= MIN_HZ && rawHz <= MAX_HZ
+        && (estimate.clarity ?? 0) >= this.minClarity;
+      const gapMs = this.lastReliableTimestampMs == null ? Infinity : timestampMs - this.lastReliableTimestampMs;
+      if (!reliable) {
+        if (gapMs > this.holdPriorMs) { this.hz = null; this.startCandidate = null; this.startFrames = 0; this.clearTransition(); }
+        return { ...estimate, hz: this.hz, accepted: false, rejectionReason: 'unvoiced' };
+      }
+      this.lastReliableTimestampMs = timestampMs;
+      if (this.hz == null || gapMs > this.holdPriorMs) {
+        if (this.startCandidate != null && Math.abs(centsBetween(rawHz, this.startCandidate)) <= this.candidateConsistencyCents) {
+          this.startCandidate = (this.startCandidate * this.startFrames + rawHz) / (this.startFrames + 1);
+          this.startFrames += 1;
+        } else { this.startCandidate = rawHz; this.startFrames = 1; }
+        if (this.startFrames < this.initialFrames) return { ...estimate, hz: null, accepted: false, rejectionReason: 'warm-up' };
+        this.hz = this.startCandidate;
+        this.startCandidate = null; this.startFrames = 0; this.clearTransition();
+        return { ...estimate, hz: this.hz, accepted: true, rejectionReason: null };
+      }
+
+      const deltaCents = centsBetween(rawHz, this.hz);
+      const octaveLike = Math.abs(Math.abs(deltaCents) - this.octaveCenterCents) <= this.octaveToleranceCents;
+      const jumpLimit = octaveLike ? this.octaveConfirmFrames : this.largeJumpConfirmFrames;
+      if (Math.abs(deltaCents) > this.smallJumpCents) {
+        this.collectCandidate(rawHz);
+        if (this.transitionFrames < jumpLimit) {
+          return { ...estimate, hz: this.hz, accepted: true, rejectionReason: octaveLike ? 'octave-held' : 'large-jump-held' };
+        }
+        this.hz = this.transitionCandidate;
+        this.clearTransition();
+        return { ...estimate, hz: this.hz, accepted: true, rejectionReason: null };
+      }
+
+      this.clearTransition();
+      const previousSemitone = semitoneIndex(this.hz);
+      const nextSemitone = semitoneIndex(rawHz);
+      this.hz = hzFromSemitone(previousSemitone * (1 - this.smoothingAlpha) + nextSemitone * this.smoothingAlpha);
+      return { ...estimate, hz: this.hz, accepted: true, rejectionReason: null };
+    }
+  }
+
   global.ChoirPitch = {
     MIN_HZ,
     MAX_HZ,
     centsBetween,
     detectPitch,
+    yinCandidates,
+    decodeYinCandidatePath,
+    mpmCandidates,
+    decodeCrepeProbabilities,
     PitchSmoother,
+    OctaveAwarePitchTracker,
     rmsOf,
   };
 })(window);

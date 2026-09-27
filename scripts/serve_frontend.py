@@ -36,7 +36,7 @@ MUSESCORE_CANDIDATES = (
     Path(r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe"),
 )
 _library_lock = threading.Lock()
-LIBRARY_ASSET_LAYOUT_VERSION = 3
+LIBRARY_ASSET_LAYOUT_VERSION = 4
 
 
 def _musescore() -> str:
@@ -398,6 +398,20 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
             remaining -= len(chunk)
 
     def do_POST(self):
+        if self.path == "/api/benchmark-event":
+            content_length = int(self.headers.get("Content-Length", "0"))
+            if content_length > 4096:
+                self.send_error(HTTPStatus.REQUEST_ENTITY_TOO_LARGE, "Diagnostic payload too large")
+                return
+            try:
+                payload = json.loads(self.rfile.read(content_length) or b"{}")
+            except (ValueError, UnicodeDecodeError):
+                self.send_error(HTTPStatus.BAD_REQUEST, "Invalid diagnostic payload")
+                return
+            action = str(payload.get("action", "unknown"))[:80]
+            recorder_state = str(payload.get("recorderState", "unknown"))[:40]
+            print(f"[benchmark-ui] {action} recorder={recorder_state}", flush=True)
+            return self._send_json({"ok": True})
         if self.path == "/api/ingestions":
             return self._create_ingestion()
         if self.path.startswith("/api/ingestions/") and self.path.endswith("/revision"):

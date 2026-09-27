@@ -223,21 +223,11 @@ def compile_musicxml(
                     key_fifths = int(float(_text(key, "fifths") or key_fifths))
             measure_beats = numerator * (4.0 / denominator)
             measure_start = part_beat
-            measure_spans.setdefault(measure_id, (measure_start, measure_start + measure_beats))
             if part_index == 0:
                 navigation_hints.append(_navigation_hint(measure, measure_index))
-                measures.append(
-                    WrittenMeasure(
-                        id=measure_id,
-                        number=measure_number,
-                        index=measure_index,
-                        time_signature_numerator=numerator,
-                        time_signature_denominator=denominator,
-                        key_fifths=key_fifths,
-                    )
-                )
 
             cursor = measure_start
+            furthest_cursor = measure_start
             last_note_onset = measure_start
             occurrence_id = f"occurrence-{measure_index + 1}"
             for child in list(measure):
@@ -250,6 +240,7 @@ def compile_musicxml(
                 if kind in {"backup", "forward"}:
                     offset = _number(child, "duration", 0.0) / divisions
                     cursor += offset if kind == "forward" else -offset
+                    furthest_cursor = max(furthest_cursor, cursor)
                     continue
                 if kind != "note":
                     continue
@@ -261,6 +252,7 @@ def compile_musicxml(
                 onset = last_note_onset if is_chord else cursor
                 if not is_chord:
                     cursor += duration_beats
+                    furthest_cursor = max(furthest_cursor, cursor)
                     last_note_onset = onset
                 is_rest = _child(child, "rest") is not None
                 midi_pitch = None if is_rest else _midi_pitch(child)
@@ -308,7 +300,27 @@ def compile_musicxml(
                         is_rest=is_rest,
                     )
                 )
-            part_beat = max(measure_start + measure_beats, cursor)
+            # MusicXML denotes an anacrusis with an implicit partial measure.
+            # Its content is played immediately, but its metrical label starts
+            # at the omitted beat (e.g. the only quarter in 6/4 is beat 6).
+            actual_duration = max(0.0, furthest_cursor - measure_start)
+            is_partial_measure = measure.get("implicit") == "yes" and actual_duration > 0
+            performance_duration = actual_duration if is_partial_measure else measure_beats
+            measure_end = measure_start + performance_duration
+            if part_index == 0:
+                measure_spans[measure_id] = (measure_start, measure_end)
+                measures.append(
+                    WrittenMeasure(
+                        id=measure_id,
+                        number=measure_number,
+                        index=measure_index,
+                        time_signature_numerator=numerator,
+                        time_signature_denominator=denominator,
+                        beat_offset=(measure_beats - actual_duration) if is_partial_measure else 0.0,
+                        key_fifths=key_fifths,
+                    )
+                )
+            part_beat = measure_end
 
     tempo_by_beat: dict[float, float] = {}
     for change in raw_tempo_changes:

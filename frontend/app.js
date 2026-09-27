@@ -1,6 +1,6 @@
 const { NormalizedScoreRuntime, MediaPlaybackClock } = window.ChoirScore;
 const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, measureSeekState, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
-const { detectPitch, PitchSmoother } = window.ChoirPitch;
+const { detectPitch, PitchSmoother, OctaveAwarePitchTracker, yinCandidates, decodeYinCandidatePath, mpmCandidates, decodeCrepeProbabilities } = window.ChoirPitch;
 
 const UI_CONFIG = Object.freeze({
   historyBeats: 4.5,
@@ -13,12 +13,12 @@ const UI_CONFIG = Object.freeze({
 
 const els = Object.fromEntries([
   'transpose',
-  'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close',
+  'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close', 'settings-dialog', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-color', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-reset', 'settings-close',
   'result-dialog', 'result-text', 'result-progress', 'retry', 'next-phrase', 'result-close',
   'phrase-loop', 'note-names',
-  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-title', 'library-title-save', 'library-part', 'library-note', 'library-open', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-mode', 'settings',
+  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-title', 'library-title-save', 'library-part', 'library-note', 'library-open', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-mode', 'settings',
   'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
-  'score-loading', 'score-pitch-divider', 'pitch-lane', 'intonation-readout', 'live-note', 'live-cents', 'live-state',
+  'score-loading', 'score-pitch-divider', 'pitch-lane', 'intonation-readout', 'live-note', 'live-cents', 'live-state', 'pitch-layer-v1', 'pitch-layer-crepe',
   'measure-counter', 'scoring-cue', 'previous-measure', 'toggle-playback', 'next-measure', 'volume', 'metronome-toggle', 'metronome-volume', 'backing-audio', 'toast', 'asset-status', 'microphone',
 ].map((id) => [id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]));
 
@@ -62,12 +62,63 @@ const state = {
   microphoneBuffer: null,
   microphoneRms: 0,
   pitchSmoother: new PitchSmoother(),
+  detectorSettings: { rmsThreshold: .001, fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 },
+  plumeSettings: { width: 1, intensity: 1, color: '#63c8c2' },
+  pitchLayers: { v1: true, crepe: true },
   livePitch: null,
+  neuralLive: { enabled: false, loading: false, inFlight: false, generation: 0, lastStartedMs: -Infinity, latestPitch: null, samples: [], durationsMs: [], v1DurationsMs: [], lastLatencyMs: null, error: null },
   pitchSamples: [],
   pitchTakeId: 1,
   groundTruth: { capture: null },
+  benchmark: { capture: null, pending: null, previewUrl: null, sessionId: null, savedTakes: [], selectedTakeId: null, analysisAudioUrl: null, analysisLayers: { raw: true, audio: true, score: true },
+    analysisView: { timeZoom: 1, pitchZoom: 1, centerBeat: null, pitchOffset: 0, pointer: null, inspectBeat: null } },
   gridInspect: { active: false, viewBeat: 0, pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null },
 };
+
+const V1_RMS_THRESHOLD = Object.freeze({ default: .001, min: .0001, max: .01 });
+const V1_TRACKER_DEFAULTS = Object.freeze({ fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 });
+
+function rmsThresholdFromSlider(value) {
+  const ratio = Math.max(0, Math.min(1, Number(value) / 100));
+  return 10 ** (Math.log10(V1_RMS_THRESHOLD.min) + ratio * (Math.log10(V1_RMS_THRESHOLD.max) - Math.log10(V1_RMS_THRESHOLD.min)));
+}
+
+function rmsSliderFromThreshold(value) {
+  const threshold = Math.max(V1_RMS_THRESHOLD.min, Math.min(V1_RMS_THRESHOLD.max, value));
+  return Math.round((Math.log10(threshold) - Math.log10(V1_RMS_THRESHOLD.min))
+    / (Math.log10(V1_RMS_THRESHOLD.max) - Math.log10(V1_RMS_THRESHOLD.min)) * 100);
+}
+
+function updateDetectorSettingsUi() {
+  const threshold = state.detectorSettings.rmsThreshold;
+  els.settingsV1Rms.value = String(rmsSliderFromThreshold(threshold));
+  els.settingsV1RmsValue.textContent = `${threshold.toFixed(4).replace('.', ',')} RMS`;
+  els.settingsV1RmsDescription.textContent = threshold < V1_RMS_THRESHOLD.default
+    ? 'Più sensibile: ammette segnali deboli; verifica che non compaiano pitch sul rumore.'
+    : threshold > V1_RMS_THRESHOLD.default
+      ? 'Più selettiva: richiede una voce più presente e filtra meglio il rumore debole.'
+      : 'Valore predefinito: filtra silenzio e rumore debole.';
+  els.settingsV1FastAlpha.value = String(Math.round(state.detectorSettings.fastAlpha * 100));
+  els.settingsV1FastAlphaValue.textContent = `${Math.round(state.detectorSettings.fastAlpha * 100)}%`;
+  els.settingsV1SlowAlpha.value = String(Math.round(state.detectorSettings.slowAlpha * 100));
+  els.settingsV1SlowAlphaValue.textContent = `${Math.round(state.detectorSettings.slowAlpha * 100)}%`;
+  els.settingsV1MedianFrames.value = String(state.detectorSettings.medianWindowFrames);
+  els.settingsV1MedianFramesValue.textContent = `${state.detectorSettings.medianWindowFrames} frame`;
+  els.settingsV1PlumeWidth.value = String(Math.round(state.plumeSettings.width * 100));
+  els.settingsV1PlumeWidthValue.textContent = `${Math.round(state.plumeSettings.width * 100)}%`;
+  els.settingsV1PlumeColor.value = state.plumeSettings.color;
+  els.settingsV1PlumeIntensity.value = String(Math.round(state.plumeSettings.intensity * 100));
+  els.settingsV1PlumeIntensityValue.textContent = `${Math.round(state.plumeSettings.intensity * 100)}%`;
+}
+
+function applyLiveTrackerSettings() {
+  state.pitchSmoother.configure(state.detectorSettings);
+}
+
+function openDetectorSettings() {
+  updateDetectorSettingsUi();
+  if (!els.settingsDialog.open) els.settingsDialog.showModal();
+}
 
 function normalizeSlug(value) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
@@ -137,13 +188,14 @@ function buildOccurrenceMeasures(runtime) {
         endBeat: occurrence.endBeat,
         timeSignatureNumerator: written?.timeSignatureNumerator ?? 4,
         timeSignatureDenominator: written?.timeSignatureDenominator ?? 4,
+        beatOffset: written?.beatOffset ?? 0,
       };
     });
   }
   let beat = 0;
   return runtime.measures.map((measure) => {
     const duration = measure.timeSignatureNumerator * (4 / measure.timeSignatureDenominator);
-    const item = { id: measure.id, number: measure.number, startBeat: beat, endBeat: beat + duration, timeSignatureNumerator: measure.timeSignatureNumerator, timeSignatureDenominator: measure.timeSignatureDenominator };
+    const item = { id: measure.id, number: measure.number, startBeat: beat, endBeat: beat + duration, timeSignatureNumerator: measure.timeSignatureNumerator, timeSignatureDenominator: measure.timeSignatureDenominator, beatOffset: measure.beatOffset ?? 0 };
     beat += duration;
     return item;
   });
@@ -389,10 +441,15 @@ function sampleMicrophone(beat, running) {
   state.lastSampleMs = now;
   if (state.microphoneStatus !== 'active') { state.livePitch = null; state.microphoneRms = 0; return; }
   state.microphoneAnalyser.getFloatTimeDomainData(state.microphoneBuffer);
-  const estimate = state.pitchSmoother.update(
-    detectPitch(state.microphoneBuffer, state.microphoneContext.sampleRate),
-    performance.now(),
-  );
+  const v1StartedMs = performance.now();
+  const rawEstimate = detectPitch(state.microphoneBuffer, state.microphoneContext.sampleRate, state.detectorSettings);
+  if (state.neuralLive.enabled || state.neuralLive.loading) {
+    state.neuralLive.v1DurationsMs.push(performance.now() - v1StartedMs);
+    if (state.neuralLive.v1DurationsMs.length > 80) state.neuralLive.v1DurationsMs.shift();
+  }
+  const estimate = state.pitchSmoother.update(rawEstimate, performance.now());
+  queueNeuralLiveInference(state.microphoneBuffer, state.microphoneContext.sampleRate, beat);
+  appendBenchmarkFrame(estimate, beat);
   state.microphoneRms = estimate.rms;
   document.getElementById('microphone-level').value = state.microphoneRms;
   document.getElementById('test-microphone-level').value = state.microphoneRms;
@@ -408,20 +465,229 @@ function sampleMicrophone(beat, running) {
       state.attempt.voicedMs += elapsed;
       if (Math.abs((state.livePitch - target.midiPitch - state.transpose) * 100) <= UI_CONFIG.acceptableCents) state.attempt.insideMs += elapsed;
     }
+  }
+  const rawPitch = Number.isFinite(estimate.rawHz) ? 69 + 12 * Math.log2(estimate.rawHz / 440) : null;
+  if (state.livePitch != null || rawPitch != null) {
     const previous = state.pitchSamples.at(-1);
-    if (!previous || previous.takeId !== state.pitchTakeId || beat - previous.beat >= .025) {
-      state.pitchSamples.push({ beat, pitch: state.livePitch, confidence: estimate.confidence, takeId: state.pitchTakeId });
-    }
+    const sample = { beat, pitch: state.livePitch, rawPitch, confidence: estimate.confidence, clarity: estimate.clarity, takeId: state.pitchTakeId };
+    if (!running && previous?.takeId === state.pitchTakeId && Math.abs(beat - previous.beat) < .025) state.pitchSamples[state.pitchSamples.length - 1] = sample;
+    else if (!previous || previous.takeId !== state.pitchTakeId || beat - previous.beat >= .025) state.pitchSamples.push(sample);
   }
   // Keep a bounded session history: the director can pan back over earlier
   // takes instead of losing the trace whenever playback is repositioned.
   if (state.pitchSamples.length > 12000) state.pitchSamples.splice(0, state.pitchSamples.length - 12000);
 }
 
+function medianOf(values) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.floor(sorted.length / 2)];
+}
+
+function percentileOf(values, percentile) {
+  if (!values.length) return null;
+  const sorted = [...values].sort((left, right) => left - right);
+  return sorted[Math.min(sorted.length - 1, Math.ceil((sorted.length - 1) * percentile))];
+}
+
+function updateNeuralLiveUi() {
+  const neural = state.neuralLive;
+  const running = neural.enabled || neural.loading;
+  els.neuralLive.setAttribute('aria-pressed', String(running));
+  els.neuralLive.disabled = neural.loading;
+  const medianMs = medianOf(neural.durationsMs);
+  els.neuralLive.textContent = neural.loading ? 'Neurale…' : neural.enabled
+    ? `Neurale ${medianMs == null ? 'live' : `${Math.round(medianMs)} ms`}`
+    : 'Neurale live';
+  els.neuralLiveStatus.hidden = !running;
+  if (!running) return;
+  els.neuralLiveNote.textContent = Number.isFinite(neural.latestPitch) ? noteLabel(neural.latestPitch) : '—';
+  if (neural.loading) els.neuralLiveTiming.textContent = 'carico modello locale…';
+  else if (neural.error) els.neuralLiveTiming.textContent = neural.error;
+  else {
+    const p50 = medianOf(neural.durationsMs), p95 = percentileOf(neural.durationsMs, .95), v1p50 = medianOf(neural.v1DurationsMs);
+    els.neuralLiveTiming.textContent = p50 == null ? 'attendo voce…' : `v1 p50 ${Math.round(v1p50)} ms · v5 p50 ${Math.round(p50)} / p95 ${Math.round(p95)} ms`;
+  }
+}
+
+function resampleLiveCrepeFrame(samples, sourceRate) {
+  const output = new Float32Array(1024);
+  const sourceSpan = 1024 / 16000 * sourceRate;
+  const start = samples.length - sourceSpan;
+  for (let index = 0; index < output.length; index += 1) {
+    const sourcePosition = start + index / (output.length - 1) * (sourceSpan - 1);
+    const left = Math.floor(sourcePosition), fraction = sourcePosition - left;
+    if (left < 0 || left + 1 >= samples.length) continue;
+    output[index] = samples[left] * (1 - fraction) + samples[left + 1] * fraction;
+  }
+  return output;
+}
+
+function queueNeuralLiveInference(samples, sourceRate, beat) {
+  const neural = state.neuralLive;
+  const now = performance.now();
+  if (!neural.enabled || neural.inFlight || now - neural.lastStartedMs < 50) return;
+  neural.inFlight = true; neural.lastStartedMs = now;
+  const frame = normaliseCrepeFrame(resampleLiveCrepeFrame(samples, sourceRate));
+  const generation = neural.generation;
+  void (async () => {
+    try {
+      const session = await crepeSession();
+      const ort = window.ort;
+      const results = await session.run({ [session.inputNames[0]]: new ort.Tensor('float32', frame, [1, 1024]) });
+      if (generation !== state.neuralLive.generation) return;
+      const probabilities = results[session.outputNames[0]]?.data;
+      if (!probabilities || probabilities.length < 360) throw new Error('output CREPE non valido');
+      const result = decodeCrepeProbabilities(probabilities?.subarray(0, 360));
+      const elapsedMs = performance.now() - now;
+      neural.durationsMs.push(elapsedMs);
+      if (neural.durationsMs.length > 80) neural.durationsMs.shift();
+      neural.lastLatencyMs = elapsedMs;
+      neural.latestPitch = Number.isFinite(result.hz) ? 69 + 12 * Math.log2(result.hz / 440) : null;
+      neural.samples.push({ beat, pitch: neural.latestPitch, takeId: state.pitchTakeId, salience: Float32Array.from(probabilities.subarray(0, 360)) });
+      if (neural.samples.length > 12000) neural.samples.splice(0, neural.samples.length - 12000);
+    } catch (error) {
+      if (generation === state.neuralLive.generation) {
+        neural.error = 'inferenza non disponibile';
+        neural.enabled = false;
+        showToast(`CREPE live non disponibile: ${error.message ?? 'errore runtime'}`);
+      }
+    } finally {
+      if (generation === state.neuralLive.generation) {
+        neural.inFlight = false;
+        updateNeuralLiveUi();
+      }
+    }
+  })();
+}
+
+async function toggleNeuralLive() {
+  const neural = state.neuralLive;
+  if (neural.enabled || neural.loading) {
+    neural.generation += 1; neural.enabled = false; neural.loading = false; neural.inFlight = false; neural.latestPitch = null; neural.samples = [];
+    updateNeuralLiveUi(); showToast('Confronto CREPE live fermato. V1 resta attivo.'); render(); return;
+  }
+  if (state.microphoneStatus !== 'active') await toggleMicrophone();
+  if (state.microphoneStatus !== 'active') return;
+  neural.loading = true; neural.error = null; neural.samples = []; neural.durationsMs = []; neural.v1DurationsMs = []; neural.latestPitch = null;
+  const generation = ++neural.generation;
+  updateNeuralLiveUi();
+  try {
+    await crepeSession();
+    if (generation !== neural.generation) return;
+    neural.loading = false; neural.enabled = true;
+    showToast('CREPE live attivo: plume rosa, score invariato.');
+  } catch (error) {
+    if (generation !== neural.generation) return;
+    neural.loading = false; neural.enabled = false; neural.error = 'runtime non caricato';
+    showToast(`CREPE live non disponibile: ${error.message ?? 'errore runtime'}`);
+  }
+  updateNeuralLiveUi(); render();
+}
+
 function roundedRect(context, x, y, width, height, radius) {
   const r = Math.min(radius, Math.abs(width) / 2, Math.abs(height) / 2);
   context.beginPath();
   context.roundRect(x, y, width, height, r);
+}
+
+// A piano roll should never imply a continuous glissando merely because two
+// estimates happened to be consecutive.  We keep stable local runs, but break
+// the ink over silence and unvalidated leaps.  The omitted micro-runs are
+// still present in the recorded data and in the numerical benchmark metrics.
+function stableVisualPitchSegments(frames, {
+  pitchAt,
+  timeAt,
+  maxJumpCents = 320,
+  maxGap = Infinity,
+  minimumFrames = 3,
+} = {}) {
+  const complete = [];
+  let current = [];
+  const close = () => {
+    if (current.length) complete.push(current);
+    current = [];
+  };
+  for (const frame of frames) {
+    const pitch = pitchAt(frame), time = timeAt(frame);
+    if (!Number.isFinite(pitch) || !Number.isFinite(time)) { close(); continue; }
+    const previous = current.at(-1);
+    if (previous && (time - previous.time > maxGap || Math.abs(pitch - previous.pitch) * 100 > maxJumpCents)) close();
+    current.push({ frame, pitch, time });
+  }
+  close();
+  return complete.filter((segment) => segment.length >= minimumFrames);
+}
+
+function drawStablePitchSegments(context, segments, xAt, yAt) {
+  for (const segment of segments) {
+    context.beginPath();
+    segment.forEach((point, index) => {
+      const x = xAt(point.frame), y = yAt(point.pitch);
+      if (index) context.lineTo(x, y); else context.moveTo(x, y);
+    });
+    context.stroke();
+  }
+}
+
+function drawLiveCrepePlume(context, samples, xAt, yAt, minPitch, maxPitch) {
+  context.save(); context.globalCompositeOperation = 'screen';
+  for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex += 1) {
+    const sample = samples[sampleIndex], salience = sample.salience;
+    if (!salience?.length) continue;
+    let peak = 0;
+    for (let index = 0; index < salience.length; index += 1) peak = Math.max(peak, salience[index]);
+    if (peak < .18) continue;
+    const x = xAt(sample), next = samples[sampleIndex + 1];
+    const halfWidth = Math.max(1, Math.min(5, next ? Math.abs(xAt(next) - x) / 2 : 2));
+    for (let index = 0; index < salience.length; index += 1) {
+      const pitch = crepeBinMidi(index);
+      if (pitch < minPitch || pitch > maxPitch) continue;
+      const relative = salience[index] / peak;
+      if (relative < .18) continue;
+      context.fillStyle = `rgba(243,166,208,${.18 * Math.pow(relative, .72)})`;
+      context.fillRect(x - halfWidth, yAt(pitch) - 3, halfWidth * 2, 6);
+    }
+  }
+  context.restore();
+}
+
+// v1 does not retain a full multi-candidate CMND surface in the live loop.
+// This is therefore an explicitly visual confidence plume around raw F0, not
+// a claim of a multimodal acoustic posterior. It costs only a few canvas fills.
+function drawLiveV1ConfidencePlume(context, samples, xAt, yAt, minPitch, maxPitch) {
+  const plumeWidth = state.plumeSettings.width;
+  const plumeIntensity = state.plumeSettings.intensity;
+  const colour = /^#([0-9a-f]{6})$/i.exec(state.plumeSettings.color)?.[1] ?? '63c8c2';
+  const red = Number.parseInt(colour.slice(0, 2), 16);
+  const green = Number.parseInt(colour.slice(2, 4), 16);
+  const blue = Number.parseInt(colour.slice(4, 6), 16);
+  context.save(); context.globalCompositeOperation = 'screen';
+  for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex += 1) {
+    const sample = samples[sampleIndex];
+    const center = Number.isFinite(sample.rawPitch) ? sample.rawPitch : sample.pitch;
+    if (!Number.isFinite(center)) continue;
+    const confidence = Math.max(0, Math.min(1, sample.confidence ?? 0));
+    // This is an intentionally restrained display width: it communicates v1
+    // confidence without turning a single F0 estimate into a fictitious
+    // multi-semitone distribution.
+    const sigmaSemitones = (.08 + (1 - confidence) * .32) * plumeWidth;
+    const x = xAt(sample), next = samples[sampleIndex + 1];
+    // Span to the next frame rather than drawing isolated thin columns. The
+    // small overlap also makes the plume continuous when RAF cadence varies.
+    const width = Math.max(4, Math.min(18, next ? Math.abs(xAt(next) - x) + 2 : 8));
+    for (let offset = -3 * sigmaSemitones; offset <= 3 * sigmaSemitones; offset += .08) {
+      const pitch = center + offset;
+      if (pitch < minPitch || pitch > maxPitch) continue;
+      const relative = Math.exp(-.5 * (offset / sigmaSemitones) ** 2);
+      const alpha = Math.min(.55, (.025 + confidence * .1) * relative * plumeIntensity);
+      context.fillStyle = `rgba(${red},${green},${blue},${alpha})`;
+      // 8px-high bands overlap at every practical piano-roll zoom: no black
+      // horizontal pinstripes between adjacent probability samples.
+      context.fillRect(x - width / 2, yAt(pitch) - 4, width, 8);
+    }
+  }
+  context.restore();
 }
 
 function drawPitchLane(beat) {
@@ -518,31 +784,17 @@ function drawPitchLane(beat) {
 
   ctx.save();
   ctx.beginPath(); ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top); ctx.clip();
-  ctx.strokeStyle = '#68d1cb'; ctx.lineWidth = rect.width < 700 ? 2.2 : 3; ctx.lineJoin = 'round'; ctx.lineCap = 'round';
-  ctx.shadowColor = 'rgba(99,200,194,.3)'; ctx.shadowBlur = 6; ctx.beginPath();
-  let drawing = false;
-  let previousTakeId = null;
-  for (const sample of state.pitchSamples) {
-    if (sample.beat < visibleStart || sample.beat > visibleEnd) { drawing = false; previousTakeId = null; continue; }
-    if (previousTakeId != null && sample.takeId !== previousTakeId) drawing = false;
-    const x = timeToX(sample.beat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
-    const y = pitchToY(sample.pitch, bounds.min, bounds.max, plot.top, plot.bottom);
-    if (drawing) ctx.lineTo(x, y); else ctx.moveTo(x, y);
-    drawing = true;
-    previousTakeId = sample.takeId;
+  if (state.pitchLayers.v1) {
+    const v1PlumeSamples = state.pitchSamples.filter((sample) => sample.beat >= visibleStart && sample.beat <= visibleEnd);
+    drawLiveV1ConfidencePlume(ctx, v1PlumeSamples,
+      (sample) => timeToX(sample.beat, displayBeat, plot.left, plot.right, historyBeats, futureBeats),
+      (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), bounds.min, bounds.max);
   }
-  ctx.stroke();
-  // A stationary clock has no horizontal history to draw. Keep the current
-  // estimate visible at NOW so activating the microphone gives immediate,
-  // unambiguous feedback before playback starts.
-  if (Number.isFinite(state.livePitch)) {
-    const radius = rect.width < 700 ? 4 : 5;
-    const y = Math.max(plot.top + radius, Math.min(
-      plot.bottom - radius,
-      pitchToY(state.livePitch, bounds.min, bounds.max, plot.top, plot.bottom),
-    ));
-    ctx.fillStyle = '#68d1cb';
-    ctx.beginPath(); ctx.arc(nowX, y, radius, 0, Math.PI * 2); ctx.fill();
+  if (state.pitchLayers.crepe && (state.neuralLive.enabled || state.neuralLive.samples.length)) {
+    const plumeSamples = state.neuralLive.samples.filter((sample) => sample.beat >= visibleStart && sample.beat <= visibleEnd);
+    drawLiveCrepePlume(ctx, plumeSamples,
+      (sample) => timeToX(sample.beat, displayBeat, plot.left, plot.right, historyBeats, futureBeats),
+      (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), bounds.min, bounds.max);
   }
   ctx.restore(); ctx.shadowBlur = 0;
 
@@ -664,18 +916,19 @@ function renderMetronome(snapshot) {
   const measure = state.occurrenceMeasures[measureIndex];
   const metronomeBeatLength = 4 / (measure?.timeSignatureDenominator ?? 4);
   const beatInMeasure = Math.max(0, Math.floor(((snapshot.beat - (measure?.startBeat ?? 0)) / metronomeBeatLength) + 0.015));
-  const beatToken = `${measureIndex}:${beatInMeasure}`;
+  const metricalBeatIndex = (measure?.beatOffset ?? 0) + beatInMeasure;
+  const beatToken = `${measureIndex}:${metricalBeatIndex}`;
   if (state.lastMetronomeBeat == null) {
     state.lastMetronomeBeat = beatToken;
     const nearestPulse = (measure?.startBeat ?? 0) + Math.round((snapshot.beat - (measure?.startBeat ?? 0)) / metronomeBeatLength) * metronomeBeatLength;
     if (Math.abs(snapshot.beat - nearestPulse) < 0.06) {
-      playMetronomeClick(beatInMeasure === 0);
+      playMetronomeClick(metricalBeatIndex === 0);
     }
     return;
   }
   if (beatToken === state.lastMetronomeBeat) return;
   state.lastMetronomeBeat = beatToken;
-  playMetronomeClick(beatInMeasure === 0);
+  playMetronomeClick(metricalBeatIndex === 0);
 }
 
 function renderSyncDebug(snapshot) {
@@ -812,7 +1065,8 @@ async function stopMicrophone() {
   if (state.microphoneContext && state.microphoneContext.state !== 'closed') await state.microphoneContext.close();
   state.microphoneStream = null; state.microphoneContext = null; state.microphoneSource = null; state.microphoneAnalyser = null; state.microphoneSilencer = null; state.microphoneBuffer = null;
   state.microphoneStatus = 'idle'; state.livePitch = null; state.microphoneRms = 0; state.pitchSmoother.reset();
-  updateMicrophoneButton(); render();
+  state.neuralLive.generation += 1; state.neuralLive.enabled = false; state.neuralLive.loading = false; state.neuralLive.inFlight = false; state.neuralLive.latestPitch = null; state.neuralLive.samples = [];
+  updateMicrophoneButton(); updateNeuralLiveUi(); render();
 }
 
 async function toggleMicrophone() {
@@ -847,6 +1101,8 @@ function preferenceKey() {
   return `choir-practice:${state.bundleManifest.piece_id ?? state.runtime.title}:${state.runtime.selectedPartId}`;
 }
 
+const LAST_PRACTICE_PIECE_KEY = 'choir-last-practice-piece';
+
 function pitchHistoryKey() { return `${preferenceKey()}:pitch-history`; }
 
 function savePitchHistory() {
@@ -880,17 +1136,35 @@ function clearPitchHistory() {
   state.pitchSamples = [];
   state.pitchTakeId = 1;
   state.lastSampleMs = null;
+  // Benchmark/restart is a clean acquisition boundary for both estimators.
+  // CREPE samples are transient by design and must never visually bleed into
+  // the following run.
+  state.neuralLive.samples = [];
+  state.neuralLive.latestPitch = null;
+  state.neuralLive.durationsMs = [];
+  state.neuralLive.v1DurationsMs = [];
+  state.neuralLive.lastLatencyMs = null;
+  updateNeuralLiveUi();
   try { localStorage.removeItem(pitchHistoryKey()); } catch (_) { /* Storage is optional. */ }
 }
 
-function groundTruthStore(mode = 'readonly') {
+function recordingStore(storeName, mode = 'readonly') {
   return new Promise((resolve, reject) => {
-    const request = indexedDB.open('choir-ground-truth', 1);
-    request.onupgradeneeded = () => request.result.createObjectStore('takes', { keyPath: 'id' });
+    const request = indexedDB.open('choir-ground-truth', 2);
+    request.onupgradeneeded = () => {
+      const database = request.result;
+      if (!database.objectStoreNames.contains('takes')) database.createObjectStore('takes', { keyPath: 'id' });
+      if (!database.objectStoreNames.contains('benchmark-takes')) database.createObjectStore('benchmark-takes', { keyPath: 'id' });
+      if (!database.objectStoreNames.contains('benchmark-sessions')) database.createObjectStore('benchmark-sessions', { keyPath: 'id' });
+    };
     request.onerror = () => reject(request.error);
-    request.onsuccess = () => resolve(request.result.transaction('takes', mode).objectStore('takes'));
+    request.onsuccess = () => resolve(request.result.transaction(storeName, mode).objectStore(storeName));
   });
 }
+
+function groundTruthStore(mode = 'readonly') { return recordingStore('takes', mode); }
+function benchmarkStore(mode = 'readonly') { return recordingStore('benchmark-takes', mode); }
+function benchmarkSessionStore(mode = 'readonly') { return recordingStore('benchmark-sessions', mode); }
 
 async function refreshGroundTruthCount() {
   try {
@@ -947,6 +1221,1018 @@ async function approveGroundTruthCapture() {
   capture.recorder.stop();
 }
 
+const BENCHMARK_SCENARIOS = [
+  ['T01', 'Note tenute — vocali nel registro tenore'],
+  ['T02', 'Scala/gradi congiunti — legato o staccato'],
+  ['T03', 'Intervalli reali dal repertorio'],
+  ['T04', 'Salti reali di ottava'],
+  ['T05', 'Note brevi, testo e consonanti'],
+  ['T06', 'Nota sostenuta con vibrato naturale'],
+  ['T07', 'Pause e respirazioni'],
+  ['E01', 'Errore intenzionale — ±1 o ±2 semitoni'],
+  ['E02', 'Errore intenzionale — ottava sbagliata'],
+  ['E03', 'Intonazione controllata — ±20 / ±35 / ±60 cent'],
+  ['N01', 'Condizione annotata — rumore o leakage'],
+];
+
+function putLocalRecord(store, value) {
+  return new Promise((resolve, reject) => {
+    const request = store.put(value);
+    request.onsuccess = resolve;
+    request.onerror = () => reject(request.error);
+  });
+}
+
+async function refreshBenchmarkCount() {
+  try {
+    const store = await benchmarkStore();
+    const count = await new Promise((resolve, reject) => {
+      const request = store.count(); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    els.benchmarkCount.textContent = `${count} take benchmark salvati in questo browser.`;
+  } catch (_) { els.benchmarkCount.textContent = 'Database locale non disponibile.'; }
+}
+
+function selectedBenchmarkTake() {
+  return state.benchmark.savedTakes.find((take) => take.id === state.benchmark.selectedTakeId) ?? null;
+}
+
+function benchmarkScenarioLabel(id) {
+  return BENCHMARK_SCENARIOS.find(([scenarioId]) => scenarioId === id)?.[1] ?? id;
+}
+
+function formatClock(seconds) {
+  const total = Math.max(0, Math.floor(seconds || 0));
+  return `${Math.floor(total / 60)}:${String(total % 60).padStart(2, '0')}`;
+}
+
+function benchmarkPitchBounds(take) {
+  const targets = (take.targetEvents ?? []).filter((event) => Number.isFinite(event.midiPitch));
+  const frames = (take.frames ?? []).filter((frame) => Number.isFinite(frame.trackedHz) || Number.isFinite(frame.rawHz));
+  const pitches = [
+    ...targets.map((event) => event.midiPitch + (take.transpose ?? 0)),
+    ...frames.flatMap((frame) => [frame.trackedHz, frame.rawHz]
+      .filter(Number.isFinite)
+      .map((hz) => 69 + 12 * Math.log2(hz / 440))),
+    ...(take._v3Frames ?? []).map((frame) => frame.v3Hz)
+      .filter(Number.isFinite)
+      .map((hz) => 69 + 12 * Math.log2(hz / 440)),
+    ...(take._v4Frames ?? []).map((frame) => frame.v4Hz)
+      .filter(Number.isFinite)
+      .map((hz) => 69 + 12 * Math.log2(hz / 440)),
+    ...(take._v5Frames ?? []).map((frame) => frame.v5Hz)
+      .filter(Number.isFinite)
+      .map((hz) => 69 + 12 * Math.log2(hz / 440)),
+  ];
+  return {
+    min: Math.floor(Math.min(...pitches, 57)) - 1,
+    max: Math.ceil(Math.max(...pitches, 62)) + 1,
+  };
+}
+
+function benchmarkV2Frames(take) {
+  if (take._v2Frames) return take._v2Frames;
+  const tracker = new OctaveAwarePitchTracker();
+  let fallbackTimestampMs = 0;
+  take._v2Frames = (take.frames ?? []).map((frame) => {
+    const recordedTimestampMs = Number(frame.audioTimeSec) * 1000;
+    const timestampMs = Number.isFinite(recordedTimestampMs) ? recordedTimestampMs : fallbackTimestampMs;
+    fallbackTimestampMs = timestampMs + 1000 / 60;
+    const result = tracker.update({
+      hz: frame.rawHz,
+      rms: frame.rms,
+      clarity: frame.clarity,
+      confidence: Math.max(0, Math.min(1, (frame.clarity ?? 0) * Math.min(1, (frame.rms ?? 0) / .08))),
+    }, timestampMs);
+    return { ...frame, v2Hz: result.accepted && Number.isFinite(result.hz) ? result.hz : null, v2Reason: result.rejectionReason };
+  });
+  return take._v2Frames;
+}
+
+function benchmarkTargetAt(take, beat) {
+  const target = (take.targetEvents ?? []).find((event) => event.onsetBeat <= beat && beat < event.onsetBeat + event.durationBeats);
+  return target?.midiPitch == null ? null : target.midiPitch + (take.transpose ?? 0);
+}
+
+function benchmarkBeatAtAudioTime(take, audioTimeSec) {
+  const frames = take.frames ?? [];
+  if (!frames.length) return Number(take.startBeat) || 0;
+  let low = 0, high = frames.length - 1;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if ((frames[middle].audioTimeSec ?? -Infinity) < audioTimeSec) low = middle + 1; else high = middle;
+  }
+  const after = frames[low], before = frames[Math.max(0, low - 1)];
+  const span = (after.audioTimeSec ?? 0) - (before.audioTimeSec ?? 0);
+  if (span <= 0) return after.beat ?? before.beat ?? (Number(take.startBeat) || 0);
+  const ratio = Math.max(0, Math.min(1, (audioTimeSec - before.audioTimeSec) / span));
+  return (before.beat ?? 0) + ((after.beat ?? before.beat ?? 0) - (before.beat ?? 0)) * ratio;
+}
+
+function resampledMonoWindow(audio, centerSeconds, sampleRate = 8000, windowSize = 1024) {
+  const output = new Float32Array(windowSize);
+  const channels = Array.from({ length: audio.numberOfChannels }, (_, index) => audio.getChannelData(index));
+  const startSeconds = centerSeconds - windowSize / sampleRate / 2;
+  for (let index = 0; index < windowSize; index += 1) {
+    const sourcePosition = (startSeconds + index / sampleRate) * audio.sampleRate;
+    const leftIndex = Math.floor(sourcePosition), fraction = sourcePosition - leftIndex;
+    if (leftIndex < 0 || leftIndex + 1 >= audio.length) continue;
+    let mixed = 0;
+    for (const channel of channels) mixed += channel[leftIndex] * (1 - fraction) + channel[leftIndex + 1] * fraction;
+    output[index] = mixed / channels.length;
+  }
+  return output;
+}
+
+async function resampleAudioForV3(audio, sampleRate) {
+  const OfflineContextClass = window.OfflineAudioContext || window.webkitOfflineAudioContext;
+  if (!OfflineContextClass || audio.sampleRate === sampleRate) return audio;
+  const context = new OfflineContextClass(1, Math.ceil(audio.duration * sampleRate), sampleRate);
+  const source = context.createBufferSource();
+  source.buffer = audio; source.connect(context.destination); source.start();
+  return context.startRendering();
+}
+
+function setBenchmarkV3Status(take, message) {
+  take._v3Status = message;
+  if (selectedBenchmarkTake()?.id === take.id) els.benchmarkAnalysisV3Status.textContent = message;
+}
+
+async function calculateBenchmarkV3(take) {
+  if (!take.audio) throw new Error('Audio della take non disponibile');
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) throw new Error('Decodifica audio non supportata dal browser');
+  const context = new AudioContextClass();
+  try {
+    const decodedAudio = await context.decodeAudioData(await take.audio.arrayBuffer());
+    const hopSeconds = .05, analysisRate = 8000, windowSize = 1024;
+    const audio = await resampleAudioForV3(decodedAudio, analysisRate);
+    const totalFrames = Math.max(1, Math.floor(audio.duration / hopSeconds));
+    const candidateFrames = [];
+    for (let index = 0; index < totalFrames; index += 1) {
+      const relativeTimeSec = Math.min(audio.duration, index * hopSeconds + hopSeconds / 2);
+      const absoluteAudioTimeSec = (take.startAudioTimeSec ?? 0) + relativeTimeSec;
+      const beat = benchmarkBeatAtAudioTime(take, absoluteAudioTimeSec);
+      const window = resampledMonoWindow(audio, relativeTimeSec, analysisRate, windowSize);
+      const result = yinCandidates(window, analysisRate);
+      candidateFrames.push({ ...result, beat, audioTimeSec: absoluteAudioTimeSec });
+      if (index % 12 === 0) {
+        setBenchmarkV3Status(take, `V3: analisi multi-candidata ${Math.round((index + 1) / totalFrames * 100)}%`);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+    }
+    const path = decodeYinCandidatePath(candidateFrames);
+    take._v3Frames = candidateFrames.map((frame, index) => ({
+      beat: frame.beat,
+      audioTimeSec: frame.audioTimeSec,
+      targetMidiPitch: benchmarkTargetAt(take, frame.beat),
+      v3Hz: path[index]?.unvoiced ? null : path[index]?.hz ?? null,
+      v3Clarity: path[index]?.clarity ?? 0,
+    }));
+    setBenchmarkV3Status(take, 'V3 pronta · YIN multi-candidato + decoder temporale');
+  } finally {
+    await context.close();
+  }
+}
+
+function ensureBenchmarkV3(take) {
+  if (take._v3Frames) return Promise.resolve(take._v3Frames);
+  if (take._v3Promise) return take._v3Promise;
+  setBenchmarkV3Status(take, 'V3: preparo l’analisi audio…');
+  take._v3Promise = calculateBenchmarkV3(take).catch((error) => {
+    setBenchmarkV3Status(take, `V3 non disponibile: ${error.message ?? 'errore di analisi'}`);
+  }).finally(() => {
+    take._v3Promise = null;
+    if (selectedBenchmarkTake()?.id === take.id) {
+      renderBenchmarkAnalysisMetrics(take);
+      drawBenchmarkAnalysisRoll(take);
+    }
+  });
+  return take._v3Promise;
+}
+
+function setBenchmarkV4Status(take, message) {
+  take._v4Status = message;
+  if (selectedBenchmarkTake()?.id === take.id) els.benchmarkAnalysisV4Status.textContent = message;
+}
+
+async function calculateBenchmarkV4(take) {
+  if (!take.audio) throw new Error('Audio della take non disponibile');
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) throw new Error('Decodifica audio non supportata dal browser');
+  const context = new AudioContextClass();
+  try {
+    const decodedAudio = await context.decodeAudioData(await take.audio.arrayBuffer());
+    const hopSeconds = .05, analysisRate = 8000, windowSize = 1024;
+    const audio = await resampleAudioForV3(decodedAudio, analysisRate);
+    const totalFrames = Math.max(1, Math.floor(audio.duration / hopSeconds));
+    const output = [];
+    for (let index = 0; index < totalFrames; index += 1) {
+      const relativeTimeSec = Math.min(audio.duration, index * hopSeconds + hopSeconds / 2);
+      const absoluteAudioTimeSec = (take.startAudioTimeSec ?? 0) + relativeTimeSec;
+      const beat = benchmarkBeatAtAudioTime(take, absoluteAudioTimeSec);
+      const window = resampledMonoWindow(audio, relativeTimeSec, analysisRate, windowSize);
+      const result = mpmCandidates(window, analysisRate, { maxCandidates: 1, minClarity: .78 });
+      output.push({
+        beat, audioTimeSec: absoluteAudioTimeSec,
+        targetMidiPitch: benchmarkTargetAt(take, beat),
+        v4Hz: result.candidates[0]?.hz ?? null,
+        v4Clarity: result.candidates[0]?.clarity ?? 0,
+      });
+      if (index % 12 === 0) {
+        setBenchmarkV4Status(take, `V4: analisi MPM ${Math.round((index + 1) / totalFrames * 100)}%`);
+        await new Promise((resolve) => requestAnimationFrame(resolve));
+      }
+    }
+    take._v4Frames = output;
+    setBenchmarkV4Status(take, 'V4 pronta · MPM/NSDF con soglia voicing 0,78');
+  } finally {
+    await context.close();
+  }
+}
+
+function ensureBenchmarkV4(take) {
+  if (take._v4Frames) return Promise.resolve(take._v4Frames);
+  if (take._v4Promise) return take._v4Promise;
+  setBenchmarkV4Status(take, 'V4: preparo l’analisi audio…');
+  take._v4Promise = calculateBenchmarkV4(take).catch((error) => {
+    setBenchmarkV4Status(take, `V4 non disponibile: ${error.message ?? 'errore di analisi'}`);
+  }).finally(() => {
+    take._v4Promise = null;
+    if (selectedBenchmarkTake()?.id === take.id) {
+      renderBenchmarkAnalysisMetrics(take);
+      drawBenchmarkAnalysisRoll(take);
+    }
+  });
+  return take._v4Promise;
+}
+
+// v5 is deliberately an acoustic comparison, not a score-aware correction.
+// The model file is served with the app; ONNX Runtime is a pinned browser
+// dependency. Audio samples and derived frames remain in this browser.
+const CREPE_TINY_MODEL_URL = 'models/crepe_onnx_tiny.onnx';
+const CREPE_RUNTIME_BASE_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.0/dist/';
+let crepeSessionPromise = null;
+
+function normaliseCrepeFrame(samples) {
+  let mean = 0;
+  for (const sample of samples) mean += sample;
+  mean /= samples.length;
+  let variance = 0;
+  for (const sample of samples) variance += (sample - mean) ** 2;
+  const deviation = Math.sqrt(variance / samples.length);
+  const output = new Float32Array(samples.length);
+  if (deviation < 1e-5) return output;
+  for (let index = 0; index < samples.length; index += 1) output[index] = (samples[index] - mean) / deviation;
+  return output;
+}
+
+async function crepeSession() {
+  const ort = window.ort;
+  if (!ort?.InferenceSession || !ort?.Tensor) {
+    throw new Error('runtime ONNX non caricato: controlla la connessione e ricarica la pagina');
+  }
+  if (!crepeSessionPromise) {
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.wasmPaths = CREPE_RUNTIME_BASE_URL;
+    crepeSessionPromise = ort.InferenceSession.create(CREPE_TINY_MODEL_URL, { executionProviders: ['wasm'] });
+  }
+  return crepeSessionPromise;
+}
+
+function setBenchmarkV5Status(take, message) {
+  take._v5Status = message;
+  if (selectedBenchmarkTake()?.id === take.id && els.benchmarkAnalysisV5Status) els.benchmarkAnalysisV5Status.textContent = message;
+}
+
+// This tracker exists only in the offline analysis page. Its state is a
+// distribution over pitch bins plus an implicit unvoiced state; it never feeds
+// the live v1 scorer. A 20-cent grid preserves CREPE's native bin resolution.
+const MUSIC_TRACKER_CONFIG = Object.freeze({
+  centsStep: 20,
+  contextSemitones: 18,
+  minMidi: 36,
+  maxMidi: 84,
+  localTransitionSemitones: .65,
+  unexpectedTransitionMass: .0015,
+  scorePriorMaximum: .24,
+  scoreBoundaryToleranceBeats: .45,
+  scoreDestinationSemitones: .35,
+});
+
+function crepeBinMidi(index) {
+  const cents = 1997.3794084376191 + index * (7180 / 359);
+  const hz = 10 * Math.pow(2, cents / 1200);
+  return 69 + 12 * Math.log2(hz / 440);
+}
+
+function crepeSalienceAtMidi(salience, midi) {
+  if (!salience?.length) return 0;
+  const cents = 1200 * Math.log2((440 * Math.pow(2, (midi - 69) / 12)) / 10);
+  const position = (cents - 1997.3794084376191) / (7180 / 359);
+  const left = Math.floor(position), fraction = position - left;
+  if (left < 0 || left + 1 >= salience.length) return 0;
+  return Math.max(0, salience[left] * (1 - fraction) + salience[left + 1] * fraction);
+}
+
+function makeMusicTrackerGrid(take, frames) {
+  const targets = (take.targetEvents ?? []).map((event) => event.midiPitch + (take.transpose ?? 0)).filter(Number.isFinite);
+  const observed = frames.map((frame) => Number.isFinite(frame.v5Hz) ? 69 + 12 * Math.log2(frame.v5Hz / 440) : null).filter(Number.isFinite);
+  const source = [...targets, ...observed];
+  const low = Math.max(MUSIC_TRACKER_CONFIG.minMidi, Math.floor(Math.min(...source, 50) - MUSIC_TRACKER_CONFIG.contextSemitones));
+  const high = Math.min(MUSIC_TRACKER_CONFIG.maxMidi, Math.ceil(Math.max(...source, 65) + MUSIC_TRACKER_CONFIG.contextSemitones));
+  const step = MUSIC_TRACKER_CONFIG.centsStep / 100;
+  const count = Math.max(2, Math.round((high - low) / step) + 1);
+  return Float32Array.from({ length: count }, (_, index) => low + index * step);
+}
+
+function normalizedCrepeSalience(frame, grid) {
+  const output = new Float32Array(grid.length);
+  let maximum = 0;
+  for (let index = 0; index < grid.length; index += 1) {
+    const value = crepeSalienceAtMidi(frame.v5Salience, grid[index]);
+    output[index] = value; maximum = Math.max(maximum, value);
+  }
+  if (maximum > 0) for (let index = 0; index < output.length; index += 1) output[index] /= maximum;
+  return output;
+}
+
+function scoreBoundaryWeight(take, frame) {
+  const tolerance = MUSIC_TRACKER_CONFIG.scoreBoundaryToleranceBeats;
+  let closest = Infinity;
+  for (const event of take.targetEvents ?? []) {
+    if (!Number.isFinite(event.onsetBeat) || event.onsetBeat <= (take.startBeat ?? 0) + .001) continue;
+    closest = Math.min(closest, Math.abs(frame.beat - event.onsetBeat));
+  }
+  if (closest > tolerance) return 0;
+  return MUSIC_TRACKER_CONFIG.scorePriorMaximum * Math.exp(-.5 * (closest / tolerance) ** 2);
+}
+
+function scoreDestinationDistribution(grid, targetMidi) {
+  const output = new Float32Array(grid.length);
+  if (!Number.isFinite(targetMidi)) { output.fill(1 / grid.length); return output; }
+  let total = 0;
+  for (let index = 0; index < grid.length; index += 1) {
+    const z = (grid[index] - targetMidi) / MUSIC_TRACKER_CONFIG.scoreDestinationSemitones;
+    output[index] = Math.exp(-.5 * z * z); total += output[index];
+  }
+  for (let index = 0; index < grid.length; index += 1) output[index] = .75 * output[index] / total + .25 / grid.length;
+  return output;
+}
+
+async function calculateMusicInformedPosteriors(take) {
+  const frames = take._v5Frames ?? [];
+  if (!frames.length || !frames[0].v5Salience) return;
+  const grid = makeMusicTrackerGrid(take, frames), count = grid.length;
+  const kernel = new Float32Array(count * count);
+  for (let previous = 0; previous < count; previous += 1) {
+    let total = 0;
+    for (let current = 0; current < count; current += 1) {
+      const value = Math.exp(-Math.abs(grid[current] - grid[previous]) / MUSIC_TRACKER_CONFIG.localTransitionSemitones)
+        + MUSIC_TRACKER_CONFIG.unexpectedTransitionMass;
+      kernel[current * count + previous] = value; total += value;
+    }
+    for (let current = 0; current < count; current += 1) kernel[current * count + previous] /= total;
+  }
+  const raw = [], audio = [], score = [];
+  let audioPrevious = Float32Array.from({ length: count }, () => 1 / count), scorePrevious = Float32Array.from(audioPrevious);
+  let audioUnvoiced = .5, scoreUnvoiced = .5;
+  for (let frameIndex = 0; frameIndex < frames.length; frameIndex += 1) {
+    const frame = frames[frameIndex], salience = normalizedCrepeSalience(frame, grid);
+    raw.push(salience);
+    const confidence = Math.max(0, Math.min(1, frame.v5Confidence ?? 0));
+    const update = (previous, previousUnvoiced, useScore) => {
+      const predicted = new Float32Array(count);
+      for (let current = 0; current < count; current += 1) {
+        let transitionSum = 0;
+        for (let previousIndex = 0; previousIndex < count; previousIndex += 1) transitionSum += previous[previousIndex] * kernel[current * count + previousIndex];
+        predicted[current] = .91 * transitionSum + previousUnvoiced * .09 / count;
+      }
+      let predictedUnvoiced = previousUnvoiced * .86 + .06;
+      if (useScore) {
+        const lambda = scoreBoundaryWeight(take, frame);
+        if (lambda > 0) {
+          const destination = scoreDestinationDistribution(grid, benchmarkTargetAt(take, frame.beat));
+          for (let index = 0; index < count; index += 1) predicted[index] = (1 - lambda) * predicted[index] + lambda * destination[index];
+          predictedUnvoiced *= 1 - lambda;
+        }
+      }
+      const posterior = new Float32Array(count);
+      let total = 0;
+      for (let index = 0; index < count; index += 1) {
+        posterior[index] = predicted[index] * (.015 + salience[index]); total += posterior[index];
+      }
+      let unvoiced = predictedUnvoiced * (.03 + 1 - confidence); total += unvoiced;
+      if (total <= 0 || !Number.isFinite(total)) { posterior.fill(1 / count); return { posterior, unvoiced: .5 }; }
+      for (let index = 0; index < count; index += 1) posterior[index] /= total;
+      unvoiced /= total;
+      return { posterior, unvoiced };
+    };
+    const audioResult = update(audioPrevious, audioUnvoiced, false);
+    const scoreResult = update(scorePrevious, scoreUnvoiced, true);
+    audio.push(audioResult.posterior); score.push(scoreResult.posterior);
+    audioPrevious = audioResult.posterior; audioUnvoiced = audioResult.unvoiced;
+    scorePrevious = scoreResult.posterior; scoreUnvoiced = scoreResult.unvoiced;
+    if (frameIndex % 18 === 0) {
+      setBenchmarkV5Status(take, `V5: posterior probabilistico ${Math.round((frameIndex + 1) / frames.length * 100)}%`);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+  }
+  take._v5Posteriors = { grid, raw, audio, score };
+}
+
+async function calculateBenchmarkV5(take) {
+  if (!take.audio) throw new Error('Audio della take non disponibile');
+  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+  if (!AudioContextClass) throw new Error('Decodifica audio non supportata dal browser');
+  setBenchmarkV5Status(take, 'V5: carico CREPE tiny locale…');
+  const [session, context] = await Promise.all([crepeSession(), Promise.resolve(new AudioContextClass())]);
+  try {
+    const decodedAudio = await context.decodeAudioData(await take.audio.arrayBuffer());
+    const hopSeconds = .05, analysisRate = 16000, windowSize = 1024, batchSize = 48;
+    const audio = await resampleAudioForV3(decodedAudio, analysisRate);
+    const totalFrames = Math.max(1, Math.floor(audio.duration / hopSeconds));
+    const output = [];
+    const inputName = session.inputNames[0], outputName = session.outputNames[0];
+    for (let start = 0; start < totalFrames; start += batchSize) {
+      const count = Math.min(batchSize, totalFrames - start);
+      const batch = new Float32Array(count * windowSize);
+      const metadata = [];
+      for (let offset = 0; offset < count; offset += 1) {
+        const index = start + offset;
+        const relativeTimeSec = Math.min(audio.duration, index * hopSeconds + hopSeconds / 2);
+        const absoluteAudioTimeSec = (take.startAudioTimeSec ?? 0) + relativeTimeSec;
+        const beat = benchmarkBeatAtAudioTime(take, absoluteAudioTimeSec);
+        batch.set(normaliseCrepeFrame(resampledMonoWindow(audio, relativeTimeSec, analysisRate, windowSize)), offset * windowSize);
+        metadata.push({ beat, audioTimeSec: absoluteAudioTimeSec });
+      }
+      const ort = window.ort;
+      const results = await session.run({ [inputName]: new ort.Tensor('float32', batch, [count, windowSize]) });
+      const probabilities = results[outputName]?.data;
+      if (!probabilities || probabilities.length < count * 360) throw new Error('output CREPE non valido');
+      for (let offset = 0; offset < count; offset += 1) {
+        const decoded = decodeCrepeProbabilities(probabilities.subarray(offset * 360, (offset + 1) * 360));
+        const frame = metadata[offset];
+        output.push({
+          ...frame,
+          targetMidiPitch: benchmarkTargetAt(take, frame.beat),
+          v5Hz: decoded.hz,
+          v5Confidence: decoded.confidence,
+          v5Salience: Float32Array.from(probabilities.subarray(offset * 360, (offset + 1) * 360)),
+        });
+      }
+      setBenchmarkV5Status(take, `V5: inferenza CREPE tiny ${Math.round((start + count) / totalFrames * 100)}%`);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
+    }
+    take._v5Frames = output;
+    await calculateMusicInformedPosteriors(take);
+    setBenchmarkV5Status(take, 'V5 pronta · salience, posterior audio e score-aware');
+  } finally {
+    await context.close();
+  }
+}
+
+function ensureBenchmarkV5(take) {
+  if (take._v5Frames) return Promise.resolve(take._v5Frames);
+  if (take._v5Promise) return take._v5Promise;
+  setBenchmarkV5Status(take, 'V5: preparo l’analisi audio…');
+  take._v5Promise = calculateBenchmarkV5(take).catch((error) => {
+    setBenchmarkV5Status(take, `V5 non disponibile: ${error.message ?? 'errore di analisi'}`);
+  }).finally(() => {
+    take._v5Promise = null;
+    if (selectedBenchmarkTake()?.id === take.id) {
+      renderBenchmarkAnalysisMetrics(take);
+      drawBenchmarkAnalysisRoll(take);
+    }
+  });
+  return take._v5Promise;
+}
+
+// The blur radius below is a constant display kernel, deliberately separate
+// from posterior entropy. Statistical uncertainty is carried by the vertical
+// spread of probability mass itself, not by this cosmetic glow.
+function drawProbabilityPlume(context, frames, distributions, grid, xAt, yAt, viewStartBeat, viewEndBeat, rgb, maximumAlpha) {
+  if (!distributions?.length || !grid?.length) return;
+  context.save(); context.globalCompositeOperation = 'screen';
+  for (let frameIndex = 0; frameIndex < Math.min(frames.length, distributions.length); frameIndex += 1) {
+    const frame = frames[frameIndex];
+    if (frame.beat < viewStartBeat || frame.beat > viewEndBeat) continue;
+    const distribution = distributions[frameIndex];
+    let peak = 0;
+    for (let index = 0; index < distribution.length; index += 1) peak = Math.max(peak, distribution[index]);
+    if (peak <= 0) continue;
+    const x = xAt(frame.beat), next = frames[frameIndex + 1];
+    const halfWidth = Math.max(1, Math.min(5, next ? Math.abs(xAt(next.beat) - x) / 2 : 2));
+    for (let index = 0; index < distribution.length; index += 1) {
+      const relative = distribution[index] / peak;
+      if (relative < .13) continue;
+      const alpha = maximumAlpha * Math.pow(relative, .7);
+      const y = yAt(grid[index]);
+      context.fillStyle = `rgba(${rgb},${alpha})`;
+      context.fillRect(x - halfWidth, y - 3, halfWidth * 2, 6);
+    }
+  }
+  context.restore();
+}
+
+function drawBenchmarkAnalysisRoll(take) {
+  const canvas = els.benchmarkAnalysisRoll;
+  const rect = canvas.getBoundingClientRect();
+  if (!take || rect.width < 2 || rect.height < 2) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2);
+  canvas.width = Math.round(rect.width * dpr); canvas.height = Math.round(rect.height * dpr);
+  const ctx = canvas.getContext('2d'); ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const width = rect.width, height = rect.height;
+  const plot = { left: 52, right: width - 14, top: 16, bottom: height - 31 };
+  ctx.clearRect(0, 0, width, height);
+  const frames = (take.frames ?? []).filter((frame) => Number.isFinite(frame.beat));
+  const v5Frames = take._v5Frames ?? [];
+  const targets = (take.targetEvents ?? []).filter((event) => Number.isFinite(event.midiPitch));
+  const baseBounds = benchmarkPitchBounds(take);
+  const baseMinPitch = baseBounds.min, baseMaxPitch = baseBounds.max;
+  const startBeat = Number(take.startBeat) || 0, endBeat = Math.max(startBeat + .001, Number(take.endBeat) || startBeat + 1);
+  const view = state.benchmark.analysisView;
+  view.centerBeat ??= (startBeat + endBeat) / 2;
+  const totalBeatSpan = endBeat - startBeat;
+  const beatSpan = Math.max(.15, totalBeatSpan / view.timeZoom);
+  const viewStartBeat = Math.max(startBeat, Math.min(endBeat - beatSpan, view.centerBeat - beatSpan / 2));
+  const viewEndBeat = viewStartBeat + beatSpan;
+  const basePitchSpan = Math.max(2, baseMaxPitch - baseMinPitch);
+  const pitchSpan = Math.max(2, basePitchSpan / view.pitchZoom);
+  const baseCenterPitch = (baseMinPitch + baseMaxPitch) / 2 + view.pitchOffset;
+  const minPitch = baseCenterPitch - pitchSpan / 2, maxPitch = baseCenterPitch + pitchSpan / 2;
+  const span = maxPitch - minPitch;
+  const xAt = (beat) => plot.left + (beat - viewStartBeat) / beatSpan * (plot.right - plot.left);
+  const yAt = (pitch) => plot.bottom - (pitch - minPitch) / span * (plot.bottom - plot.top);
+  for (let pitch = Math.ceil(minPitch); pitch <= Math.floor(maxPitch); pitch += 1) {
+    const y = yAt(pitch);
+    const pitchClass = ((pitch % 12) + 12) % 12;
+    const isWhite = [0, 2, 4, 5, 7, 9, 11].includes(pitchClass);
+    const laneHeight = (plot.bottom - plot.top) / span;
+    ctx.fillStyle = isWhite ? 'rgba(166,198,193,.055)' : 'rgba(2,10,14,.32)';
+    ctx.fillRect(plot.left, y - laneHeight / 2, plot.right - plot.left, laneHeight);
+    if (pitchClass === 0 || pitchClass === 5) { ctx.strokeStyle = 'rgba(190,215,211,.24)'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(plot.left, Math.round(y + laneHeight / 2) + .5); ctx.lineTo(plot.right, Math.round(y + laneHeight / 2) + .5); ctx.stroke(); }
+    if (pitchClass === 0 || pitch === Math.round((minPitch + maxPitch) / 2)) { ctx.fillStyle = '#9cb1b0'; ctx.font = '11px Inter, sans-serif'; ctx.textAlign = 'right'; ctx.fillText(noteLabel(pitch), plot.left - 8, y + 4); }
+  }
+  const posterior = take._v5Posteriors;
+  if (posterior) {
+    const layers = state.benchmark.analysisLayers;
+    if (layers.raw) drawProbabilityPlume(ctx, v5Frames, posterior.raw, posterior.grid, xAt, yAt, viewStartBeat, viewEndBeat, '243,166,208', .13);
+    if (layers.audio) drawProbabilityPlume(ctx, v5Frames, posterior.audio, posterior.grid, xAt, yAt, viewStartBeat, viewEndBeat, '99,200,194', .22);
+    if (layers.score) drawProbabilityPlume(ctx, v5Frames, posterior.score, posterior.grid, xAt, yAt, viewStartBeat, viewEndBeat, '190,165,255', .18);
+  }
+  for (const event of targets) {
+    const eventStart = Math.max(viewStartBeat, event.onsetBeat), eventEnd = Math.min(viewEndBeat, event.onsetBeat + event.durationBeats);
+    if (eventEnd <= eventStart) continue;
+    const y = yAt(event.midiPitch + (take.transpose ?? 0));
+    const laneHeight = (plot.bottom - plot.top) / span;
+    ctx.fillStyle = 'rgba(217,168,91,.72)'; ctx.fillRect(xAt(eventStart), y - laneHeight / 2 + 1, Math.max(1, xAt(eventEnd) - xAt(eventStart) - 1), Math.max(4, laneHeight - 2));
+  }
+  for (let beat = Math.ceil(viewStartBeat); beat < viewEndBeat; beat += 1) { ctx.strokeStyle = 'rgba(180,207,203,.12)'; ctx.setLineDash([3, 5]); ctx.beginPath(); ctx.moveTo(Math.round(xAt(beat)) + .5, plot.top); ctx.lineTo(Math.round(xAt(beat)) + .5, plot.bottom); ctx.stroke(); }
+  const measures = [...new Map(targets.filter((event) => event.onsetBeat >= viewStartBeat && event.onsetBeat <= viewEndBeat)
+    .map((event) => [event.measureNumber ?? '?', event])).values()];
+  for (const event of measures) { const x = xAt(event.onsetBeat); ctx.strokeStyle = 'rgba(226,180,101,.5)'; ctx.setLineDash([]); ctx.beginPath(); ctx.moveTo(Math.round(x) + .5, plot.top); ctx.lineTo(Math.round(x) + .5, plot.bottom); ctx.stroke(); ctx.fillStyle = '#d9ad67'; ctx.font = '700 10px Inter, sans-serif'; ctx.textAlign = 'left'; ctx.fillText(`Batt. ${event.measureNumber ?? '?'}`, x + 4, plot.top + 12); }
+  // The raw estimate stays visible separately from the tracker. This is what
+  // lets an inspection distinguish an onset error of YIN itself from a
+  // transition introduced by the continuity/smoothing heuristic.
+  ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(159,180,200,.74)'; ctx.lineWidth = 1.15;
+  drawStablePitchSegments(ctx, stableVisualPitchSegments(frames.filter((frame) => frame.beat >= viewStartBeat && frame.beat <= viewEndBeat), {
+    pitchAt: (frame) => Number.isFinite(frame.rawHz) ? 69 + 12 * Math.log2(frame.rawHz / 440) : null,
+    timeAt: (frame) => frame.audioTimeSec,
+    maxGap: .12,
+    minimumFrames: 2,
+  }), (frame) => xAt(frame.beat), (pitch) => yAt(pitch));
+  ctx.setLineDash([]); ctx.strokeStyle = '#63c8c2'; ctx.lineWidth = 2.2; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.shadowColor = 'rgba(99,200,194,.32)'; ctx.shadowBlur = 5;
+  drawStablePitchSegments(ctx, stableVisualPitchSegments(frames.filter((frame) => frame.beat >= viewStartBeat && frame.beat <= viewEndBeat && frame.voicing === 'voiced'), {
+    pitchAt: (frame) => Number.isFinite(frame.trackedHz) ? 69 + 12 * Math.log2(frame.trackedHz / 440) : null,
+    timeAt: (frame) => frame.audioTimeSec,
+    maxGap: .12,
+    minimumFrames: 3,
+  }), (frame) => xAt(frame.beat), (pitch) => yAt(pitch)); ctx.shadowBlur = 0;
+  if (!take._v5Posteriors) {
+    ctx.strokeStyle = '#f3a6d0'; ctx.lineWidth = 2; ctx.shadowColor = 'rgba(243,166,208,.25)'; ctx.shadowBlur = 4;
+    drawStablePitchSegments(ctx, stableVisualPitchSegments(v5Frames.filter((frame) => frame.beat >= viewStartBeat && frame.beat <= viewEndBeat), {
+      pitchAt: (frame) => Number.isFinite(frame.v5Hz) ? 69 + 12 * Math.log2(frame.v5Hz / 440) : null,
+      timeAt: (frame) => frame.audioTimeSec,
+      maxGap: .12,
+      minimumFrames: 3,
+    }), (frame) => xAt(frame.beat), (pitch) => yAt(pitch));
+  }
+  ctx.shadowBlur = 0;
+  const audio = els.benchmarkAnalysisAudio;
+  const fallbackDuration = Math.max(0, (take.endAudioTimeSec ?? 0) - (take.startAudioTimeSec ?? 0));
+  const duration = Number.isFinite(audio.duration) && audio.duration > 0 ? audio.duration : fallbackDuration;
+  const progress = duration > 0 ? Math.max(0, Math.min(1, audio.currentTime / duration)) : 0;
+  const playheadBeat = startBeat + progress * totalBeatSpan;
+  if (playheadBeat >= viewStartBeat && playheadBeat <= viewEndBeat) { const playhead = xAt(playheadBeat); ctx.strokeStyle = '#f0cf8f'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(Math.round(playhead) + .5, plot.top); ctx.lineTo(Math.round(playhead) + .5, plot.bottom); ctx.stroke(); }
+  const inspectedBeat = view.inspectBeat;
+  if (Number.isFinite(inspectedBeat) && inspectedBeat >= viewStartBeat && inspectedBeat <= viewEndBeat) { const x = xAt(inspectedBeat); ctx.strokeStyle = '#f1f4f1'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(Math.round(x) + .5, plot.top); ctx.lineTo(Math.round(x) + .5, plot.bottom); ctx.stroke(); ctx.setLineDash([]); }
+  ctx.fillStyle = '#718788'; ctx.font = '11px Inter, sans-serif'; ctx.textAlign = 'left'; ctx.fillText('inizio', plot.left, height - 9); ctx.textAlign = 'right'; ctx.fillText('fine', plot.right, height - 9);
+}
+
+function benchmarkTrackStats(frames, hzKey, accepted) {
+  const voiced = frames.filter((frame) => accepted(frame) && Number.isFinite(frame[hzKey]));
+  const cents = voiced.map((frame) => frame.targetMidiPitch == null ? null
+    : 1200 * Math.log2(frame[hzKey] / pitchToHz(frame.targetMidiPitch))).filter(Number.isFinite).map(Math.abs).sort((a, b) => a - b);
+  let largeJumps = 0;
+  for (let index = 1; index < voiced.length; index += 1) {
+    const previous = voiced[index - 1], current = voiced[index];
+    const elapsed = Math.abs((current.audioTimeSec ?? 0) - (previous.audioTimeSec ?? 0));
+    if (elapsed <= .12 && Math.abs(1200 * Math.log2(current[hzKey] / previous[hzKey])) > 700) largeJumps += 1;
+  }
+  return { voiced, cents, largeJumps };
+}
+
+function benchmarkV1OnComparisonGrid(take, comparisonFrames) {
+  const source = take.frames ?? [];
+  let sourceIndex = 0;
+  return comparisonFrames.map((frame) => {
+    while (sourceIndex + 1 < source.length
+      && Math.abs((source[sourceIndex + 1].audioTimeSec ?? 0) - frame.audioTimeSec) <= Math.abs((source[sourceIndex].audioTimeSec ?? 0) - frame.audioTimeSec)) sourceIndex += 1;
+    const nearest = source[sourceIndex] ?? {};
+    return { ...frame, trackedHz: nearest.voicing === 'voiced' ? nearest.trackedHz : null };
+  });
+}
+
+function benchmarkMetrics(take) {
+  const frames = take.frames ?? [];
+  const duration = Math.max(0, (take.endAudioTimeSec ?? 0) - (take.startAudioTimeSec ?? 0));
+  const median = (stats) => stats.cents.length ? stats.cents[Math.floor(stats.cents.length / 2)] : null;
+  if (!take._v5Frames) {
+    const v1 = benchmarkTrackStats(frames, 'trackedHz', (frame) => frame.voicing === 'voiced');
+    return [['Durata', formatClock(duration)], ['Frame acquisiti', String(frames.length)],
+      ['V1 · voce tracciata', `${frames.length ? Math.round(v1.voiced.length / frames.length * 100) : 0}%`],
+      ['V1 · errore mediano', median(v1) == null ? 'n/d' : `${Math.round(median(v1))} ¢`],
+      ['V1 · salti >700¢', String(v1.largeJumps)], ['V5 · stato', take._v5Status ?? 'in elaborazione']];
+  }
+  const v1Frames = benchmarkV1OnComparisonGrid(take, take._v5Frames);
+  const v1 = benchmarkTrackStats(v1Frames, 'trackedHz', () => true);
+  const v5 = benchmarkTrackStats(take._v5Frames, 'v5Hz', () => true);
+  const summary = [['Durata', formatClock(duration)], ['Frame confronto', String(take._v5Frames.length)],
+    ['V1 · voce tracciata', `${v1Frames.length ? Math.round(v1.voiced.length / v1Frames.length * 100) : 0}%`],
+    ['V1 · errore mediano', median(v1) == null ? 'n/d' : `${Math.round(median(v1))} ¢`],
+    ['V1 · salti >700¢', String(v1.largeJumps)]];
+  return [...summary,
+    ['V5 · voce tracciata', `${take._v5Frames.length ? Math.round(v5.voiced.length / take._v5Frames.length * 100) : 0}%`],
+    ['V5 · errore mediano', median(v5) == null ? 'n/d' : `${Math.round(median(v5))} ¢`],
+    ['V5 · salti >700¢', String(v5.largeJumps)]];
+}
+
+function renderBenchmarkAnalysisMetrics(take) {
+  els.benchmarkAnalysisMetrics.replaceChildren(...benchmarkMetrics(take).flatMap(([label, value]) => {
+    const term = document.createElement('dt'); term.textContent = label;
+    const detail = document.createElement('dd'); detail.textContent = value;
+    return [term, detail];
+  }));
+  if (els.benchmarkAnalysisV5Status) els.benchmarkAnalysisV5Status.textContent = take._v5Status ?? 'V5: analisi neurale in attesa';
+}
+
+function resetBenchmarkAnalysisView() {
+  state.benchmark.analysisView = { timeZoom: 1, pitchZoom: 1, centerBeat: null, pitchOffset: 0, pointer: null, inspectBeat: null };
+  const take = selectedBenchmarkTake();
+  if (take) drawBenchmarkAnalysisRoll(take);
+  els.benchmarkAnalysisInspect.textContent = 'Vista completa';
+}
+
+function updateBenchmarkInspection(take, event) {
+  const canvas = els.benchmarkAnalysisRoll, rect = canvas.getBoundingClientRect();
+  const startBeat = Number(take.startBeat) || 0, endBeat = Math.max(startBeat + .001, Number(take.endBeat) || startBeat + 1);
+  const view = state.benchmark.analysisView, totalSpan = endBeat - startBeat, visibleSpan = totalSpan / view.timeZoom;
+  const viewStart = Math.max(startBeat, Math.min(endBeat - visibleSpan, view.centerBeat - visibleSpan / 2));
+  const localX = Math.max(0, Math.min(1, (event.clientX - rect.left - 52) / Math.max(1, rect.width - 66)));
+  const beat = viewStart + localX * visibleSpan;
+  view.inspectBeat = beat;
+  const active = (take.targetEvents ?? []).find((target) => target.onsetBeat <= beat && beat < target.onsetBeat + target.durationBeats);
+  els.benchmarkAnalysisInspect.textContent = active
+    ? `Batt. ${active.measureNumber ?? '?'} · beat ${beat.toFixed(2)} · ${active.noteName ?? noteLabel(active.midiPitch + (take.transpose ?? 0))}`
+    : `Beat ${beat.toFixed(2)} · nessun target`;
+}
+
+function bindBenchmarkAnalysisCanvas() {
+  const canvas = els.benchmarkAnalysisRoll;
+  canvas.addEventListener('wheel', (event) => {
+    const take = selectedBenchmarkTake(); if (!take) return;
+    event.preventDefault();
+    const view = state.benchmark.analysisView;
+    const rect = canvas.getBoundingClientRect();
+    const factor = event.deltaY < 0 ? 1.22 : 1 / 1.22;
+    const xRatio = Math.max(0, Math.min(1, (event.clientX - rect.left - 52) / Math.max(1, rect.width - 66)));
+    const yRatio = Math.max(0, Math.min(1, (event.clientY - rect.top - 16) / Math.max(1, rect.height - 47)));
+    const startBeat = Number(take.startBeat) || 0;
+    const endBeat = Math.max(startBeat + .001, Number(take.endBeat) || startBeat + 1);
+    const totalBeatSpan = endBeat - startBeat;
+    view.centerBeat ??= (startBeat + endBeat) / 2;
+    if (event.shiftKey) {
+      const bounds = benchmarkPitchBounds(take);
+      const basePitchSpan = Math.max(2, bounds.max - bounds.min);
+      const oldSpan = Math.max(2, basePitchSpan / view.pitchZoom);
+      const oldCenter = (bounds.min + bounds.max) / 2 + view.pitchOffset;
+      const anchorPitch = oldCenter + oldSpan / 2 - yRatio * oldSpan;
+      view.pitchZoom = Math.max(.65, Math.min(8, view.pitchZoom * factor));
+      const newSpan = Math.max(2, basePitchSpan / view.pitchZoom);
+      view.pitchOffset = anchorPitch - (bounds.min + bounds.max) / 2 - newSpan / 2 + yRatio * newSpan;
+    } else {
+      const oldSpan = totalBeatSpan / view.timeZoom;
+      const oldStart = Math.max(startBeat, Math.min(endBeat - oldSpan, view.centerBeat - oldSpan / 2));
+      const anchorBeat = oldStart + xRatio * oldSpan;
+      view.timeZoom = Math.max(1, Math.min(20, view.timeZoom * factor));
+      const newSpan = totalBeatSpan / view.timeZoom;
+      const newStart = Math.max(startBeat, Math.min(endBeat - newSpan, anchorBeat - xRatio * newSpan));
+      view.centerBeat = newStart + newSpan / 2;
+    }
+    updateBenchmarkInspection(take, event); drawBenchmarkAnalysisRoll(take);
+  }, { passive: false });
+  canvas.addEventListener('pointerdown', (event) => {
+    const take = selectedBenchmarkTake(); if (!take) return;
+    const view = state.benchmark.analysisView;
+    view.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, centerBeat: view.centerBeat, pitchOffset: view.pitchOffset };
+    canvas.setPointerCapture(event.pointerId); canvas.classList.add('is-panning'); updateBenchmarkInspection(take, event); drawBenchmarkAnalysisRoll(take);
+  });
+  canvas.addEventListener('pointermove', (event) => {
+    const take = selectedBenchmarkTake(), view = state.benchmark.analysisView; if (!take) return;
+    if (!view.pointer || view.pointer.id !== event.pointerId) { updateBenchmarkInspection(take, event); drawBenchmarkAnalysisRoll(take); return; }
+    const rect = canvas.getBoundingClientRect(); const total = (take.endBeat ?? 1) - (take.startBeat ?? 0);
+    view.centerBeat = view.pointer.centerBeat - (event.clientX - view.pointer.x) * (total / view.timeZoom) / Math.max(1, rect.width - 66);
+    const pitchRange = Math.max(2, 12 / view.pitchZoom);
+    view.pitchOffset = view.pointer.pitchOffset + (event.clientY - view.pointer.y) * pitchRange / Math.max(1, rect.height - 47);
+    updateBenchmarkInspection(take, event); drawBenchmarkAnalysisRoll(take);
+  });
+  const finish = (event) => { const view = state.benchmark.analysisView; if (view.pointer?.id !== event.pointerId) return; canvas.releasePointerCapture?.(event.pointerId); view.pointer = null; canvas.classList.remove('is-panning'); };
+  canvas.addEventListener('pointerup', finish); canvas.addEventListener('pointercancel', finish); canvas.addEventListener('pointerleave', (event) => { if (!state.benchmark.analysisView.pointer) { state.benchmark.analysisView.inspectBeat = null; els.benchmarkAnalysisInspect.textContent = 'Vista completa'; drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); } });
+}
+
+function renderBenchmarkArchive() {
+  const takes = state.benchmark.savedTakes;
+  els.benchmarkArchive.hidden = takes.length === 0;
+  if (!takes.length) return;
+  if (!takes.some((take) => take.id === state.benchmark.selectedTakeId)) state.benchmark.selectedTakeId = takes[0].id;
+  els.benchmarkTakeList.replaceChildren(...takes.map((take, index) => {
+    const date = new Date(take.acceptedAt ?? take.stoppedAt ?? take.startedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' });
+    return new Option(`${index + 1}. ${take.scenarioId} · take ${take.repetition} · ${date}`, take.id);
+  }));
+  els.benchmarkTakeList.value = state.benchmark.selectedTakeId;
+  const take = selectedBenchmarkTake();
+  if (!take) return;
+  const seconds = Math.max(0, (take.endAudioTimeSec ?? 0) - (take.startAudioTimeSec ?? 0));
+  els.benchmarkTakeSummary.textContent = `${benchmarkScenarioLabel(take.scenarioId)} · ${take.frames?.length ?? 0} frame · ${seconds.toFixed(1)} s · ${take.partId ?? 'parte non disponibile'}.`;
+  els.benchmarkAlgorithmLabel.textContent = take.configuration?.estimator?.id === 'yin-style-js' ? 'v1 · YIN' : 'v1';
+}
+
+function renderBenchmarkAnalysis() {
+  const take = selectedBenchmarkTake();
+  if (!take) return;
+  els.benchmarkAnalysisTake.replaceChildren(...state.benchmark.savedTakes.map((item, index) => {
+    const date = new Date(item.acceptedAt ?? item.startedAt).toLocaleString('it-IT', { dateStyle: 'short', timeStyle: 'short' });
+    return new Option(`${index + 1}. ${item.scenarioId} · take ${item.repetition} · ${date}`, item.id);
+  }));
+  els.benchmarkAnalysisTake.value = take.id;
+  els.benchmarkAnalysisName.textContent = `${take.scenarioId} · take ${take.repetition}`;
+  els.benchmarkAnalysisMeta.textContent = `${benchmarkScenarioLabel(take.scenarioId)} · ${take.partId ?? 'parte'} · ${new Date(take.acceptedAt ?? take.startedAt).toLocaleString('it-IT')}`;
+  renderBenchmarkAnalysisMetrics(take);
+  if (state.benchmark.analysisAudioUrl) URL.revokeObjectURL(state.benchmark.analysisAudioUrl);
+  state.benchmark.analysisAudioUrl = take.audio ? URL.createObjectURL(take.audio) : null;
+  els.benchmarkAnalysisAudio.src = state.benchmark.analysisAudioUrl ?? '';
+  const duration = Math.max(0, (take.endAudioTimeSec ?? 0) - (take.startAudioTimeSec ?? 0));
+  els.benchmarkAnalysisTime.textContent = `${formatClock(0)} / ${formatClock(duration)}`;
+  requestAnimationFrame(() => drawBenchmarkAnalysisRoll(take));
+  void ensureBenchmarkV5(take);
+}
+
+function openBenchmarkAnalysis() {
+  if (!selectedBenchmarkTake()) return;
+  if (els.benchmarkDialog.open) els.benchmarkDialog.close();
+  state.benchmark.analysisView = { timeZoom: 1, pitchZoom: 1, centerBeat: null, pitchOffset: 0, pointer: null, inspectBeat: null };
+  els.benchmarkAnalysis.hidden = false;
+  renderBenchmarkAnalysis();
+}
+
+function closeBenchmarkAnalysis() {
+  els.benchmarkAnalysisAudio.pause();
+  els.benchmarkAnalysis.hidden = true;
+}
+
+async function refreshBenchmarkArchive() {
+  try {
+    const store = await benchmarkStore();
+    const takes = await new Promise((resolve, reject) => {
+      const request = store.getAll(); request.onsuccess = () => resolve(request.result); request.onerror = () => reject(request.error);
+    });
+    state.benchmark.savedTakes = takes.sort((a, b) => String(b.acceptedAt ?? b.startedAt).localeCompare(String(a.acceptedAt ?? a.startedAt)));
+    renderBenchmarkArchive();
+  } catch (_) { state.benchmark.savedTakes = []; els.benchmarkArchive.hidden = true; }
+  await refreshBenchmarkCount();
+}
+
+function updateBenchmarkControls() {
+  const recording = Boolean(state.benchmark.capture);
+  const pending = Boolean(state.benchmark.pending);
+  els.benchmarkSetupSection.hidden = pending;
+  els.benchmarkPrimaryActions.hidden = pending;
+  els.benchmarkReviewActions.hidden = !pending;
+  els.benchmarkClose.textContent = pending ? 'Chiudi' : 'Annulla';
+  els.benchmarkStart.disabled = recording || pending || !els.benchmarkSetup.checked;
+  els.benchmarkListen.disabled = !pending;
+  els.benchmarkAccept.disabled = !pending;
+  els.benchmarkDiscard.disabled = !recording && !pending;
+  els.benchmark.textContent = recording ? 'Interrompi benchmark' : 'Benchmark';
+  els.benchmark.setAttribute('aria-pressed', String(recording));
+}
+
+async function openBenchmarkDialog() {
+  if (!els.benchmarkScenario.options.length) {
+    els.benchmarkScenario.replaceChildren(...BENCHMARK_SCENARIOS.map(([id, label]) => new Option(`${id} · ${label}`, id)));
+  }
+  state.benchmark.sessionId ??= crypto.randomUUID();
+  if (state.clock.running) state.clock.pause();
+  if (state.fullScore) {
+    state.fullScore = false;
+    els.scoreMode.setAttribute('aria-pressed', 'false');
+    els.scoreMode.textContent = 'Partitura';
+    document.querySelector('.score-region').classList.remove('full-score');
+  }
+  // A benchmark take must start from an empty pitch lane. This only clears
+  // transient Practice history for the selected part; accepted recordings in
+  // IndexedDB are not touched.
+  clearPitchHistory();
+  seekToMeasure(0);
+  await refreshBenchmarkArchive();
+  els.benchmarkStatus.textContent = state.benchmark.pending
+    ? 'Take pronto: ascolta, accetta oppure scarta.'
+    : 'Sei all’inizio del brano. Conferma la checklist: il pulsante avvia registrazione e playback, poi torna automaticamente alla prova.';
+  updateBenchmarkControls();
+  if (!els.benchmarkDialog.open) els.benchmarkDialog.showModal();
+}
+
+async function armBenchmarkMicrophone() {
+  if (state.microphoneStatus !== 'active') await toggleMicrophone();
+  els.benchmarkStatus.textContent = state.microphoneStatus === 'active'
+    ? 'Microfono pronto. Conferma la checklist e avvia il take.'
+    : 'Non è stato possibile armare il microfono.';
+  updateBenchmarkControls();
+}
+
+function appendBenchmarkFrame(estimate, beat) {
+  const capture = state.benchmark.capture;
+  if (!capture || !state.microphoneContext) return;
+  const target = state.runtime.targetAt(beat);
+  capture.frames.push({
+    audioTimeSec: Number(state.microphoneContext.currentTime.toFixed(6)),
+    beat: Number(beat.toFixed(5)), rms: Number((estimate.rms ?? 0).toFixed(7)),
+    rawHz: Number.isFinite(estimate.rawHz) ? Number(estimate.rawHz.toFixed(5)) : null,
+    trackedHz: Number.isFinite(estimate.hz) ? Number(estimate.hz.toFixed(5)) : null,
+    clarity: Number((estimate.clarity ?? 0).toFixed(5)), confidence: Number((estimate.confidence ?? 0).toFixed(5)),
+    voicing: estimate.accepted ? 'voiced' : (estimate.rawHz == null ? 'unvoiced' : 'uncertain'),
+    rejectionReason: estimate.rejectionReason ?? null,
+    targetMidiPitch: target ? target.midiPitch + state.transpose : null,
+    targetEventId: target?.sourceEventId ?? null,
+  });
+}
+
+function reportBenchmarkEvent(action, details = {}) {
+  fetch('/api/benchmark-event', {
+    method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ action, at: new Date().toISOString(), ...details }),
+  }).catch(() => { /* The diagnostic endpoint is optional and never blocks recording. */ });
+}
+
+async function startBenchmarkCapture() {
+  if (!els.benchmarkSetup.checked) { els.benchmarkStatus.textContent = 'Conferma prima la checklist di ambiente e microfono.'; return; }
+  if (state.microphoneStatus !== 'active') { await armBenchmarkMicrophone(); if (state.microphoneStatus !== 'active') return; }
+  if (!window.MediaRecorder) { els.benchmarkStatus.textContent = 'Questo browser non supporta la registrazione audio.'; return; }
+  const chunks = [];
+  const recorder = new MediaRecorder(state.microphoneStream, MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : undefined);
+  beginPitchTake();
+  state.benchmark.capture = {
+    recorder, chunks, frames: [], startBeat: state.clock.snapshot().beat,
+    startAudioTimeSec: state.microphoneContext.currentTime, startedAt: new Date().toISOString(),
+    scenarioId: els.benchmarkScenario.value, repetition: Number(els.benchmarkRepeat.value) || 1,
+  };
+  const capture = state.benchmark.capture;
+  recorder.ondataavailable = (event) => { if (event.data.size) chunks.push(event.data); };
+  recorder.start(250);
+  reportBenchmarkEvent('started', { recorderState: recorder.state, pieceId: state.bundleManifest.piece_id, partId: state.runtime.selectedPartId });
+  const scenario = BENCHMARK_SCENARIOS.find(([id]) => id === state.benchmark.capture.scenarioId)?.[1] ?? state.benchmark.capture.scenarioId;
+  els.benchmarkLiveScenario.textContent = `${state.benchmark.capture.scenarioId} · ${scenario}`;
+  els.benchmarkRecording.hidden = false;
+  els.benchmarkDialog.close();
+  if (!state.rafId) state.rafId = requestAnimationFrame(render);
+  els.benchmarkStatus.textContent = 'Registrazione attiva: canta e interrompi quando hai finito.';
+  updateBenchmarkControls();
+  // Do not await media.play(): some browsers leave that promise pending while
+  // decoding/loading. Recording controls must become usable immediately.
+  if (!state.clock.running) {
+    state.clock.play().then(() => { updatePlaybackButton(); render(); }).catch((error) => {
+      if (state.benchmark.capture !== capture) return;
+      els.benchmarkStatus.textContent = `Registrazione attiva, ma il playback non è partito: ${error.message ?? 'errore sconosciuto'}.`;
+    });
+  } else updatePlaybackButton();
+}
+
+function benchmarkConfiguration() {
+  return {
+    estimator: { id: 'yin-style-js', minHz: 70, maxHz: 1000, cmndThreshold: 0.42 },
+    tracker: { id: 'PitchSmoother', minClarity: 0.45, minConfidence: 0.30,
+      fastAlpha: state.detectorSettings.fastAlpha, slowAlpha: state.detectorSettings.slowAlpha,
+      medianWindowFrames: state.detectorSettings.medianWindowFrames },
+    capture: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true },
+    browser: navigator.userAgent, sampleRate: state.microphoneContext?.sampleRate ?? null,
+  };
+}
+
+function finalizeBenchmarkCapture(capture) {
+  if (capture.finalized) return;
+  capture.finalized = true;
+  reportBenchmarkEvent('stopped', { recorderState: capture.recorder.state, frames: capture.frames.length });
+  const audio = new Blob(capture.chunks, { type: capture.recorder.mimeType || 'audio/webm' });
+  state.benchmark.pending = {
+    id: crypto.randomUUID(), kind: 'tenor-benchmark-take-v1', status: 'pending-review',
+    sessionId: state.benchmark.sessionId, scenarioId: capture.scenarioId, repetition: capture.repetition,
+    startedAt: capture.startedAt, stoppedAt: new Date().toISOString(), pieceId: state.bundleManifest.piece_id,
+    scoreVersionId: state.runtime.scoreVersionId, timelineHash: state.bundleManifest.integrity?.hashes?.timeline ?? null,
+    partId: state.runtime.selectedPartId, transpose: state.transpose, startBeat: capture.startBeat, endBeat: capture.endBeat,
+    startAudioTimeSec: capture.startAudioTimeSec, endAudioTimeSec: capture.endAudioTimeSec,
+    targetEvents: state.runtime.targetEvents.filter((event) => event.onsetBeat + event.durationBeats >= capture.startBeat && event.onsetBeat <= capture.endBeat),
+    configuration: benchmarkConfiguration(), frames: capture.frames, audio,
+  };
+  state.benchmark.capture = null;
+  state.benchmark.previewUrl && URL.revokeObjectURL(state.benchmark.previewUrl);
+  state.benchmark.previewUrl = URL.createObjectURL(audio);
+  els.benchmarkStatus.textContent = `${capture.frames.length} frame acquisiti. Ascolta, accetta oppure scarta il take.`;
+  updateBenchmarkControls();
+  if (!els.benchmarkDialog.open) els.benchmarkDialog.showModal();
+}
+
+function stopBenchmarkCapture() {
+  const capture = state.benchmark.capture;
+  reportBenchmarkEvent('stop-requested', { hasCapture: Boolean(capture), recorderState: capture?.recorder?.state ?? 'none' });
+  if (!capture) {
+    els.benchmarkRecording.hidden = true;
+    updateBenchmarkControls();
+    showToast('La registrazione benchmark non è più attiva.');
+    return;
+  }
+  if (capture.stopping) return;
+  capture.stopping = true;
+  if (state.clock.running) state.clock.pause();
+  updatePlaybackButton();
+  els.benchmarkRecording.hidden = true;
+  capture.endBeat = state.clock.snapshot().beat;
+  capture.endAudioTimeSec = state.microphoneContext?.currentTime ?? null;
+  capture.recorder.onstop = () => finalizeBenchmarkCapture(capture);
+  els.benchmarkStatus.textContent = 'Finalizzazione del take in corso…';
+  updateBenchmarkControls();
+  try {
+    if (capture.recorder.state === 'inactive') finalizeBenchmarkCapture(capture);
+    else capture.recorder.stop();
+  } catch (error) {
+    console.warn('Impossibile arrestare MediaRecorder; finalizzo comunque il take.', error);
+    finalizeBenchmarkCapture(capture);
+  }
+}
+
+// Direct handler used by the visible recording control. The delegated listener
+// remains as a second path for pointer devices and overlays.
+window.ChoirBenchmarkStop = stopBenchmarkCapture;
+
+async function acceptBenchmarkTake() {
+  const take = state.benchmark.pending;
+  if (!take) return;
+  try {
+    take.status = 'accepted'; take.acceptedAt = new Date().toISOString();
+    await putLocalRecord(await benchmarkStore('readwrite'), take);
+    const session = { id: state.benchmark.sessionId, kind: 'tenor-benchmark-session-v1', updatedAt: take.acceptedAt,
+      pieceId: take.pieceId, partId: take.partId, configuration: take.configuration };
+    await putLocalRecord(await benchmarkSessionStore('readwrite'), session);
+    state.benchmark.pending = null;
+    state.benchmark.previewUrl && URL.revokeObjectURL(state.benchmark.previewUrl); state.benchmark.previewUrl = null;
+    els.benchmarkStatus.textContent = 'Take benchmark accettato e salvato localmente.';
+    await refreshBenchmarkArchive(); updateBenchmarkControls(); showToast('Take benchmark salvato localmente.');
+  } catch (error) { els.benchmarkStatus.textContent = `Salvataggio non riuscito: ${error.message}`; }
+}
+
+function discardBenchmarkTake() {
+  const capture = state.benchmark.capture;
+  if (capture) { capture.recorder.onstop = () => {}; capture.recorder.stop(); state.benchmark.capture = null; }
+  els.benchmarkRecording.hidden = true;
+  state.benchmark.pending = null;
+  if (state.benchmark.previewUrl) URL.revokeObjectURL(state.benchmark.previewUrl);
+  state.benchmark.previewUrl = null;
+  els.benchmarkStatus.textContent = 'Take scartato: nessun audio o frame benchmark è stato salvato.';
+  updateBenchmarkControls();
+}
+
+function listenToBenchmarkTake(take = state.benchmark.pending) {
+  const isPendingTake = take === state.benchmark.pending;
+  const url = isPendingTake ? state.benchmark.previewUrl : (take?.audio ? URL.createObjectURL(take.audio) : null);
+  if (!url) return;
+  const audio = new Audio(url);
+  audio.addEventListener('ended', () => { if (!isPendingTake) URL.revokeObjectURL(url); }, { once: true });
+  audio.play().catch(() => {
+    if (!isPendingTake) URL.revokeObjectURL(url);
+    els.benchmarkStatus.textContent = 'Riproduzione non disponibile.';
+  });
+}
+
 function finishAttempt() {
   state.attemptActive = false;
   els.nextPhrase.disabled = !state.phrase || state.phrase.end >= state.occurrenceMeasures.length - 1;
@@ -975,7 +2261,12 @@ function savePreferences() {
       speed: els.playbackSpeed.value, volume: els.volume.value, metronome: els.metronomeVolume.value,
       measure: measureIndexAt(state.clock.snapshot().beat), phrase: state.phrase,
       autoLoop: state.autoLoop, noteNames: state.noteNames, noteNamesPreferenceVersion: 2,
-      scoreHeight: Math.round(els.scoreViewport.clientHeight) }));
+      scoreHeight: Math.round(els.scoreViewport.clientHeight), v1RmsThreshold: state.detectorSettings.rmsThreshold,
+      v1FastAlpha: state.detectorSettings.fastAlpha, v1SlowAlpha: state.detectorSettings.slowAlpha,
+      v1MedianWindowFrames: state.detectorSettings.medianWindowFrames,
+      v1PlumeWidth: state.plumeSettings.width, v1PlumeIntensity: state.plumeSettings.intensity,
+      v1PlumeColor: state.plumeSettings.color, pitchLayerV1: state.pitchLayers.v1,
+      pitchLayerCrepe: state.pitchLayers.crepe }));
     localStorage.setItem(`choir-part:${state.bundleManifest.piece_id ?? state.runtime.title}`, state.runtime.selectedPartId);
   } catch (_) { /* Practice remains usable when storage is unavailable. */ }
 }
@@ -997,6 +2288,28 @@ function restorePreferences() {
   els.playbackSpeed.value = ['0.5', '0.75', '1'].includes(saved.speed) ? saved.speed : '1';
   els.volume.value = Number.isFinite(Number(saved.volume)) ? Math.max(0, Math.min(100, Number(saved.volume))) : 62;
   els.metronomeVolume.value = Number.isFinite(Number(saved.metronome)) ? Math.max(0, Math.min(100, Number(saved.metronome))) : 0;
+  state.detectorSettings.rmsThreshold = Number.isFinite(Number(saved.v1RmsThreshold))
+    ? Math.max(V1_RMS_THRESHOLD.min, Math.min(V1_RMS_THRESHOLD.max, Number(saved.v1RmsThreshold)))
+    : V1_RMS_THRESHOLD.default;
+  state.detectorSettings.fastAlpha = Number.isFinite(Number(saved.v1FastAlpha))
+    ? Math.max(.05, Math.min(.95, Number(saved.v1FastAlpha))) : V1_TRACKER_DEFAULTS.fastAlpha;
+  state.detectorSettings.slowAlpha = Number.isFinite(Number(saved.v1SlowAlpha))
+    ? Math.max(.05, Math.min(.95, Number(saved.v1SlowAlpha))) : V1_TRACKER_DEFAULTS.slowAlpha;
+  const savedMedian = Number(saved.v1MedianWindowFrames);
+  state.detectorSettings.medianWindowFrames = Number.isFinite(savedMedian)
+    ? Math.max(1, Math.min(7, Math.round(savedMedian / 2) * 2 - 1)) : V1_TRACKER_DEFAULTS.medianWindowFrames;
+  state.plumeSettings.width = Number.isFinite(Number(saved.v1PlumeWidth))
+    ? Math.max(.35, Math.min(2.2, Number(saved.v1PlumeWidth))) : 1;
+  state.plumeSettings.intensity = Number.isFinite(Number(saved.v1PlumeIntensity))
+    ? Math.max(.15, Math.min(2, Number(saved.v1PlumeIntensity))) : 1;
+  state.plumeSettings.color = /^#[0-9a-f]{6}$/i.test(saved.v1PlumeColor ?? '')
+    ? saved.v1PlumeColor : '#63c8c2';
+  state.pitchLayers.v1 = saved.pitchLayerV1 !== false;
+  state.pitchLayers.crepe = saved.pitchLayerCrepe !== false;
+  els.pitchLayerV1.checked = state.pitchLayers.v1;
+  els.pitchLayerCrepe.checked = state.pitchLayers.crepe;
+  applyLiveTrackerSettings();
+  updateDetectorSettingsUi();
   if (Number.isFinite(saved.scoreHeight)) setScoreHeight(saved.scoreHeight);
 }
 
@@ -1073,6 +2386,10 @@ function changePart(partId) {
 function bindControls() {
   bindGridInspection();
   bindScorePitchDivider();
+  bindBenchmarkAnalysisCanvas();
+  document.querySelector('.toolbar-more').addEventListener('click', (event) => {
+    if (event.target.closest('button')) event.currentTarget.removeAttribute('open');
+  });
   document.getElementById('test-microphone').addEventListener('click', toggleMicrophone);
   window.addEventListener('pagehide', savePreferences);
   els.exercise.addEventListener('click', () => {
@@ -1118,6 +2435,12 @@ function bindControls() {
   for (const control of [els.playbackSpeed, els.volume, els.metronomeVolume]) {
     control.addEventListener('change', savePreferences);
   }
+  [['v1', els.pitchLayerV1], ['crepe', els.pitchLayerCrepe]].forEach(([layer, control]) => {
+    control.addEventListener('change', () => {
+      state.pitchLayers[layer] = control.checked;
+      savePreferences(); render();
+    });
+  });
   els.togglePlayback.addEventListener('click', togglePlayback);
   els.restartPractice.addEventListener('click', restartPractice);
   els.restartTransport.addEventListener('click', restartPractice);
@@ -1125,7 +2448,63 @@ function bindControls() {
   els.groundTruthStart.addEventListener('click', startGroundTruthCapture);
   els.groundTruthApprove.addEventListener('click', approveGroundTruthCapture);
   els.groundTruthClose.addEventListener('click', () => els.groundTruthDialog.close());
+  els.benchmark.addEventListener('click', () => {
+    if (state.benchmark.capture) stopBenchmarkCapture(); else openBenchmarkDialog();
+  });
+  els.benchmarkStart.addEventListener('click', startBenchmarkCapture);
+  // Capture-phase delegation bypasses any canvas/overlay event handling.
+  document.addEventListener('pointerdown', (event) => {
+    if (!event.target.closest?.('#benchmark-stop-live')) return;
+    event.preventDefault();
+    stopBenchmarkCapture();
+  }, true);
+  els.benchmarkListen.addEventListener('click', listenToBenchmarkTake);
+  els.benchmarkAccept.addEventListener('click', acceptBenchmarkTake);
+  els.benchmarkDiscard.addEventListener('click', discardBenchmarkTake);
+  els.benchmarkTakeList.addEventListener('change', () => {
+    state.benchmark.selectedTakeId = els.benchmarkTakeList.value;
+    renderBenchmarkArchive();
+  });
+  els.benchmarkOpenAnalysis.addEventListener('click', openBenchmarkAnalysis);
+  els.benchmarkAnalysisBack.addEventListener('click', closeBenchmarkAnalysis);
+  els.benchmarkAnalysisTake.addEventListener('change', () => {
+    state.benchmark.selectedTakeId = els.benchmarkAnalysisTake.value;
+    resetBenchmarkAnalysisView();
+    renderBenchmarkArchive(); renderBenchmarkAnalysis();
+  });
+  els.benchmarkAnalysisReset.addEventListener('click', resetBenchmarkAnalysisView);
+  [['raw', els.benchmarkAnalysisLayerRaw], ['audio', els.benchmarkAnalysisLayerAudio], ['score', els.benchmarkAnalysisLayerScore]].forEach(([layer, control]) => {
+    control.addEventListener('change', () => {
+      state.benchmark.analysisLayers[layer] = control.checked;
+      drawBenchmarkAnalysisRoll(selectedBenchmarkTake());
+    });
+  });
+  els.benchmarkAnalysisAudio.addEventListener('timeupdate', () => {
+    const take = selectedBenchmarkTake();
+    const fallbackDuration = Math.max(0, (take?.endAudioTimeSec ?? 0) - (take?.startAudioTimeSec ?? 0));
+    const reportedDuration = els.benchmarkAnalysisAudio.duration;
+    const duration = Number.isFinite(reportedDuration) && reportedDuration > 0 ? reportedDuration : fallbackDuration;
+    els.benchmarkAnalysisTime.textContent = `${formatClock(els.benchmarkAnalysisAudio.currentTime)} / ${formatClock(duration)}`;
+    drawBenchmarkAnalysisRoll(take);
+  });
+  els.benchmarkAnalysisAudio.addEventListener('loadedmetadata', () => {
+    const take = selectedBenchmarkTake();
+    const fallbackDuration = Math.max(0, (take?.endAudioTimeSec ?? 0) - (take?.startAudioTimeSec ?? 0));
+    const reportedDuration = els.benchmarkAnalysisAudio.duration;
+    const duration = Number.isFinite(reportedDuration) && reportedDuration > 0 ? reportedDuration : fallbackDuration;
+    els.benchmarkAnalysisTime.textContent = `${formatClock(els.benchmarkAnalysisAudio.currentTime)} / ${formatClock(duration)}`;
+    drawBenchmarkAnalysisRoll(take);
+  });
+  els.benchmarkSetup.addEventListener('change', updateBenchmarkControls);
+  els.benchmarkClose.addEventListener('click', () => {
+    if (state.benchmark.capture) { els.benchmarkStatus.textContent = 'Interrompi o scarta prima la registrazione attiva.'; return; }
+    els.benchmarkDialog.close();
+  });
+  els.benchmarkDialog.addEventListener('cancel', (event) => {
+    if (state.benchmark.capture) { event.preventDefault(); els.benchmarkStatus.textContent = 'Interrompi o scarta prima la registrazione attiva.'; }
+  });
   els.microphone.addEventListener('click', toggleMicrophone);
+  els.neuralLive.addEventListener('click', toggleNeuralLive);
   els.previousMeasure.addEventListener('click', () => seekToMeasure(Math.max(0, measureIndexAt(state.clock.snapshot().beat) - 1)));
   els.nextMeasure.addEventListener('click', () => seekToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(state.clock.snapshot().beat) + 1)));
   els.partSelector.addEventListener('change', () => changePart(els.partSelector.value));
@@ -1173,9 +2552,53 @@ function bindControls() {
   els.backingAudio.addEventListener('ended', () => { updatePlaybackButton(); render(); });
   els.backingAudio.addEventListener('pause', () => { updatePlaybackButton(); if (!state.clock.running) render(); });
   els.backingAudio.addEventListener('error', () => showToast(`Errore audio (${els.backingAudio.error?.code ?? 'sconosciuto'}).`));
-  els.settings.addEventListener('click', () => window.open('admin-review.html', 'choir-admin-review'));
+  els.settings.addEventListener('click', openDetectorSettings);
+  els.settingsV1Rms.addEventListener('input', () => {
+    state.detectorSettings.rmsThreshold = rmsThresholdFromSlider(els.settingsV1Rms.value);
+    updateDetectorSettingsUi();
+  });
+  els.settingsV1Rms.addEventListener('change', () => {
+    savePreferences();
+    showToast(`Soglia v1 aggiornata: ${state.detectorSettings.rmsThreshold.toFixed(4).replace('.', ',')} RMS.`);
+  });
+  const updateTrackerSettings = () => {
+    state.detectorSettings.fastAlpha = Number(els.settingsV1FastAlpha.value) / 100;
+    state.detectorSettings.slowAlpha = Number(els.settingsV1SlowAlpha.value) / 100;
+    state.detectorSettings.medianWindowFrames = Number(els.settingsV1MedianFrames.value);
+    applyLiveTrackerSettings(); updateDetectorSettingsUi();
+  };
+  for (const control of [els.settingsV1FastAlpha, els.settingsV1SlowAlpha, els.settingsV1MedianFrames]) {
+    control.addEventListener('input', updateTrackerSettings);
+    control.addEventListener('change', () => {
+      savePreferences();
+      showToast('Memoria del tracker v1 aggiornata.');
+    });
+  }
+  const updatePlumeSettings = () => {
+    state.plumeSettings.width = Number(els.settingsV1PlumeWidth.value) / 100;
+    state.plumeSettings.intensity = Number(els.settingsV1PlumeIntensity.value) / 100;
+    state.plumeSettings.color = els.settingsV1PlumeColor.value;
+    updateDetectorSettingsUi(); render();
+  };
+  for (const control of [els.settingsV1PlumeWidth, els.settingsV1PlumeIntensity, els.settingsV1PlumeColor]) {
+    control.addEventListener('input', updatePlumeSettings);
+    control.addEventListener('change', () => {
+      savePreferences();
+      showToast('Aspetto della plume v1 salvato.');
+    });
+  }
+  els.settingsReset.addEventListener('click', () => {
+    state.detectorSettings.rmsThreshold = V1_RMS_THRESHOLD.default;
+    Object.assign(state.detectorSettings, V1_TRACKER_DEFAULTS);
+    state.plumeSettings = { width: 1, intensity: 1, color: '#63c8c2' };
+    applyLiveTrackerSettings(); updateDetectorSettingsUi(); savePreferences();
+    render(); showToast('Impostazioni v1 ripristinate ai valori predefiniti.');
+  });
+  els.settingsClose.addEventListener('click', () => els.settingsDialog.close());
+  document.getElementById('admin-review').addEventListener('click', () => window.open('admin-review.html', 'choir-admin-review'));
   document.getElementById('exit-practice').addEventListener('click', openLibraryPicker);
   window.addEventListener('resize', () => { state.activeScoreSegment = null; render(); });
+  window.addEventListener('resize', () => { if (!els.benchmarkAnalysis.hidden) drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); });
   window.addEventListener('beforeunload', () => { savePitchHistory(); state.microphoneStream?.getTracks().forEach((track) => track.stop()); });
   document.addEventListener('keydown', (event) => {
     if (event.code === 'Space' && !['SELECT', 'INPUT', 'BUTTON'].includes(document.activeElement?.tagName)) { event.preventDefault(); togglePlayback(); }
@@ -1192,11 +2615,11 @@ async function initialize() {
   state.library = (await libraryResponse.json()).pieces ?? [];
   if (!state.library.length) throw new Error('Non ci sono brani MuseScore nella cartella sheets');
   bindLibraryPicker();
-  const selectedPiece = new URLSearchParams(window.location.search).get('piece');
-  if (!selectedPiece || !state.library.some((piece) => piece.piece_id === selectedPiece)) {
-    openLibraryPicker();
-    return;
-  }
+  const requestedPiece = new URLSearchParams(window.location.search).get('piece');
+  let rememberedPiece = null;
+  try { rememberedPiece = localStorage.getItem(LAST_PRACTICE_PIECE_KEY); } catch (_) { /* Optional convenience only. */ }
+  const selectedPiece = [requestedPiece, rememberedPiece, state.library[0]?.piece_id]
+    .find((pieceId) => pieceId && state.library.some((piece) => piece.piece_id === pieceId));
   await loadPracticePiece(selectedPiece);
 }
 
@@ -1278,6 +2701,7 @@ async function loadPracticePiece(pieceId) {
   const bundleResponse = await fetch(`/api/library/${encodeURIComponent(pieceId)}/bundle`, { cache: 'no-store' });
   if (!bundleResponse.ok) throw new Error('Manifest del brano non disponibile');
   const bundleManifest = await bundleResponse.json();
+  try { localStorage.setItem(LAST_PRACTICE_PIECE_KEY, pieceId); } catch (_) { /* Optional convenience only. */ }
   const [scoreResponse, glyphResponse, backingResponse] = await Promise.all([
     fetch(bundleManifest.assets.score),
     fetch(bundleManifest.assets.glyph_map),
@@ -1320,6 +2744,10 @@ async function loadPracticePiece(pieceId) {
     return new Option(label, String(offset));
   }));
   restorePreferences();
+  // Transposition is an in-session rehearsal choice.  Never carry it into a
+  // newly opened piece, even if that piece has older saved preferences.
+  state.transpose = 0;
+  els.transpose.value = '0';
   restorePitchHistory();
   state.occurrenceMeasures = buildOccurrenceMeasures(state.runtime);
   configureBacking();

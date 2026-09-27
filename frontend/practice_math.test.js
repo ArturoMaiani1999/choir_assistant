@@ -32,6 +32,10 @@ const twoTwoGrid = math.rhythmGridLines([
 assert.deepEqual(twoTwoGrid.filter((line) => line.kind === 'measure').map((line) => line.beat), [0, 4, 8]);
 assert.deepEqual(twoTwoGrid.filter((line) => line.kind === 'beat').map((line) => line.beat), [2, 6]);
 assert.deepEqual(twoTwoGrid.filter((line) => line.kind === 'subdivision').map((line) => line.beat), [1, 3, 5, 7]);
+const pickupGrid = math.rhythmGridLines([
+  { number: 1, startBeat: 0, endBeat: 1, timeSignatureDenominator: 4, beatOffset: 5 },
+], 0, 1);
+assert.equal(pickupGrid.find((line) => line.kind === 'measure').label, 'B. 1 · 6');
 const smooth = math.smoothPitchBounds({ min: 50, max: 60 }, { min: 60, max: 70 }, 90, 180);
 assert.ok(smooth.bounds.min > 50 && smooth.bounds.min < 60 && smooth.animating, 'pitch viewport interpolates without jumping');
 

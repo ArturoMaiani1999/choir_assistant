@@ -33,6 +33,10 @@ class WrittenMeasure:
     index: int
     time_signature_numerator: int
     time_signature_denominator: int
+    # Number of metrical beats omitted before a partial (pickup) measure.
+    # The performance timeline still starts at zero; the UI can therefore
+    # label a one-quarter 6/4 pickup as beat 6 instead of beat 1.
+    beat_offset: float = 0.0
     # Circle-of-fifths value: negative for flat keys, positive for sharp keys.
     # The rehearsal UI uses it to preserve the score's enharmonic spelling.
     key_fifths: int = 0

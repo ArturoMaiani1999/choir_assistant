@@ -5,18 +5,19 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <meta name="theme-color" content="#081419" />
     <title>Vocal Coach</title>
-    <link rel="stylesheet" href="styles.css?v=20260926-library-titles" />
-    <script src="practice_math.js?v=20260909-smooth-pitch" defer></script>
-    <script src="score_runtime.js?v=20260909-playback-fix" defer></script>
-    <script src="pitch_detector.js?v=20260918-octave-guard" defer></script>
-    <script src="app.js?v=20260926-library-titles" defer></script>
+    <link rel="stylesheet" href="styles.css?v=20260926-v1-plume-custom" />
+    <script src="practice_math.js?v=20260927-pickup-timing" defer></script>
+    <script src="score_runtime.js?v=20260927-pickup-timing" defer></script>
+    <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.0/dist/ort.min.js" defer></script>
+    <script src="pitch_detector.js?v=20260926-v7-tracker-settings" defer></script>
+    <script src="app.js?v=20260927-pickup-timing" defer></script>
   </head>
   <body>
     <main class="practice-shell" aria-label="Strumento di prova">
       <header class="practice-toolbar">
-        <button class="icon-button" id="exit-practice" type="button" aria-label="Esci dalla prova" title="Esci">←</button>
+        <button class="mode-button change-piece-button" id="exit-practice" type="button">Cambia brano</button>
         <div class="piece-identity" aria-live="polite">
-          <button class="piece-picker-button" id="piece-picker" type="button" aria-label="Scegli un brano"><strong id="piece-title">Caricamento…</strong></button><span aria-hidden="true">·</span>
+          <button class="piece-picker-button" id="piece-picker" type="button" aria-label="Scegli un brano"><strong id="piece-title">Caricamento…</strong></button>
           <label class="part-control"><span class="sr-only">Parte vocale</span><select id="part-selector" aria-label="Parte vocale"></select></label>
         </div>
         <div class="toolbar-actions">
@@ -29,7 +30,15 @@
           <button class="mode-button" id="score-mode" type="button" aria-pressed="false">Partitura</button>
           <button class="mode-button" id="exercise" type="button">Esercizio</button>
           <button class="mode-button microphone-button" id="microphone" type="button" aria-pressed="false">Microfono</button>
-          <button class="mode-button" id="settings" type="button" aria-label="Apri revisione admin">Revisione</button>
+          <details class="toolbar-more">
+            <summary aria-label="Altri strumenti">Altro</summary>
+            <div class="toolbar-more-menu">
+              <button class="mode-button diagnostic-button" id="benchmark" type="button">Benchmark</button>
+              <button class="mode-button diagnostic-button" id="neural-live" type="button" aria-pressed="false" title="Confronto CREPE v5 sperimentale: non altera il punteggio">Neurale live</button>
+              <button class="mode-button" id="settings" type="button">Impostazioni</button>
+              <button class="mode-button" id="admin-review" type="button" aria-label="Apri revisione admin">Revisione</button>
+            </div>
+          </details>
         </div>
       </header>
 
@@ -51,7 +60,12 @@
         <canvas id="pitch-lane" role="img" aria-describedby="pitch-description"></canvas>
         <p class="sr-only" id="pitch-description">Le note target scorrono da destra verso la linea Ora fissa. La traiettoria mostra l’intonazione rilevata dal microfono.</p>
         <div class="intonation-readout" id="intonation-readout" aria-live="polite"><strong id="live-note">—</strong><span id="live-cents">— ¢</span><small id="live-state">in attesa</small></div>
-        <div class="lane-legend" aria-hidden="true"><span class="voice-key">Voce rilevata</span><span class="target-key">Target reale</span></div>
+        <div class="lane-legend" aria-label="Tracce visibili nel piano roll">
+          <label class="pitch-layer-toggle voice-key"><input id="pitch-layer-v1" type="checkbox" checked /> V1 plume</label>
+          <label class="pitch-layer-toggle plume-key"><input id="pitch-layer-crepe" type="checkbox" checked /> CREPE plume</label>
+          <span class="target-key">Target reale</span>
+        </div>
+        <output class="neural-live-status" id="neural-live-status" hidden aria-live="polite"><span>CREPE v5</span><strong id="neural-live-note">—</strong><small id="neural-live-timing">in attesa</small></output>
         <meter id="microphone-level" min="0" max="0.08" value="0" aria-label="Livello del microfono" title="Livello del microfono"></meter>
       </section>
 
@@ -65,6 +79,7 @@
       </footer>
       <audio id="backing-audio" preload="auto"></audio>
       <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
+      <aside class="benchmark-recording" id="benchmark-recording" aria-live="assertive" hidden><span><b>● Registrazione benchmark</b><small id="benchmark-live-scenario"></small></span><button id="benchmark-stop-live" type="button" onclick="window.ChoirBenchmarkStop?.()">Interrompi take</button></aside>
     </main>
     <dialog id="exercise-dialog" class="practice-dialog">
       <h2>Una frase alla volta</h2>
@@ -77,6 +92,40 @@
       <button id="test-microphone" class="mode-button" type="button">Attiva / disattiva microfono</button>
       <meter id="test-microphone-level" min="0" max="0.08" value="0" aria-label="Livello del microfono nella preparazione"></meter>
       <div class="dialog-actions"><button id="phrase-apply" type="button">Studia questa frase</button><button id="phrase-clear" type="button">Brano intero</button><button id="exercise-close" type="button">Chiudi</button></div>
+    </dialog>
+    <dialog id="settings-dialog" class="practice-dialog detector-settings-dialog" aria-labelledby="settings-heading">
+      <h2 id="settings-heading">Impostazioni rilevamento</h2>
+      <p>Questa regolazione agisce solo sulla soglia di volume del detector v1 live. Non modifica CREPE né rielabora le take già salvate.</p>
+      <section class="detector-setting" aria-labelledby="settings-v1-rms-heading">
+        <div><h3 id="settings-v1-rms-heading">Soglia volume d’ingresso</h3><output id="settings-v1-rms-value">0,0010 RMS</output></div>
+        <input id="settings-v1-rms" type="range" min="0" max="100" step="1" value="50" aria-describedby="settings-v1-rms-description" />
+        <div class="detector-setting-scale"><span>Più sensibile</span><span>Più selettiva</span></div>
+        <p id="settings-v1-rms-description">Valore predefinito: filtra silenzio e rumore debole.</p>
+      </section>
+      <section class="detector-setting" aria-labelledby="settings-v1-tracker-heading">
+        <div><h3 id="settings-v1-tracker-heading">Memoria del tracker v1</h3><output id="settings-v1-median-frames-value">3 frame</output></div>
+        <label class="detector-setting-label tracker-setting-label" for="settings-v1-fast-alpha">Reattività in attacco <output id="settings-v1-fast-alpha-value">65%</output></label>
+        <input id="settings-v1-fast-alpha" type="range" min="5" max="95" step="5" value="65" />
+        <div class="detector-setting-scale"><span>Più filtrata</span><span>Più reattiva</span></div>
+        <label class="detector-setting-label tracker-setting-label" for="settings-v1-slow-alpha">Reattività stabile <output id="settings-v1-slow-alpha-value">30%</output></label>
+        <input id="settings-v1-slow-alpha" type="range" min="5" max="95" step="5" value="30" />
+        <div class="detector-setting-scale"><span>Più filtrata</span><span>Più reattiva</span></div>
+        <label class="detector-setting-label" for="settings-v1-median-frames">Finestra mediana</label>
+        <input id="settings-v1-median-frames" type="range" min="1" max="7" step="2" value="3" />
+        <div class="detector-setting-scale"><span>1 · reattiva</span><span>7 · robusta</span></div>
+        <p>Reattività alta e una mediana corta riducono il ritardo, ma lasciano passare più instabilità e salti brevi.</p>
+      </section>
+      <section class="detector-setting" aria-labelledby="settings-v1-plume-heading">
+        <div><h3 id="settings-v1-plume-heading">Aspetto plume v1</h3><output id="settings-v1-plume-width-value">100%</output></div>
+        <label class="detector-setting-label" for="settings-v1-plume-width">Larghezza</label>
+        <input id="settings-v1-plume-width" type="range" min="35" max="220" step="5" value="100" />
+        <div class="detector-setting-scale"><span>Più stretta</span><span>Più ampia</span></div>
+        <div class="detector-setting-colour"><label for="settings-v1-plume-color">Colore <input id="settings-v1-plume-color" type="color" value="#63c8c2" /></label><label for="settings-v1-plume-intensity">Intensità <output id="settings-v1-plume-intensity-value">100%</output></label></div>
+        <input id="settings-v1-plume-intensity" type="range" min="15" max="200" step="5" value="100" />
+        <p>Queste opzioni cambiano solo il rendering della plume ciano: non alterano F0, confidenza o punteggio v1.</p>
+      </section>
+      <p class="library-note">Abbassare la soglia può riconoscere attacchi più deboli, ma può anche aumentare falsi pitch da respiro, rumore o accompagnamento.</p>
+      <div class="dialog-actions"><button id="settings-reset" type="button">Ripristina predefinito</button><button id="settings-close" type="button">Chiudi</button></div>
     </dialog>
     <dialog id="result-dialog" class="practice-dialog">
       <h2>Prova completata</h2><p id="result-text"></p><p id="result-progress"></p>
@@ -99,5 +148,50 @@
       <p id="ground-truth-count" class="ground-truth-count"></p>
       <div class="dialog-actions"><button id="ground-truth-start" type="button">Avvia acquisizione qui</button><button id="ground-truth-approve" type="button" disabled>Interrompi e approva</button><button id="ground-truth-close" type="button">Chiudi</button></div>
     </dialog>
+    <dialog id="benchmark-dialog" class="practice-dialog benchmark-dialog" aria-labelledby="benchmark-heading">
+      <p class="dialog-eyebrow">RACCOLTA DATI LOCALE</p>
+      <h2 id="benchmark-heading">Registra un take benchmark</h2>
+      <p class="benchmark-intro">Scegli il test, conferma il setup e avvia dal principio. Audio e dati del detector rimangono su questo browser.</p>
+      <div class="benchmark-setup-section" id="benchmark-setup-section">
+        <div class="benchmark-fields">
+          <label>Test <select id="benchmark-scenario" aria-label="Scenario benchmark"></select></label>
+          <label>Take n.<input id="benchmark-repeat" type="number" min="1" max="99" value="1" inputmode="numeric" /></label>
+        </div>
+        <label class="benchmark-check"><input id="benchmark-setup" type="checkbox" /> Ho cuffie, ambiente e microfono pronti.</label>
+      </div>
+      <p id="benchmark-status" class="library-note">Verrai riportato all’inizio del brano. Poi registreremo e avvieremo subito la prova.</p>
+      <p id="benchmark-count" class="ground-truth-count"></p>
+      <div class="dialog-actions benchmark-primary-actions" id="benchmark-primary-actions"><button id="benchmark-start" type="button" disabled>Inizia take dal principio</button><button id="benchmark-close" type="button">Annulla</button></div>
+      <section class="benchmark-review-actions" id="benchmark-review-actions" hidden aria-label="Revisione take">
+        <h3>Take pronto</h3><p>Ascoltalo se vuoi, poi conservalo oppure scartalo.</p>
+        <div class="dialog-actions"><button id="benchmark-listen" type="button" disabled>Ascolta</button><button id="benchmark-accept" type="button" disabled>Conserva take</button><button id="benchmark-discard" type="button" disabled>Scarta take</button></div>
+      </section>
+      <section class="benchmark-archive" id="benchmark-archive" hidden aria-labelledby="benchmark-archive-heading">
+        <div class="benchmark-archive-heading"><div><p class="dialog-eyebrow">ARCHIVIO LOCALE</p><h3 id="benchmark-archive-heading">Take registrati</h3></div><span id="benchmark-algorithm-label">v1</span></div>
+        <label>Ispeziona <select id="benchmark-take-list" aria-label="Take benchmark registrato"></select></label>
+        <div class="benchmark-take-summary" id="benchmark-take-summary"></div>
+        <div class="dialog-actions benchmark-archive-actions"><button id="benchmark-open-analysis" type="button">Apri analisi del take</button></div>
+      </section>
+    </dialog>
+    <section class="benchmark-analysis" id="benchmark-analysis" hidden aria-label="Analisi take benchmark">
+      <header class="benchmark-analysis-header">
+        <button class="analysis-back" id="benchmark-analysis-back" type="button">← Torna alla prova</button>
+        <div class="analysis-title"><p>ANALISI LOCALE · TAKE REGISTRATO</p><h1>Pitch tracking</h1></div>
+        <label class="analysis-take-picker">Take <select id="benchmark-analysis-take" aria-label="Take da analizzare"></select></label>
+      </header>
+      <main class="benchmark-analysis-main">
+        <aside class="analysis-sidebar">
+          <section class="analysis-card"><p class="analysis-kicker">TAKE SELEZIONATO</p><h2 id="benchmark-analysis-name">—</h2><p id="benchmark-analysis-meta">—</p><audio id="benchmark-analysis-audio" controls preload="metadata"></audio></section>
+          <section class="analysis-card"><p class="analysis-kicker">SINTESI DEL CONFRONTO</p><dl id="benchmark-analysis-metrics" class="analysis-metrics"></dl></section>
+          <section class="analysis-card"><p class="analysis-kicker">ALGORITMI</p><div class="analysis-algorithm active"><span>v1</span><div><strong>YIN-style + tracker</strong><small>baseline registrata</small></div></div><div class="analysis-algorithm rejected"><span>v2</span><div><strong>Continuità armonica</strong><small>scartato: non migliora questa take</small></div></div><div class="analysis-algorithm rejected"><span>v3</span><div><strong>YIN multi-candidato</strong><small>scartato: più falsi positivi di voicing</small></div></div><div class="analysis-algorithm experimental"><span>v4</span><div><strong>MPM / NSDF</strong><small id="benchmark-analysis-v4-status">V4: analisi in attesa</small></div></div><p class="analysis-empty">V4 analizza l'audio della stessa take con un estimatore indipendente e non usa il target dello spartito.</p></section>
+          <section class="analysis-card"><p class="analysis-kicker">NUOVO CONFRONTO</p><div class="analysis-algorithm experimental"><span>v5</span><div><strong>CREPE tiny / ONNX</strong><small id="benchmark-analysis-v5-status">V5: analisi neurale in attesa</small></div></div><p class="analysis-empty">Modello neurale indipendente, eseguito localmente sulla stessa take e senza consultare il target dello spartito.</p></section>
+        </aside>
+        <section class="analysis-workspace">
+          <header class="analysis-workspace-header"><div><p class="analysis-kicker">PIANO ROLL DEL TAKE</p><h2>Target e rilevamento</h2></div><div class="analysis-tools"><span id="benchmark-analysis-inspect">Vista completa</span><button id="benchmark-analysis-reset" type="button">Adatta</button><div class="analysis-layer-toggles" aria-label="Livelli probabilistici"><label><input id="benchmark-analysis-layer-raw" type="checkbox" checked /> Raw</label><label><input id="benchmark-analysis-layer-audio" type="checkbox" checked /> Audio</label><label><input id="benchmark-analysis-layer-score" type="checkbox" checked /> Score-aware</label></div><div class="analysis-legend"><span class="target-key">Target score</span><span class="raw-key">YIN grezzo</span><span class="voice-key">Tracking v1</span><span class="v5-key">CREPE raw</span><span class="audio-key">Posterior audio</span><span class="score-key">Posterior score</span></div></div></header>
+          <canvas id="benchmark-analysis-roll" aria-label="Piano roll del take con note target e pitch tracking v1"></canvas>
+          <footer class="analysis-workspace-footer"><span id="benchmark-analysis-time">0:00 / 0:00</span><span id="benchmark-analysis-help">Tracce spezzate su salti incerti · rotella: zoom tempo · Shift + rotella: zoom pitch · trascina: esplora.</span></footer>
+        </section>
+      </main>
+    </section>
   </body>
 </html>

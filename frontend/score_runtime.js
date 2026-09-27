@@ -67,7 +67,7 @@
         const measure = this.measures.find((item) => item.id === occurrence.writtenMeasureId);
         return {
           number: measure?.number ?? '?',
-          beatInMeasure: Math.max(0, safeBeat - occurrence.startBeat) + 1,
+          beatInMeasure: (measure?.beatOffset ?? 0) + Math.max(0, safeBeat - occurrence.startBeat) + 1,
           occurrenceIndex: occurrence.occurrenceIndex,
         };
       }
@@ -125,6 +125,7 @@
         number: measure.number,
         timeSignatureNumerator: measure.time_signature_numerator,
         timeSignatureDenominator: measure.time_signature_denominator,
+        beatOffset: measure.beat_offset ?? 0,
         keyFifths: measure.key_fifths ?? 0,
       }));
       const beatsPerMeasure = measures[0]?.timeSignatureNumerator ?? 4;

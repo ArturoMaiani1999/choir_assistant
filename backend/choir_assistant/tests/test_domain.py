@@ -70,6 +70,18 @@ class RuntimeScoreTests(unittest.TestCase):
         self.assertEqual(score.measures[0].key_fifths, 0)
         self.assertEqual(score.measures[1].key_fifths, -1)
 
+    def test_musicxml_preserves_a_six_four_pickup_as_beat_six(self) -> None:
+        fixture = Path(__file__).parent / "fixtures" / "six_four_pickup.musicxml"
+        score = compile_musicxml(fixture)
+
+        self.assertEqual(score.measures[0].beat_offset, 5)
+        self.assertEqual(
+            [(item.start_beat, item.end_beat) for item in score.performance_occurrences[:2]],
+            [(0.0, 1.0), (1.0, 7.0)],
+        )
+        self.assertEqual(score.target_events[0].onset_beats, 0.0)
+        self.assertEqual(score.target_events[1].onset_beats, 1.0)
+
     def test_musicxml_flattens_repeat_with_second_ending(self) -> None:
         fixture = Path(__file__).parent / "fixtures" / "repeat_endings.musicxml"
         score = compile_musicxml(fixture)

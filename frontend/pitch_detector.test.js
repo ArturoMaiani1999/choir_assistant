@@ -3,7 +3,7 @@ const assert = require('node:assert/strict');
 global.window = global;
 require('./pitch_detector.js');
 
-const { PitchSmoother } = global.ChoirPitch;
+const { PitchSmoother, OctaveAwarePitchTracker, yinCandidates, decodeYinCandidatePath, mpmCandidates, decodeCrepeProbabilities } = global.ChoirPitch;
 const estimate = (hz, clarity = 0.9, confidence = 0.9) => ({ hz, rms: 0.08, clarity, confidence });
 const cents = (hz, reference) => 1200 * Math.log2(hz / reference);
 const frame = (smoother, hz, index) => smoother.update(estimate(hz), index * 20);
@@ -12,6 +12,77 @@ const frame = (smoother, hz, index) => smoother.update(estimate(hz), index * 20)
   const smoother = new PitchSmoother();
   const frames = [440, 440, 440].map((hz, index) => frame(smoother, hz, index));
   assert.equal(frames.at(-1).accepted, true, 'stable pitch is accepted after warm-up');
+}
+
+{
+  const tracker = new OctaveAwarePitchTracker();
+  [440, 440, 440].forEach((hz, index) => frame(tracker, hz, index));
+  frame(tracker, null, 3);
+  const octaveAttack = frame(tracker, 220, 4);
+  const recovered = frame(tracker, 440, 5);
+  assert.ok(Math.abs(cents(octaveAttack.hz, 440)) < 20, 'v2 retains the prior through a short unvoiced attack gap');
+  assert.equal(octaveAttack.rejectionReason, 'octave-held', 'v2 labels a held octave candidate');
+  assert.ok(Math.abs(cents(recovered.hz, 440)) < 20, 'v2 returns to the stable pitch without an octave flip');
+}
+
+{
+  const sampleRate = 8000;
+  const buffer = Float32Array.from({ length: 1024 }, (_, index) => (
+    .38 * Math.sin(2 * Math.PI * 220 * index / sampleRate)
+    + .72 * Math.sin(2 * Math.PI * 440 * index / sampleRate)
+  ));
+  const result = yinCandidates(buffer, sampleRate);
+  assert.ok(result.candidates.length >= 2, 'multi-candidate YIN retains more than one periodic hypothesis');
+  assert.ok(result.candidates.some((candidate) => Math.abs(cents(candidate.hz, 220)) < 80), 'fundamental remains available among harmonic candidates');
+}
+
+{
+  const sampleRate = 8000;
+  const quietTone = Float32Array.from({ length: 1024 }, (_, index) => .0008 * Math.sin(2 * Math.PI * 220 * index / sampleRate));
+  assert.equal(global.ChoirPitch.detectPitch(quietTone, sampleRate).hz, null, 'default RMS threshold rejects a very quiet input');
+  assert.ok(Number.isFinite(global.ChoirPitch.detectPitch(quietTone, sampleRate, { rmsThreshold: .0001 }).hz), 'configurable RMS threshold can admit a quiet periodic input');
+}
+
+{
+  const probabilities = new Float32Array(360);
+  probabilities[228] = .94;
+  probabilities[227] = .5;
+  probabilities[229] = .5;
+  const result = decodeCrepeProbabilities(probabilities);
+  assert.ok(Math.abs(result.confidence - .94) < 1e-6, 'CREPE decoder preserves the peak activation as confidence');
+  assert.ok(result.hz > 430 && result.hz < 450, 'CREPE decoder maps the 20-cent bin grid to an A4-range frequency');
+}
+
+{
+  const sampleRate = 8000;
+  const buffer = Float32Array.from({ length: 1024 }, (_, index) => (
+    .55 * Math.sin(2 * Math.PI * 196 * index / sampleRate)
+    + .12 * Math.sin(2 * Math.PI * 392 * index / sampleRate)
+  ));
+  const result = mpmCandidates(buffer, sampleRate);
+  assert.ok(result.candidates.length > 0, 'MPM produces a voiced candidate for a periodic tenor-range signal');
+  assert.ok(Math.abs(cents(result.candidates[0].hz, 196)) < 25, 'MPM estimates the fundamental from an NSDF peak');
+}
+
+{
+  const candidateFrames = [
+    [{ hz: 440, cmnd: .02 }, { hz: 220, cmnd: .25 }],
+    [{ hz: 440, cmnd: .02 }, { hz: 220, cmnd: .25 }],
+    [{ hz: 440, cmnd: .18 }, { hz: 220, cmnd: .08 }],
+    [{ hz: 440, cmnd: .18 }, { hz: 220, cmnd: .08 }],
+    [{ hz: 440, cmnd: .02 }, { hz: 220, cmnd: .25 }],
+    [{ hz: 440, cmnd: .02 }, { hz: 220, cmnd: .25 }],
+  ].map((candidates) => ({ candidates }));
+  const path = decodeYinCandidatePath(candidateFrames);
+  assert.ok(path.every((candidate) => candidate.hz === 440), 'decoder rejects a brief lower harmonic excursion when the continuous path wins');
+}
+
+{
+  const tracker = new OctaveAwarePitchTracker();
+  [440, 440, 440].forEach((hz, index) => frame(tracker, hz, index));
+  const octave = [220, 220, 220, 220, 220, 220].map((hz, index) => frame(tracker, hz, index + 3));
+  assert.ok(octave.slice(0, -1).every((result) => Math.abs(cents(result.hz, 440)) < 20), 'v2 holds isolated or brief octave alternatives');
+  assert.ok(Math.abs(cents(octave.at(-1).hz, 220)) < 20, 'v2 accepts a sustained genuine octave change');
 }
 
 {
@@ -48,6 +119,14 @@ const frame = (smoother, hz, index) => smoother.update(estimate(hz), index * 20)
   [440, 440, 440].forEach((hz, index) => frame(smoother, hz, index));
   const step = frame(smoother, 493.883, 3);
   assert.equal(step.accepted, true, 'small melodic movement is accepted without delay');
+}
+
+{
+  const smoother = new PitchSmoother();
+  smoother.configure({ fastAlpha: .9, slowAlpha: .8, medianWindowFrames: 1 });
+  assert.equal(smoother.fastAlpha, .9, 'tracker accepts a live-configured attack reactivity');
+  assert.equal(smoother.slowAlpha, .8, 'tracker accepts a live-configured sustained reactivity');
+  assert.equal(smoother.medianWindowFrames, 1, 'tracker accepts a live-configured median window');
 }
 
 {

@@ -21,6 +21,7 @@ An unreviewed transcription is never authoritative and is never exposed to singe
 - [Agentic PDF ingestion pipeline](docs/INGESTION_PIPELINE.md)
 - [Implementation plan](docs/IMPLEMENTATION_PLAN.md)
 - [Legacy pitch-tracking audit](docs/LEGACY_PITCH_TRACKING_AUDIT.md)
+- [Tenor recording benchmark plan](docs/TENOR_RECORDING_BENCHMARK_PLAN.md)
 - [Practice UX specification](docs/PRACTICE_UX_SPEC.md)
 - [Practice redesign plan](docs/PRACTICE_REDESIGN_PLAN.md)
 - [Practice redesign progress](docs/PRACTICE_REDESIGN_PROGRESS.md)
@@ -90,6 +91,15 @@ calibrated against a labelled vocal dataset. The browser currently requests a
 mono microphone with echo cancellation and noise suppression disabled, but
 automatic gain control enabled.
 
+The **Impostazioni** button exposes v1's RMS input gate (default `0.001`,
+configurable from `0.0001` to `0.01`) and saves it locally for the selected
+practice part. It also exposes v1's attack and sustained smoothing factors and
+the 1/3/5/7-frame median window, plus the live plume's vertical width, opacity
+intensity, and color. The plume controls are visual only; the tracker controls
+are applied live and recorded in new benchmark-take metadata. Lower RMS values
+admit quieter attacks but also make breath, room noise and accompaniment
+leakage more likely to be considered by v1.
+
 Questions to take to a pitch-detection expert: whether to retain a lightweight
 YIN/pYIN family detector with probabilistic voicing and score-aware tracking,
 or use a modern neural F0 estimator; how to evaluate candidates on the
@@ -98,6 +108,26 @@ pitch, vibrato, octave errors, and accompaniment leakage without making the
 feedback feel laggy. The module API is deliberately separate from the UI so a
 WebAssembly or AudioWorklet-based detector can replace it without rewriting
 the scoring interface.
+
+### Offline neural comparison (v5)
+
+The **Benchmark** analysis page can run a separate CREPE tiny neural F0
+estimator against an already saved take. It is deliberately offline and does
+not alter the live v1 detector or the practice score. The local model processes
+16 kHz, 1,024-sample centred windows every 50 ms; the UI compares its output
+with v1 on exactly that grid. The model file is in `frontend/models/` with its
+source and checksum recorded in `CREPE_TINY_LICENSE.md`.
+
+The browser loads the pinned ONNX Runtime Web dependency when opening a v5
+analysis, but the recorded audio, decoded samples, pitch frames and take data
+are never uploaded: all inference is executed in the browser.
+
+`Neurale live` is an explicit experimental comparison mode. It keeps v1 as the
+only pitch used for feedback and scoring, draws CREPE as a separate pink trace,
+and reports the rolling p50/p95 time spent by v5 beside the measured v1
+estimator time on that browser. It uses single 64 ms windows, not the offline
+batching strategy, so the displayed figures are directly useful for deciding
+whether a production real-time integration is viable.
 
 ### Monodic pieces
 

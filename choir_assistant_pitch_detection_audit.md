@@ -1,14 +1,28 @@
 # choir_assistant — Audit e piano tecnico per pitch detection e scoring
 
-**Destinatario:** Codex / agente di sviluppo  
+**Destinatario:** esperto esterno di F0/pitch tracking vocale e team di sviluppo<br>
 **Ambito:** DSP, rilevazione monofonica della frequenza fondamentale (F0), tracking temporale e valutazione dell'intonazione nel browser.  
-**Stato del documento:** *audit preliminare basato sulla descrizione dell'architettura fornita dal committente*. **Non è un audit del codice effettivamente ispezionato.** Prima di implementare modifiche, leggere il repository e verificare ogni dettaglio riportato di seguito.
+**Stato del documento:** revisione del codice effettuata il **2026-09-27**. La baseline descritta nelle sezioni 1–3 è verificata contro `frontend/pitch_detector.js`, `frontend/app.js`, `frontend/score_runtime.js` e i test Node disponibili. Il repository era in worktree modificato: prima di una valutazione riproducibile, consegnare all'esperto un commit/tag o un archivio dello snapshot effettivamente eseguito, non il solo hash di `HEAD`.
+
+**Limite essenziale dell'evidenza:** i dati correnti di benchmark confrontano il pitch con il target MusicXML; non costituiscono una ground truth acustica frame-per-frame. Le cifre in cent e i salti servono a generare ipotesi, non a dimostrare l'accuratezza assoluta di un estimatore F0.
 
 ## 1. Contesto e obiettivo
 
 `choir_assistant` è una piattaforma privata di studio corale. Il riferimento musicale canonico è il MusicXML approvato, derivato da un `.mscz` verificato da un amministratore; una timeline di esecuzione collega le note dello spartito al playback. La webapp offre feedback di intonazione per una **singola voce** acquisita dal microfono, idealmente con l'accompagnamento nelle cuffie. L'analisi rimane locale nel browser.
 
 Attualmente `frontend/pitch_detector.js` implementa uno stimatore F0 ispirato a YIN, seguito da regole euristiche di filtraggio e scoring. Il sistema è dichiaratamente un prototipo e il repository conserva una legacy Flutter solo come riferimento.
+
+## Stato sperimentale corrente
+
+- **v1** è la baseline live: YIN-style a candidato singolo più `PitchSmoother`.
+- **v2** (prior breve e guardia d'ottava sul solo `rawHz`) è stato provato su una take di tenore e non è un candidato live attivo. L'osservazione disponibile è errore dal target invariato e più salti rapidi; senza ID take, intervallo annotato e reference F0 indipendente non è una conclusione generalizzabile.
+- **v3** (YIN multi-candidato con decoder temporale) è disponibile nell'analisi offline e non è stato promosso al live. Sulla prova disponibile ha aumentato falsi voicing e salti rapidi; il risultato va ripetuto sul corpus controllato.
+- **v4** (MPM/NSDF) è disponibile nell'analisi offline e non è stato promosso al live. La misura riportata su una take è 39 salti oltre 700¢ contro 4 per v1, con mediana di deviazione dal target invariata (19¢). Non chiamare quest'ultima «errore F0» finché manca una reference acustica indipendente.
+- **v5** è il confronto **offline** attivo: CREPE tiny in formato ONNX decodifica localmente l'audio WebM/Opus registrato, lo ricampiona a 16 kHz e valuta finestre centrate da 1024 campioni ogni 50 ms. Il confronto associa a ogni frame v5 il frame v1 live temporalmente più vicino: i due stimatori non hanno quindi lo stesso hop né vedono necessariamente lo stesso PCM. Il modello non altera v1 né lo score di gioco.
+- **v5 live** è una sonda sperimentale, non un sostituto di v1: esegue un frame CREPE di 1024 campioni ricampionati a 16 kHz sulla finestra recente del microfono, con limite di avvio di 50 ms. Mostra una traccia rosa e registra p50/p95 di inferenza sul browser reale. V1 resta la sola sorgente di scoring.
+- **MVP posterior probabilistico** è disponibile solo nell'analisi offline della take: conserva la salience CREPE grezza, calcola un filtro forward audio-only e una variante score-aware con prior attivo soltanto vicino ai confini MusicXML. I tre livelli sono attivabili separatamente; il target non modifica mai la salience e il prior conserva massa per transizioni inattese.
+
+v5 è il primo confronto neurale: serve a capire se gli artefatti agli attacchi e gli scambi tra armoniche sono causati dallo stimatore YIN, prima di ritoccare ancora il tracker live. Il peso del modello è locale, ma ONNX Runtime Web/WASM è al momento caricato da CDN: nessun audio viene inviato in rete, tuttavia la dipendenza runtime non è offline-first.
 
 **Domanda ingegneristica:** come aumentare affidabilità e correttezza musicale del feedback, senza introdurre latenza avvertibile, consumo CPU eccessivo o dipendenza da servizi remoti?
 
@@ -20,25 +34,33 @@ Attualmente `frontend/pitch_detector.js` implementa uno stimatore F0 ispirato a 
 
 Un miglioramento del numero 2 o del numero 3 non implica necessariamente che il numero 1 sia migliore. Nel benchmark i tre livelli vanno esaminati separatamente.
 
-## 2. Baseline dichiarata da verificare nel codice
+## 2. Baseline live verificata nel codice
 
 | Componente | Comportamento dichiarato |
 |---|---|
 | Input | Buffer microfonico da 4.096 campioni, letto in corrispondenza degli animation frame; sample rate nativo browser |
 | Stima F0 | YIN-style squared difference e cumulative mean normalized difference (CMND), ricerca 70–1.000 Hz |
 | Selezione | Primo minimo discendente sotto soglia CMND `0.42`, interpolazione parabolica su tre punti |
-| Silenzio | Scarto quando RMS `< 0.001` |
+| Silenzio | Scarto quando RMS `< 0.001` per default; l'utente può impostare `0.0001`–`0.01` per parte |
 | Qualità | `clarity = 1 - CMND(minimum)`; `confidence` = clarity moltiplicata per un termine di livello saturato a RMS `0.08` |
 | Accettazione | Clarity ≥ `0.45`, confidence ≥ `0.30`; tre frame vocalizzati per conferma; rilascio dopo tre frame respinti |
-| Filtro | Mediana di tre frame in pitch logaritmico; smoothing esponenziale `α = 0.65` all'avvio e `α = 0.30` dopo |
+| Filtro | Per default mediana di tre frame in pitch logaritmico; smoothing esponenziale `α = 0.65` all'avvio e `α = 0.30` dopo. RMS, alpha e mediana (1/3/5/7) sono modificabili nella UI e salvati per parte |
 | Salti | Fino a 300 cent immediati; salti maggiori confermati da tre frame coerenti entro 100 cent; ottave confermate da cinque frame |
 | Valutazione | Comparazione con la nota MusicXML attiva dopo un grace period di attacco; «in tune» entro ±30 cent, «centred» entro ±12 |
 | Denominatore | Frame non vocalizzati/incerti esclusi dalla percentuale di intonazione |
 | Acquisizione | Microfono mono; echo cancellation e noise suppression disabilitati; automatic gain control abilitato |
 
-**Attenzione:** la selezione di un minimo con CMND `< 0.42` implica già una clarity `> 0.58`, se quella stessa CMND viene usata anche nel controllo successivo. In questo percorso la soglia `clarity ≥ 0.45` è quindi ridondante. Verificare se esistano fallback che invalidano tale conclusione: non rimuovere la soglia senza ispezione.
+**Osservazione verificata:** la selezione del primo minimo con CMND `< 0.42` implica già clarity `> 0.58`; per il percorso live v1 la soglia successiva `clarity ≥ 0.45` è quindi ridondante. La confidence, invece, può ancora rigettare il frame perché include il livello RMS. Non rimuovere la soglia senza test di regressione: conserva comunque semantica diagnostica e compatibilità con i comparatori.
 
 Una finestra di 4.096 campioni rappresenta circa 85,3 ms di audio a 48 kHz. **La durata della finestra non coincide automaticamente con la latenza end-to-end:** quest'ultima comprende acquisizione, scheduling dei frame, elaborazione, conferma del tracking e rendering. Va misurata empiricamente.
+
+### 2.1 Evidenza disponibile e lacune diagnostiche
+
+Il pulsante diagnostico **Benchmark** salva localmente in IndexedDB audio WebM/Opus, configurazione, browser user-agent, sample rate, `audioTimeSec`, beat, RMS, `rawHz`, `trackedHz`, clarity, confidence, voicing, motivo di rigetto e target. Sono presenti test sintetici per tono, soglia RMS, armoniche, MPM/CREPE e guardie d'ottava.
+
+Non sono ancora disponibili: CMND o superficie completa dei candidati v1 nei take; timestamp esplicito del centro della finestra del live; identificativo/misura del microfono e ambiente; export esplicito JSON+audio; annotazione F0/voicing indipendente; misura end-to-end microfono→UI/scoring. Inoltre, dopo il `PitchSmoother`, la confidence salvata per un frame non accettato è azzerata: la clarity e `rawHz` restano, ma non tutta la confidence dell'estimatore raw.
+
+Le metriche visualizzate nell'analisi benchmark calcolano `|1200 log2(f_est/f_target)|` rispetto al target MusicXML. Sono utili per il feedback didattico e per confronti esplorativi a parità di take, ma non distinguono una stonatura reale del cantante da un errore dell'estimatore.
 
 ## 3. Principali criticità e ipotesi tecniche
 
@@ -244,58 +266,33 @@ Conservare dati appaiati: stessi input audio, stessa timeline e stessi target pe
 5. Scoring istantaneo vs scoring robusto su nota, controllando sensibilità ai veri errori.
 6. Eventuale modello neurale: beneficio misurato rispetto alla migliore baseline DSP, considerando anche startup, download, memoria e latenza.
 
-## 8. Roadmap operativa per Codex
+## 8. Stato implementativo e prossimi esperimenti
 
-### Fase 0 — Ispezione e baseline **prima delle modifiche**
+### Già implementato
 
-- Leggere `frontend/pitch_detector.js` e le sue chiamate dalla Practice UI, il sistema di score/timeline e la gestione del microfono.
-- Leggere `docs/LEGACY_PITCH_TRACKING_AUDIT.md`, `docs/PRACTICE_UX_SPEC.md`, `docs/PRACTICE_REDESIGN_PLAN.md`, `docs/PLAYBACK_SYNC_AUDIT.md`, `docs/IMPLEMENTATION_PLAN.md`.
-- Confermare nel codice tutti i dettagli della sezione 2; segnalare discrepanze e dipendenze nascoste.
-- Identificare dove sono applicati grace period, matching delle note, calcolo denominatore, gestione pause e trasposizione di ottava delle parti monodiche.
-- Definire **una sola** fonte di timestamp e un metodo per misurare la latenza end-to-end.
-- Congelare una baseline riproducibile: test esistenti, fixture, parametri, risultati e commit di riferimento.
+- baseline v1, telemetria e fixture sintetiche per le guardie d'ottava;
+- Benchmark locale con take WebM/Opus e dati frame-by-frame in IndexedDB;
+- comparatori offline v2, v3 (YIN multi-candidato), v4 (MPM/NSDF) e v5 (CREPE tiny);
+- CREPE live come sonda separata e posterior CREPE audio-only/score-aware solo offline;
+- scelta esplicita: v1 rimane l'unico percorso live di feedback e scoring.
 
-**Deliverable:** nota tecnica sintetica con mappa dei moduli, rischi reali verificati e piano di modifica minimo. Nessun cambio comportamentale in questa fase.
+### Priorità 1 — rendere l'evidenza valutabile
 
-### Fase 1 — Osservabilità e benchmark
+1. Esportare esplicitamente audio, JSON del take e hash/versione del codice; non inviare mai audio implicitamente.
+2. Registrare campioni con timestamp del centro finestra, configurazione completa del tracker e, quando consentito, device/microfono dichiarato.
+3. Annotare in modo indipendente piccoli segmenti vocalizzati: on/off voicing, F0 o nota percepita, attacco ambiguo, vibrato, errore intenzionale.
+4. Separare nel report deviazione dal target, errore F0 rispetto alla reference, voicing, copertura, salti e latenza.
 
-- Estrarre una API di stima F0 utilizzabile offline sullo stesso PCM del live, oppure aggiungere un adapter equivalente.
-- Salvare nei test raw F0/candidati, CMND/quality, RMS, pitch filtrato, target e timestamp senza sovrascrivere i valori iniziali.
-- Inserire fixture sintetiche deterministiche: sinusoidale, segnale armonico, silenzio, cambi di nota, salti d'ottava, vibrato controllato.
-- Aggiungere metriche separate per errore acustico, voicing, lag, scoring e copertura.
-- Mantenere i take in IndexedDB locale; non introdurre upload impliciti né invio del microfono a terzi.
+### Priorità 2 — attribuire la causa dell'imprecisione
 
-**Deliverable:** comando/test ripetibile con risultati in formato machine-readable e tabella A/B.
+1. Riprodurre su stesso audio e stessa reference l'errore raw di YIN, l'effetto del `PitchSmoother` e quello dello scoring.
+2. Misurare il jitter del hop RAF, il ritardo finestra→UI e il ritardo di riconoscimento di attacchi, intervalli e ottave vere.
+3. Confrontare condizioni pulite, vibrato, consonanti, rumore e leakage; includere gli errori intenzionali E01/E02.
+4. Solo dopo scegliere se l'intervento prioritario è: candidati/voicing, tracker, audio clock regolare, oppure un nuovo estimatore.
 
-### Fase 2 — Miglioramenti DSP a basso rischio
+### Gate di adozione
 
-- Profilare la differenza YIN e il tempo per frame sui dispositivi obiettivo.
-- Sperimentare decimazione con filtro antialiasing, finestre e hop, preservando le voci gravi.
-- Valutare un comparatore JavaScript indipendente (es. Pitchy/MPM) dietro la stessa interfaccia.
-- Eliminare soglie ridondanti **solo dopo** aver verificato il relativo percorso esecutivo.
-- Se utile, spostare l'acquisizione su audio clock regolare senza bloccare il real-time audio thread.
-
-**Gate:** adottare una variante soltanto con evidenza di un compromesso migliore tra precisione, latenza e costo, non perché più sofisticata.
-
-### Fase 3 — Tracker e scoring musicale
-
-- Implementare una modalità tracker alternativo *feature-flagged*, senza sovrascrivere il tracker legacy.
-- Introdurre target e transizioni consentite come prior **debole** nel tracking.
-- Preservare la F0 raw, il disaccordo col target e l'incertezza.
-- Separare accuratezza condizionata, copertura e non-valutato.
-- Considerare un riassunto robusto del pitch centrale per note sostenute; non usarlo automaticamente per note brevi.
-- Testare casi di note sbagliate e di ottave sbagliate, in particolare quando lo score-aware tende a ricondurre l'ipotesi al target.
-
-**Gate:** il tracker deve migliorare stabilità/lag *senza* ridurre la capacità di rilevare errori musicali reali.
-
-### Fase 4 — Benchmark neurale opzionale
-
-- Prototipare fuori dal percorso UI un piccolo modello F0 neurale solo dopo aver misurato le baseline DSP.
-- Confrontare su input identici, includendo load time, memoria, inferenza, lookahead, latenza totale e browser supportati.
-- Verificare licenze e distribuzione dei pesi, non solo del codice.
-- Mantenere il detector DSP come fallback se la rete è troppo pesante o non supportata.
-
-**Gate:** integrare in produzione solo se il miglioramento è significativo per gli scenari reali di canto e non deteriora l'esperienza live sui dispositivi obiettivo.
+Una variante può sostituire v1 solo se migliora un compromesso misurato su corpus e dispositivi dichiarati, senza nascondere E01/E02, aumentare la latenza percepita o introdurre dipendenze incompatibili con l'elaborazione locale.
 
 ## 9. Vincoli di prodotto e criteri di accettazione
 
@@ -307,9 +304,23 @@ Conservare dati appaiati: stessi input audio, stessa timeline e stessi target pe
 - **Compatibilità:** preservare selezione SATB, convenzione delle ottave monodiche, sync playback e source-of-truth MusicXML approvata.
 - **Test:** nessun cambiamento nel sistema di scoring senza fixture e test di regressione sulle note errate e sulle pause.
 
-## 10. Istruzioni operative da passare a Codex
+## 10. Domande per l'esperto esterno
 
-> Esamina prima il repository e verifica le assunzioni di questo audit: il documento deriva da una descrizione, non da una lettura diretta del codice. Non avviare un refactor indiscriminato e non aggiungere nuovi framework senza una necessità misurata. Parti dalla **Fase 0**: mappa il flusso microfono → F0 → tracking → timeline/target → scoring → UI; identifica le regole effettive e i punti di latenza; segnala le discrepanze rispetto alla baseline riportata. Poi proponi la minima sequenza di modifiche verificabili per costruire benchmark e comparatori, preservando la modalità esistente. Se passi all'implementazione, lavora per piccoli commit logici con test e risultati misurabili. Priorità: evitare falsi errori di ottava, riconoscere i salti reali, trattare correttamente vibrato e silenzio, preservare i veri errori del cantante, mantenere una bassa latenza percepita. Non sostituire YIN con una rete neurale prima di aver stabilito e misurato la baseline.
+1. Considerata la scelta del **primo** minimo CMND sotto 0,42, quale failure mode è più probabile su voce cantata reale: subarmoniche/armoniche, aperiodicità di attacco, formanti o leakage? Quale diagnostica minima permetterebbe di distinguerli?
+2. La combinazione di finestra da 4096 campioni, hop RAF variabile, mediana e conferma di 3/5 frame è un compromesso adeguato per tenore/basso e salti melodici? Quali valori o architettura causale suggerirebbe di provare per primi?
+3. Come definirebbe voicing, F0 raw e una metrica di accuratezza che non confonda la stonatura del cantante con l'errore dell'estimatore?
+4. È preferibile migliorare prima il candidato YIN/voicing, passare a pYIN/MPM/WASM, o impiegare un estimatore neurale streaming? Quale esperimento discriminante a basso costo consiglierebbe?
+5. Come separare visualizzazione, feedback immediato e scoring robusto in presenza di attacchi, consonanti, vibrato e portamento?
+6. Quali limiti di latenza e quali metriche di transizione sono musicalmente accettabili per il feedback corale live?
+7. Il prior score-aware offline è formulato in modo prudente? Quali controlli negativi aggiungerebbe per dimostrare che non corregga artificialmente E01/E02?
+
+### Materiale da allegare alla richiesta
+
+- questo documento e uno snapshot immutabile del codice, in particolare `frontend/pitch_detector.js` e i passaggi microfono/benchmark in `frontend/app.js`;
+- audio e JSON di almeno 3–5 take: nota stabile, attacco/consonante, salto reale d'ottava, octave error intenzionale e leakage/rumore;
+- browser, sistema operativo, microfono, sample rate, distanza indicativa e impostazioni audio per ogni take;
+- segmenti annotati indipendentemente. Il solo MusicXML deve rimanere target musicale, non reference F0;
+- risultati separati di v1–v5 sullo stesso materiale, con criterio di associazione temporale dichiarato.
 
 ---
 

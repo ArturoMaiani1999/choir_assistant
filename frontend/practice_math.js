@@ -28,13 +28,15 @@
       const denominator = measure.timeSignatureDenominator || 4;
       const pulse = 4 / denominator;
       const subdivision = Math.max(.25, pulse / 2);
-      lines.push({ beat: measure.startBeat, kind: 'measure', label: `B. ${measure.number}` });
+      const beatOffset = measure.beatOffset ?? 0;
+      const pickupBeat = beatOffset > 0 ? ` · ${Math.round(beatOffset) + 1}` : '';
+      lines.push({ beat: measure.startBeat, kind: 'measure', label: `B. ${measure.number}${pickupBeat}` });
       const slots = Math.round((measure.endBeat - measure.startBeat) / subdivision);
       for (let slot = 1; slot < slots; slot += 1) {
         const offset = slot * subdivision;
         const pulseIndex = offset / pulse;
         const isPulse = Math.abs(pulseIndex - Math.round(pulseIndex)) < 1e-7;
-        lines.push({ beat: measure.startBeat + offset, kind: isPulse ? 'beat' : 'subdivision', label: isPulse ? String(Math.round(pulseIndex) + 1) : null });
+        lines.push({ beat: measure.startBeat + offset, kind: isPulse ? 'beat' : 'subdivision', label: isPulse ? String(Math.round(pulseIndex + beatOffset) + 1) : null });
       }
       if (index === measures.length - 1) lines.push({ beat: measure.endBeat, kind: 'measure', label: null });
     });
