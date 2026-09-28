@@ -10,6 +10,8 @@
     <script src="score_runtime.js?v=20260927-pickup-timing" defer></script>
     <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.0/dist/ort.min.js" defer></script>
     <script src="pitch_detector.js?v=20260926-v7-tracker-settings" defer></script>
+    <script src="one_euro_filter.js?v=20260927-phase2" defer></script>
+    <script src="pitch_test_harness.js?v=20260927-phase0" defer></script>
     <script src="app.js?v=20260927-pickup-timing" defer></script>
   </head>
   <body>
@@ -96,6 +98,12 @@
     <dialog id="settings-dialog" class="practice-dialog detector-settings-dialog" aria-labelledby="settings-heading">
       <h2 id="settings-heading">Impostazioni rilevamento</h2>
       <p>Questa regolazione agisce solo sulla soglia di volume del detector v1 live. Non modifica CREPE né rielabora le take già salvate.</p>
+      <section class="detector-setting" aria-labelledby="settings-display-pitch-heading">
+        <div><h3 id="settings-display-pitch-heading">Traccia visualizzata</h3></div>
+        <label for="settings-display-pitch-algorithm">Algoritmo display</label>
+        <select id="settings-display-pitch-algorithm"><option value="v1+display-filter" selected>v1 + filtro adattivo</option><option value="v1">v1 puro (baseline)</option></select>
+        <p>Il filtro agisce solo sulla plume. Pitch di scoring e valutazione restano quelli di v1 puro.</p>
+      </section>
       <section class="detector-setting" aria-labelledby="settings-v1-rms-heading">
         <div><h3 id="settings-v1-rms-heading">Soglia volume d’ingresso</h3><output id="settings-v1-rms-value">0,0010 RMS</output></div>
         <input id="settings-v1-rms" type="range" min="0" max="100" step="1" value="50" aria-describedby="settings-v1-rms-description" />
@@ -122,7 +130,10 @@
         <div class="detector-setting-scale"><span>Più stretta</span><span>Più ampia</span></div>
         <div class="detector-setting-colour"><label for="settings-v1-plume-color">Colore <input id="settings-v1-plume-color" type="color" value="#63c8c2" /></label><label for="settings-v1-plume-intensity">Intensità <output id="settings-v1-plume-intensity-value">100%</output></label></div>
         <input id="settings-v1-plume-intensity" type="range" min="15" max="200" step="5" value="100" />
-        <p>Queste opzioni cambiano solo il rendering della plume ciano: non alterano F0, confidenza o punteggio v1.</p>
+        <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-advance">Anticipo temporale <output id="settings-v1-plume-advance-value">200 ms</output></label>
+        <input id="settings-v1-plume-advance" type="range" min="0" max="200" step="10" value="200" />
+        <div class="detector-setting-scale"><span>0 ms · timestamp reale</span><span>200 ms · più anticipata</span></div>
+        <p>Queste opzioni cambiano solo il rendering della plume ciano: l’anticipo compensa visivamente parte del ritardo, ma non altera timestamp, F0, confidenza o punteggio v1.</p>
       </section>
       <p class="library-note">Abbassare la soglia può riconoscere attacchi più deboli, ma può anche aumentare falsi pitch da respiro, rumore o accompagnamento.</p>
       <div class="dialog-actions"><button id="settings-reset" type="button">Ripristina predefinito</button><button id="settings-close" type="button">Chiudi</button></div>
@@ -183,13 +194,13 @@
         <aside class="analysis-sidebar">
           <section class="analysis-card"><p class="analysis-kicker">TAKE SELEZIONATO</p><h2 id="benchmark-analysis-name">—</h2><p id="benchmark-analysis-meta">—</p><audio id="benchmark-analysis-audio" controls preload="metadata"></audio></section>
           <section class="analysis-card"><p class="analysis-kicker">SINTESI DEL CONFRONTO</p><dl id="benchmark-analysis-metrics" class="analysis-metrics"></dl></section>
-          <section class="analysis-card"><p class="analysis-kicker">ALGORITMI</p><div class="analysis-algorithm active"><span>v1</span><div><strong>YIN-style + tracker</strong><small>baseline registrata</small></div></div><div class="analysis-algorithm rejected"><span>v2</span><div><strong>Continuità armonica</strong><small>scartato: non migliora questa take</small></div></div><div class="analysis-algorithm rejected"><span>v3</span><div><strong>YIN multi-candidato</strong><small>scartato: più falsi positivi di voicing</small></div></div><div class="analysis-algorithm experimental"><span>v4</span><div><strong>MPM / NSDF</strong><small id="benchmark-analysis-v4-status">V4: analisi in attesa</small></div></div><p class="analysis-empty">V4 analizza l'audio della stessa take con un estimatore indipendente e non usa il target dello spartito.</p></section>
+          <section class="analysis-card"><p class="analysis-kicker">ALGORITMI</p><div class="analysis-algorithm active"><span>v1</span><div><strong>YIN-style + tracker</strong><small>baseline scoring, sempre selezionabile</small></div></div><div class="analysis-algorithm experimental"><span>v1+</span><div><strong>Filtro adattivo display</strong><small>One Euro; non entra nello scoring</small></div></div><div class="analysis-algorithm rejected"><span>v2</span><div><strong>Continuità armonica</strong><small>scartato: non migliora questa take</small></div></div><div class="analysis-algorithm rejected"><span>v3</span><div><strong>YIN multi-candidato</strong><small>scartato: più falsi positivi di voicing</small></div></div><div class="analysis-algorithm experimental"><span>v4</span><div><strong>MPM / NSDF</strong><small id="benchmark-analysis-v4-status">V4: analisi in attesa</small></div></div><p class="analysis-empty">V4 analizza l'audio della stessa take con un estimatore indipendente e non usa il target dello spartito.</p></section>
           <section class="analysis-card"><p class="analysis-kicker">NUOVO CONFRONTO</p><div class="analysis-algorithm experimental"><span>v5</span><div><strong>CREPE tiny / ONNX</strong><small id="benchmark-analysis-v5-status">V5: analisi neurale in attesa</small></div></div><p class="analysis-empty">Modello neurale indipendente, eseguito localmente sulla stessa take e senza consultare il target dello spartito.</p></section>
         </aside>
         <section class="analysis-workspace">
-          <header class="analysis-workspace-header"><div><p class="analysis-kicker">PIANO ROLL DEL TAKE</p><h2>Target e rilevamento</h2></div><div class="analysis-tools"><span id="benchmark-analysis-inspect">Vista completa</span><button id="benchmark-analysis-reset" type="button">Adatta</button><div class="analysis-layer-toggles" aria-label="Livelli probabilistici"><label><input id="benchmark-analysis-layer-raw" type="checkbox" checked /> Raw</label><label><input id="benchmark-analysis-layer-audio" type="checkbox" checked /> Audio</label><label><input id="benchmark-analysis-layer-score" type="checkbox" checked /> Score-aware</label></div><div class="analysis-legend"><span class="target-key">Target score</span><span class="raw-key">YIN grezzo</span><span class="voice-key">Tracking v1</span><span class="v5-key">CREPE raw</span><span class="audio-key">Posterior audio</span><span class="score-key">Posterior score</span></div></div></header>
-          <canvas id="benchmark-analysis-roll" aria-label="Piano roll del take con note target e pitch tracking v1"></canvas>
-          <footer class="analysis-workspace-footer"><span id="benchmark-analysis-time">0:00 / 0:00</span><span id="benchmark-analysis-help">Tracce spezzate su salti incerti · rotella: zoom tempo · Shift + rotella: zoom pitch · trascina: esplora.</span></footer>
+          <header class="analysis-workspace-header"><div><p class="analysis-kicker">PIANO ROLL DEL TAKE</p><h2>Target e rilevamento</h2></div><div class="analysis-tools"><span id="benchmark-analysis-inspect">Vista completa</span><button id="benchmark-analysis-reset" type="button">Adatta</button><div class="analysis-layer-toggles" aria-label="Tracce e livelli probabilistici"><label><input id="benchmark-analysis-layer-v1" type="checkbox" checked /> v1</label><label><input id="benchmark-analysis-layer-display" type="checkbox" checked /> v1+ display</label><label><input id="benchmark-analysis-layer-raw" type="checkbox" checked /> CREPE raw</label><label><input id="benchmark-analysis-layer-audio" type="checkbox" checked /> Audio</label><label><input id="benchmark-analysis-layer-score" type="checkbox" checked /> Score-aware</label></div><div class="analysis-legend"><span class="target-key">Target score</span><span class="raw-key">YIN grezzo</span><span class="voice-key">Tracking v1</span><span class="display-key">v1+ display</span><span class="v5-key">CREPE raw</span><span class="audio-key">Posterior audio</span><span class="score-key">Posterior score</span></div></div></header>
+          <canvas id="benchmark-analysis-roll" tabindex="0" aria-label="Piano roll del take: clicca per posizionare il cursore di riproduzione"></canvas>
+          <footer class="analysis-workspace-footer"><div class="analysis-transport"><button id="benchmark-analysis-play-selection" type="button">▶ Riproduci da qui</button><span id="benchmark-analysis-selection">Cursore: inizio</span><span id="benchmark-analysis-time">0:00 / 0:00</span></div><span id="benchmark-analysis-help">Clic: posiziona · doppio clic: riproduci · spazio: play/pausa · trascina: esplora · rotella: zoom tempo · Shift + rotella: zoom pitch.</span></footer>
         </section>
       </main>
     </section>

@@ -22,6 +22,7 @@ def main():
         process = subprocess.Popen([
             str(CHROME), '--headless=new', '--disable-gpu',
             '--autoplay-policy=no-user-gesture-required', '--remote-allow-origins=*',
+            '--use-fake-device-for-media-stream', '--use-fake-ui-for-media-stream',
             '--remote-debugging-port=0', f'--user-data-dir={profile}', args.url,
         ], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
         socket = None
@@ -36,12 +37,16 @@ def main():
             else:
                 raise RuntimeError('Chrome did not start')
             tabs = json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/json'))
-            page = next(tab for tab in tabs if tab.get('type') == 'page')
+            page = next(tab for tab in tabs if tab.get('type') == 'page' and tab.get('url', '').startswith(args.url))
             socket = websocket.create_connection(page['webSocketDebuggerUrl'], timeout=20)
-            time.sleep(.8)
+            for call_id in range(10, 90):
+                if evaluate(socket, call_id, "typeof state !== 'undefined' && Boolean(state.runtime)"):
+                    break
+                time.sleep(.1)
             result = evaluate(socket, 1, """(async () => {
               const assert = (value, message) => { if (!value) throw Error(message); };
               assert(state.runtime, 'runtime initialized');
+              assert(state.plumeSettings.timeAdvanceMs === 200, 'global default visual advance');
               assert(els.transpose.options.length === 25, 'semitone and octave options');
               // Approval is stubbed in this isolated test profile, never persisted.
               state.bundleApproved = true;
@@ -53,11 +58,13 @@ def main():
               els.transpose.value = '-12'; els.transpose.dispatchEvent(new Event('change'));
               await ready;
               assert(els.backingAudio.duration > 1 && Number.isFinite(els.backingAudio.duration), 'transposed audio decoded');
-              const target = state.runtime.targetAt(0);
-              state.livePitch = target.midiPitch - 12;
-              renderReadout(0, false);
+              const target = state.runtime.targetEvents[0];
+              const targetBeat = target.onsetBeat + Math.min(.01, target.durationBeats / 2);
+              state.trackedPitch = target.midiPitch - 12;
+              state.displayPitch = state.trackedPitch;
+              renderReadout(targetBeat, false);
               assert(els.liveState.textContent === 'centrato', 'transposed comparison centered');
-              state.transpose = 0; renderReadout(0, false);
+              state.transpose = 0; renderReadout(targetBeat, false);
               assert(els.liveState.textContent.includes('ottava sotto'), 'octave feedback');
               state.transpose = -12;
               els.exercise.click();
@@ -67,6 +74,7 @@ def main():
               state.clock.seekBeat(state.occurrenceMeasures[1].endBeat); render();
               await new Promise(resolve => setTimeout(resolve, 400));
               assert(state.clock.running && state.clock.snapshot().beat < 2, 'automatic loop restarts: ' + JSON.stringify({snapshot:state.clock.snapshot(),toast:els.toast.textContent,active:state.attemptActive}));
+              assert(state.microphoneStatus === 'active', 'Play automatically activates microphone');
               state.clock.pause(); state.autoLoop = false; state.attemptActive = false;
               state.attempt = {voicedMs:2000, insideMs:1500}; finishAttempt();
               assert(els.resultDialog.open && els.resultText.textContent.startsWith('75%'), 'phrase summary');
@@ -77,13 +85,35 @@ def main():
               state.attempt = {voicedMs:0, insideMs:0}; finishAttempt();
               assert(els.resultText.textContent.includes('insufficienti'), 'silence not scored');
               els.resultClose.click();
+              els.settingsV1PlumeAdvance.value = '120';
+              els.settingsV1PlumeAdvance.dispatchEvent(new Event('input'));
+              assert(state.plumeSettings.timeAdvanceMs === 120, 'visual pitch advance setting');
+              const sourceBeat = Math.min(10, totalBeats() - 1);
+              const shiftedBeat = visuallyAdvancedPitchBeat(sourceBeat);
+              const shiftedSeconds = state.runtime.secondsAtBeat(sourceBeat) - state.runtime.secondsAtBeat(shiftedBeat);
+              assert(shiftedBeat < sourceBeat && Math.abs(shiftedSeconds - .12) < .002,
+                'visual pitch advance is timestamp-only: ' + JSON.stringify({sourceBeat,shiftedBeat,shiftedSeconds}));
+              els.settingsV1Rms.value = '0';
+              els.settingsV1Rms.dispatchEvent(new Event('input'));
+              assert(Math.abs(state.detectorSettings.rmsThreshold - .00001) < 1e-10,
+                'extended quiet-voice sensitivity');
+              assert(els.settingsV1RmsValue.textContent.startsWith('0,00001'), 'low RMS value remains readable');
               savePreferences();
-              return {duration:els.backingAudio.duration, transpose:state.transpose, phrase:state.phrase};
+              const piecePreferences = JSON.parse(localStorage.getItem(preferenceKey()));
+              for (const key of ['v1RmsThreshold','v1FastAlpha','v1SlowAlpha','v1MedianWindowFrames','v1PlumeWidth',
+                'v1PlumeIntensity','v1PlumeColor','v1PlumeAdvanceMs','displayPitchAlgorithm','pitchLayerV1','pitchLayerCrepe']) delete piecePreferences[key];
+              localStorage.setItem(preferenceKey(), JSON.stringify(piecePreferences));
+              assert(JSON.parse(localStorage.getItem(GLOBAL_DETECTOR_PREFERENCES_KEY)).v1PlumeAdvanceMs === 120,
+                'detector preferences saved globally');
+              return {duration:els.backingAudio.duration, transpose:state.transpose, phrase:state.phrase,
+                plumeAdvanceMs:state.plumeSettings.timeAdvanceMs, rmsThreshold:state.detectorSettings.rmsThreshold};
             })()""")
             command(socket, 2, 'Page.reload')
             time.sleep(.8)
-            restored = evaluate(socket, 3, """({transpose:state.transpose, phrase:state.phrase})""")
-            assert restored['transpose'] == -12 and restored['phrase']['end'] == 1, restored
+            restored = evaluate(socket, 3, """({transpose:state.transpose, phrase:state.phrase,
+              plumeAdvanceMs:state.plumeSettings.timeAdvanceMs, rmsThreshold:state.detectorSettings.rmsThreshold})""")
+            assert (restored['transpose'] == 0 and restored['phrase']['end'] == 1
+                    and restored['plumeAdvanceMs'] == 120 and abs(restored['rmsThreshold'] - .00001) < 1e-10), restored
             print(json.dumps({'features': result, 'restored': restored}, indent=2))
         finally:
             if socket:

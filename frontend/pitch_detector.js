@@ -84,7 +84,12 @@
     }
 
     const clarity = Math.max(0, Math.min(1, 1 - center));
-    const levelConfidence = Math.max(0, Math.min(1, rms / 0.08));
+    // Preserve the frozen v1 behaviour at the default threshold. When the
+    // singer deliberately selects a more sensitive gate, allow a strongly
+    // periodic whisper-level signal to reach the tracker instead of rejecting
+    // it a second time solely because of absolute amplitude.
+    const sensitivityConfidenceFloor = effectiveRmsThreshold < 0.001 ? 0.36 : 0;
+    const levelConfidence = Math.max(sensitivityConfidenceFloor, Math.max(0, Math.min(1, rms / 0.08)));
     return {
       hz,
       rms,

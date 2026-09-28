@@ -41,6 +41,12 @@ const frame = (smoother, hz, index) => smoother.update(estimate(hz), index * 20)
   const quietTone = Float32Array.from({ length: 1024 }, (_, index) => .0008 * Math.sin(2 * Math.PI * 220 * index / sampleRate));
   assert.equal(global.ChoirPitch.detectPitch(quietTone, sampleRate).hz, null, 'default RMS threshold rejects a very quiet input');
   assert.ok(Number.isFinite(global.ChoirPitch.detectPitch(quietTone, sampleRate, { rmsThreshold: .0001 }).hz), 'configurable RMS threshold can admit a quiet periodic input');
+  const whisperedTone = Float32Array.from({ length: 1024 }, (_, index) => .00008 * Math.sin(2 * Math.PI * 220 * index / sampleRate));
+  const whispered = global.ChoirPitch.detectPitch(whisperedTone, sampleRate, { rmsThreshold: .00001 });
+  assert.ok(Number.isFinite(whispered.hz) && whispered.confidence >= .3, 'extended sensitivity admits a periodic whisper-level input to the tracker');
+  const smoother = new PitchSmoother();
+  const tracked = [0, 1, 2].map(index => smoother.update(whispered, index * 20));
+  assert.equal(tracked.at(-1).accepted, true, 'whisper-level pitch survives detector and tracker gates');
 }
 
 {
