@@ -2,7 +2,10 @@
 
 ## Current implementation
 
-The browser pitch lab uses a dependency-free YIN-style detector in [frontend/pitch_detector.js](../frontend/pitch_detector.js). The page supplies microphone frames through an `AnalyserNode`; microphone samples remain in the browser and are not uploaded.
+The browser pitch lab uses a dependency-free YIN-style detector in
+[frontend/pitch_detector.js](../../../frontend/pitch_detector.js). The page
+supplies microphone frames through an `AnalyserNode`; microphone samples remain
+in the browser and are not uploaded.
 
 The detector currently performs:
 

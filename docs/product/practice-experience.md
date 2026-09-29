@@ -1,5 +1,9 @@
 # Practice UX specification
 
+**Status:** canonical
+**Owner:** project maintainer
+**Last reviewed:** 2026-09-28
+
 Status: stable frontend decisions, 9 September 2026.
 
 ## Product hierarchy

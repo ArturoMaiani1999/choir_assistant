@@ -1,5 +1,9 @@
 # Free OMR consensus pipeline
 
+**Status:** operational reference; verify tool availability before use
+**Owner:** project maintainer
+**Last reviewed:** 2026-09-28
+
 This pipeline treats the PDF as evidence and never assumes an original Sibelius or other notation file exists.
 
 ```powershell

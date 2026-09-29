@@ -162,7 +162,7 @@ Valori iniziali da calibrare su device reali:
 3. Conservare, dietro un flag diagnostico, raw pitch, pitch accettato,
    clarity/confidence e motivo del rigetto. Non esporli nell'interfaccia del
    corista per default.
-4. Aggiornare `docs/PITCH_DETECTION_VALIDATION.md` con parametri, semantica di
+4. Aggiornare `validation.md` con parametri, semantica di
    `accepted` e limiti noti.
 
 ## Fase 4 — miglioramento opzionale: candidati YIN equivalenti

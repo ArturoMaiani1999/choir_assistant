@@ -1,7 +1,7 @@
 # choir_assistant — Audit e piano tecnico per pitch detection e scoring
 
 **Destinatario:** esperto esterno di F0/pitch tracking vocale e team di sviluppo<br>
-**Ambito:** DSP, rilevazione monofonica della frequenza fondamentale (F0), tracking temporale e valutazione dell'intonazione nel browser.  
+**Ambito:** DSP, rilevazione monofonica della frequenza fondamentale (F0), tracking temporale e valutazione dell'intonazione nel browser.
 **Stato del documento:** revisione del codice effettuata il **2026-09-27**. La baseline descritta nelle sezioni 1–3 è verificata contro `frontend/pitch_detector.js`, `frontend/app.js`, `frontend/score_runtime.js` e i test Node disponibili. Il repository era in worktree modificato: prima di una valutazione riproducibile, consegnare all'esperto un commit/tag o un archivio dello snapshot effettivamente eseguito, non il solo hash di `HEAD`.
 
 **Limite essenziale dell'evidenza:** i dati correnti di benchmark confrontano il pitch con il target MusicXML; non costituiscono una ground truth acustica frame-per-frame. Le cifre in cent e i salti servono a generare ipotesi, non a dimostrare l'accuratezza assoluta di un estimatore F0.

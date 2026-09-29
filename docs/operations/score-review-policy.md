@@ -1,5 +1,9 @@
 # Practice-score reconstruction policy
 
+**Status:** canonical
+**Owner:** project maintainer
+**Last reviewed:** 2026-09-28
+
 Status: canonical policy, 9 September 2026.
 
 ## Principle

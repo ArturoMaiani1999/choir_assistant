@@ -112,7 +112,7 @@ def main():
             time.sleep(.8)
             restored = evaluate(socket, 3, """({transpose:state.transpose, phrase:state.phrase,
               plumeAdvanceMs:state.plumeSettings.timeAdvanceMs, rmsThreshold:state.detectorSettings.rmsThreshold})""")
-            assert (restored['transpose'] == 0 and restored['phrase']['end'] == 1
+            assert (restored['transpose'] == 0 and restored['phrase'] is None
                     and restored['plumeAdvanceMs'] == 120 and abs(restored['rmsThreshold'] - .00001) < 1e-10), restored
             print(json.dumps({'features': result, 'restored': restored}, indent=2))
         finally:

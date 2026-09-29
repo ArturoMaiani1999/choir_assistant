@@ -1,7 +1,16 @@
 const { NormalizedScoreRuntime, MediaPlaybackClock } = window.ChoirScore;
 const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, measureSeekState, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
 const { detectPitch, PitchSmoother, OctaveAwarePitchTracker, yinCandidates, decodeYinCandidatePath, mpmCandidates, decodeCrepeProbabilities } = window.ChoirPitch;
+const PitchShared = window.ChoirPitchShared;
 const { OneEuroFilter } = window.ChoirOneEuro;
+const VocalFeedback = window.VocalFeedback;
+const RUNTIME_CONFIG = window.ChoirRuntimeConfig ?? Object.freeze({});
+
+function libraryBundleUrl(pieceId) {
+  const template = RUNTIME_CONFIG.bundleUrlTemplate;
+  if (!template) throw new Error('Configurazione della libreria incompleta');
+  return template.replace('{pieceId}', encodeURIComponent(pieceId));
+}
 
 /** @typedef {number|null} TrackedPitch MIDI pitch consumed only by scoring. */
 /** @typedef {number|null} DisplayPitch MIDI pitch consumed only by presentation. */
@@ -19,12 +28,14 @@ const UI_CONFIG = Object.freeze({
 
 const els = Object.fromEntries([
   'transpose', 'settings-display-pitch-algorithm',
+  'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-own', 'voice-mixer-close',
   'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close', 'settings-dialog', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-color', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-reset', 'settings-close',
   'result-dialog', 'result-text', 'result-progress', 'retry', 'next-phrase', 'result-close',
   'phrase-loop', 'note-names',
   'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-title', 'library-title-save', 'library-part', 'library-note', 'library-open', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-mode', 'settings',
   'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
   'score-loading', 'score-pitch-divider', 'pitch-lane', 'intonation-readout', 'live-note', 'live-cents', 'live-state', 'pitch-layer-v1', 'pitch-layer-crepe',
+  'feedback-analyse', 'feedback-status', 'feedback-priorities', 'feedback-priority-list', 'feedback-score-image', 'feedback-note-card', 'feedback-note-name', 'feedback-note-meta', 'feedback-cent-chart', 'feedback-note-metrics', 'feedback-message', 'feedback-previous', 'feedback-next', 'feedback-original', 'feedback-corrected', 'feedback-strength', 'feedback-strength-value', 'feedback-playback-kind',
   'measure-counter', 'scoring-cue', 'previous-measure', 'toggle-playback', 'next-measure', 'volume', 'metronome-toggle', 'metronome-volume', 'backing-audio', 'toast', 'asset-status', 'microphone',
 ].map((id) => [id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]));
 
@@ -48,6 +59,8 @@ const state = {
   rafId: null,
   lastAnnouncedState: '',
   backingManifest: null,
+  voiceStemAudio: new Map(),
+  selectedVoiceIds: new Set(),
   bundleManifest: null,
   bundleApproved: false,
   scoreGeometry: new Map(),
@@ -70,8 +83,8 @@ const state = {
   pitchSmoother: new PitchSmoother(),
   displayPitchFilter: new OneEuroFilter(),
   displayPitchAlgorithm: 'v1+display-filter',
-  detectorSettings: { rmsThreshold: .001, fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 },
-  plumeSettings: { width: 1, intensity: 1, color: '#63c8c2', timeAdvanceMs: 200 },
+  detectorSettings: { ...PitchShared.DETECTOR_DEFAULTS },
+  plumeSettings: { ...PitchShared.PLUME_DEFAULTS },
   pitchLayers: { v1: true, crepe: true },
   trackedPitch: null,
   displayPitch: null,
@@ -80,7 +93,7 @@ const state = {
   pitchSamples: [],
   pitchTakeId: 1,
   groundTruth: { capture: null },
-  benchmark: { capture: null, pending: null, previewUrl: null, sessionId: null, savedTakes: [], selectedTakeId: null, analysisAudioUrl: null, analysisPlaybackRaf: null, analysisLayers: { v1: true, display: true, raw: true, audio: true, score: true },
+  benchmark: { capture: null, pending: null, previewUrl: null, sessionId: null, savedTakes: [], selectedTakeId: null, analysisAudioUrl: null, correctedAudioUrl: null, correctedAudioKey: null, audioVariant: 'original', analysisPlaybackRaf: null, feedbackSource: null, analysisLayers: { v1: false, display: true, raw: false, audio: false, score: false },
     analysisView: { timeZoom: 1, pitchZoom: 1, centerBeat: null, pitchOffset: 0, pointer: null, inspectBeat: null, selectedBeat: null } },
   gridInspect: { active: false, viewBeat: 0, pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null },
 };
@@ -269,6 +282,73 @@ function loadScoreImage(page = 1) {
   els.scoreImage.alt = state.fullScore ? 'Partitura completa' : `Spartito: ${part?.name ?? 'parte selezionata'}`;
 }
 
+function voiceStemUrl(filename) {
+  return `${state.bundleManifest.assets.audio_root}/${filename}`;
+}
+
+function pauseVoiceStems() {
+  for (const audio of state.voiceStemAudio.values()) audio.pause();
+}
+
+function syncVoiceStemLevels() {
+  const count = Math.max(1, state.voiceStemAudio.size);
+  const level = Math.min(1, Number(els.volume.value) / 100 * .9 / Math.sqrt(count));
+  for (const audio of state.voiceStemAudio.values()) {
+    audio.volume = level;
+    audio.playbackRate = Number(els.playbackSpeed.value);
+    audio.preservesPitch = true;
+  }
+}
+
+function syncBackingLevel() {
+  const silentClock = Object.keys(state.backingManifest?.voice_stems ?? {}).length > 0
+    && !state.backingManifest?.accompaniment_file;
+  els.backingAudio.volume = silentClock ? 0 : Number(els.volume.value) / 100;
+}
+
+function configureVoiceStems() {
+  pauseVoiceStems();
+  state.voiceStemAudio.clear();
+  const stems = state.backingManifest?.voice_stems ?? {};
+  const mixerAvailable = Object.keys(stems).length > 0;
+  els.accompanimentMode.disabled = !mixerAvailable;
+  for (const partId of state.selectedVoiceIds) {
+    if (!stems[partId]) continue;
+    const audio = new Audio(voiceStemUrl(stems[partId]));
+    audio.preload = 'auto';
+    state.voiceStemAudio.set(partId, audio);
+  }
+  syncVoiceStemLevels();
+  els.accompanimentMode.textContent = !mixerAvailable ? 'Mix completo'
+    : state.voiceStemAudio.size ? `Voci · ${state.voiceStemAudio.size}` : 'Solo base';
+}
+
+async function playVoiceStems() {
+  const time = els.backingAudio.currentTime;
+  syncVoiceStemLevels();
+  await Promise.all([...state.voiceStemAudio.values()].map(async (audio) => {
+    if (Math.abs(audio.currentTime - time) > .04) audio.currentTime = time;
+    try { await audio.play(); } catch (_) { /* Master audio reports actionable playback errors. */ }
+  }));
+}
+
+function renderVoiceMixer() {
+  const stems = state.backingManifest?.voice_stems ?? {};
+  const parts = vocalParts(state.runtime).filter((part) => stems[part.id]);
+  els.voiceMixerOptions.replaceChildren(...parts.map((part) => {
+    const label = document.createElement('label');
+    const input = document.createElement('input');
+    input.type = 'checkbox'; input.value = part.id; input.checked = state.selectedVoiceIds.has(part.id);
+    input.addEventListener('change', () => {
+      if (input.checked) state.selectedVoiceIds.add(part.id); else state.selectedVoiceIds.delete(part.id);
+      configureVoiceStems();
+      if (state.clock.running) void playVoiceStems();
+    });
+    label.append(input, document.createTextNode(part.id === state.runtime.selectedPartId ? `${part.name} · mia parte` : part.name));
+    return label;
+  }));
+}
+
 function configureBacking() {
   if (!state.bundleApproved || !state.bundleManifest?.integrity?.consistent
       || state.backingManifest?.score_version_id !== state.runtime.scoreVersionId
@@ -281,15 +361,19 @@ function configureBacking() {
   if (!mix) { els.backingAudio.removeAttribute('src'); return; }
   const speed = Number(els.playbackSpeed.value);
   const speedFile = mix.files_by_speed?.[String(speed)];
-  state.usesPreRenderedSpeed = Boolean(speedFile);
-  const file = `${state.bundleManifest.assets.audio_root}/${speedFile ?? mix.file}`;
-  els.backingAudio.src = state.transpose
-    ? `/api/transpose?file=${encodeURIComponent(file)}&semitones=${state.transpose}`
+  state.usesPreRenderedSpeed = Boolean(speedFile) && !state.backingManifest.accompaniment_file;
+  const baseFile = state.backingManifest.accompaniment_file ?? speedFile ?? mix.file;
+  const file = `${state.bundleManifest.assets.audio_root}/${baseFile}`;
+  els.backingAudio.src = state.transpose && RUNTIME_CONFIG.transposeUrlTemplate
+    ? RUNTIME_CONFIG.transposeUrlTemplate
+      .replace('{file}', encodeURIComponent(file))
+      .replace('{semitones}', encodeURIComponent(state.transpose))
     : file;
   els.togglePlayback.disabled = false;
-  els.backingAudio.volume = Number(els.volume.value) / 100;
+  syncBackingLevel();
   els.backingAudio.playbackRate = state.usesPreRenderedSpeed ? 1 : speed;
   els.backingAudio.preservesPitch = true;
+  configureVoiceStems();
 }
 
 function buildScoreGeometry(partId) {
@@ -330,6 +414,10 @@ function scorePageFallbackSlots(svg, page) {
     const points = (line.getAttribute('points') ?? '').trim().split(/[\s,]+/).map(Number);
     return { x: points[0], y1: points[1], y2: points[3] };
   }).filter((line) => line.x != null && line.y1 != null && line.y2 != null);
+  const musicalSymbols = [...document.querySelectorAll('.Note, .Rest')].map((symbol) => {
+    const match = (symbol.getAttribute('d') ?? '').match(/^\s*M\s*([-+\d.eE]+)[,\s]+([-+\d.eE]+)/);
+    return match ? { x: Number(match[1]), y: Number(match[2]) } : null;
+  }).filter((symbol) => symbol && Number.isFinite(symbol.x) && Number.isFinite(symbol.y));
   const slots = [];
   for (let offset = 0, systemIndex = 0; offset + 4 < staffLines.length; offset += 5, systemIndex += 1) {
     const lines = staffLines.slice(offset, offset + 5);
@@ -339,8 +427,16 @@ function scorePageFallbackSlots(svg, page) {
     const barXs = [...new Set(barLines.filter((line) => Math.abs((line.y1 + line.y2) / 2 - centerY) < 420
       && line.x > startX + 20 && line.x <= endX + 25).map((line) => Math.round(line.x)).sort((a, b) => a - b))];
     let left = startX;
-    for (const right of barXs) {
-      if (right - left > 40) slots.push({ page, systemId: `fallback-p${page}-s${systemIndex}`, startX: left / width * 100,
+    for (let barIndex = 0; barIndex < barXs.length; barIndex += 1) {
+      const right = barXs[barIndex];
+      // On a new system the staff begins before clef, key and time signature.
+      // Anchor its first measure to the first actual note/rest instead.
+      const firstSymbolX = barIndex === 0
+        ? Math.min(...musicalSymbols.filter((symbol) => Math.abs(symbol.y - centerY) < 500
+          && symbol.x > left + 20 && symbol.x < right).map((symbol) => symbol.x))
+        : Number.POSITIVE_INFINITY;
+      const visualLeft = Number.isFinite(firstSymbolX) ? firstSymbolX : left;
+      if (right - visualLeft > 40) slots.push({ page, systemId: `fallback-p${page}-s${systemIndex}`, startX: visualLeft / width * 100,
         endX: right / width * 100, y_percent: centerY / height * 100, systemCenterY: centerY / height * 100 });
       left = right;
     }
@@ -494,7 +590,8 @@ function sampleMicrophone(beat, running) {
       if (Math.abs((state.trackedPitch - target.midiPitch - state.transpose) * 100) <= UI_CONFIG.acceptableCents) state.attempt.insideMs += elapsed;
     }
   }
-  if (state.displayPitch != null || rawPitch != null) {
+  // Retain invalid observations too: the renderer must see silence boundaries.
+  if (running || state.displayPitch != null || rawPitch != null) {
     const previous = state.pitchSamples.at(-1);
     const sample = { beat, trackedPitch: state.trackedPitch, displayPitch: state.displayPitch, rawPitch,
       confirmationState: state.pitchConfirmationState,
@@ -659,66 +756,12 @@ function drawStablePitchSegments(context, segments, xAt, yAt) {
   }
 }
 
-function drawLiveCrepePlume(context, samples, xAt, yAt, minPitch, maxPitch) {
-  context.save(); context.globalCompositeOperation = 'screen';
-  for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex += 1) {
-    const sample = samples[sampleIndex], salience = sample.salience;
-    if (!salience?.length) continue;
-    let peak = 0;
-    for (let index = 0; index < salience.length; index += 1) peak = Math.max(peak, salience[index]);
-    if (peak < .18) continue;
-    const x = xAt(sample), next = samples[sampleIndex + 1];
-    const halfWidth = Math.max(1, Math.min(5, next ? Math.abs(xAt(next) - x) / 2 : 2));
-    for (let index = 0; index < salience.length; index += 1) {
-      const pitch = crepeBinMidi(index);
-      if (pitch < minPitch || pitch > maxPitch) continue;
-      const relative = salience[index] / peak;
-      if (relative < .18) continue;
-      context.fillStyle = `rgba(243,166,208,${.18 * Math.pow(relative, .72)})`;
-      context.fillRect(x - halfWidth, yAt(pitch) - 3, halfWidth * 2, 6);
-    }
-  }
-  context.restore();
-}
-
-// v1 does not retain a full multi-candidate CMND surface in the live loop.
-// This is therefore an explicitly visual confidence plume around raw F0, not
-// a claim of a multimodal acoustic posterior. It costs only a few canvas fills.
-function drawLiveV1ConfidencePlume(context, samples, xAt, yAt, minPitch, maxPitch) {
-  const plumeWidth = state.plumeSettings.width;
-  const plumeIntensity = state.plumeSettings.intensity;
-  const colour = /^#([0-9a-f]{6})$/i.exec(state.plumeSettings.color)?.[1] ?? '63c8c2';
-  const red = Number.parseInt(colour.slice(0, 2), 16);
-  const green = Number.parseInt(colour.slice(2, 4), 16);
-  const blue = Number.parseInt(colour.slice(4, 6), 16);
-  context.save(); context.globalCompositeOperation = 'screen';
-  for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex += 1) {
-    const sample = samples[sampleIndex];
-    const provisional = sample.confirmationState === 'provisional';
-    if (provisional && sampleIndex % 2 === 1) continue;
-    const center = sample.displayPitch;
-    if (!Number.isFinite(center)) continue;
-    const confidence = Math.max(0, Math.min(1, sample.confidence ?? 0));
-    // This is an intentionally restrained display width: it communicates v1
-    // confidence without turning a single F0 estimate into a fictitious
-    // multi-semitone distribution.
-    const sigmaSemitones = (.08 + (1 - confidence) * .32) * plumeWidth;
-    const x = xAt(sample), next = samples[sampleIndex + 1];
-    // Span to the next frame rather than drawing isolated thin columns. The
-    // small overlap also makes the plume continuous when RAF cadence varies.
-    const width = Math.max(4, Math.min(18, next ? Math.abs(xAt(next) - x) + 2 : 8));
-    for (let offset = -3 * sigmaSemitones; offset <= 3 * sigmaSemitones; offset += .08) {
-      const pitch = center + offset;
-      if (pitch < minPitch || pitch > maxPitch) continue;
-      const relative = Math.exp(-.5 * (offset / sigmaSemitones) ** 2);
-      const alpha = Math.min(.55, (.025 + confidence * .1) * relative * plumeIntensity * (provisional ? .35 : 1));
-      context.fillStyle = `rgba(${red},${green},${blue},${alpha})`;
-      // 8px-high bands overlap at every practical piano-roll zoom: no black
-      // horizontal pinstripes between adjacent probability samples.
-      context.fillRect(x - width / 2, yAt(pitch) - 4, width, 8);
-    }
-  }
-  context.restore();
+function livePlumeSettings(displayBeat, inspecting, nowX, trailStartX) {
+  const speed = Math.max(.1, Number(els.playbackSpeed.value) || 1);
+  return { ...state.plumeSettings, nowX, trailStartX,
+    mode: inspecting ? 'review' : 'live', sortedTimeline: !inspecting,
+    currentTime: state.runtime.secondsAtBeat(displayBeat) / speed,
+    timeAt: sample => state.runtime.secondsAtBeat(sample.beat) / speed };
 }
 
 function visuallyAdvancedPitchBeat(beat) {
@@ -824,16 +867,23 @@ function drawPitchLane(beat) {
   ctx.save();
   ctx.beginPath(); ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top); ctx.clip();
   if (state.pitchLayers.v1) {
-    const v1PlumeSamples = state.pitchSamples.filter((sample) => sample.beat >= visibleStart && sample.beat <= visibleEnd);
-    drawLiveV1ConfidencePlume(ctx, v1PlumeSamples,
-      (sample) => timeToX(visuallyAdvancedPitchBeat(sample.beat), displayBeat, plot.left, plot.right, historyBeats, futureBeats),
-      (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), bounds.min, bounds.max);
+    const v1PlumeSamples = state.pitchSamples.filter((sample) => (inspecting || sample.takeId === state.pitchTakeId) && sample.beat >= visibleStart && sample.beat <= visibleEnd);
+    PitchShared.drawConfidencePlume(ctx, v1PlumeSamples,
+      (sample) => inspecting ? timeToX(sample.beat, displayBeat, plot.left, plot.right, historyBeats, futureBeats)
+        : Math.min(nowX, timeToX(visuallyAdvancedPitchBeat(sample.beat), displayBeat, plot.left, plot.right, historyBeats, futureBeats)),
+      (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), bounds.min, bounds.max,
+      livePlumeSettings(displayBeat, inspecting, inspecting ? plot.right : nowX, plot.left));
   }
   if (state.pitchLayers.crepe && (state.neuralLive.enabled || state.neuralLive.samples.length)) {
-    const plumeSamples = state.neuralLive.samples.filter((sample) => sample.beat >= visibleStart && sample.beat <= visibleEnd);
-    drawLiveCrepePlume(ctx, plumeSamples,
+    // CREPE salience is not a calibrated posterior. Keep its F0 trace separate
+    // and secondary, using the same density renderer rather than bin sprites.
+    const plumeSamples = state.neuralLive.samples.filter((sample) => (inspecting || sample.takeId === state.pitchTakeId) && sample.beat >= visibleStart && sample.beat <= visibleEnd)
+      .map(sample => ({ ...sample, displayPitch: sample.pitch, confidence: sample.salience?.length ? Math.max(...sample.salience) : 0 }));
+    PitchShared.drawConfidencePlume(ctx, plumeSamples,
       (sample) => timeToX(sample.beat, displayBeat, plot.left, plot.right, historyBeats, futureBeats),
-      (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), bounds.min, bounds.max);
+      (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), bounds.min, bounds.max,
+      { ...livePlumeSettings(displayBeat, inspecting, inspecting ? plot.right : nowX, plot.left), intensity: state.plumeSettings.intensity * .55,
+        palette: [[147,207,211], [113,153,183], [83,104,137]] });
   }
   ctx.restore(); ctx.shadowBlur = 0;
 
@@ -854,16 +904,6 @@ function drawPitchLane(beat) {
   }
 
   ctx.strokeStyle = '#f0cf8f'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(Math.round(nowX) + .5, plot.top); ctx.lineTo(Math.round(nowX) + .5, plot.bottom); ctx.stroke();
-  if (Number.isFinite(state.displayPitch) && state.displayPitch >= bounds.min && state.displayPitch <= bounds.max) {
-    const markerY = pitchToY(state.displayPitch, bounds.min, bounds.max, plot.top, plot.bottom);
-    const colour = /^#[0-9a-f]{6}$/i.test(state.plumeSettings.color) ? state.plumeSettings.color : '#63c8c2';
-    ctx.save();
-    ctx.globalAlpha = state.pitchConfirmationState === 'provisional' ? .58 : 1;
-    ctx.shadowColor = colour; ctx.shadowBlur = 9;
-    ctx.fillStyle = colour; ctx.beginPath(); ctx.arc(nowX, markerY, 6, 0, Math.PI * 2); ctx.fill();
-    ctx.shadowBlur = 0; ctx.strokeStyle = '#eaf5f2'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.restore();
-  }
   ctx.fillStyle = '#f0cf8f'; ctx.font = '700 9px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(inspecting ? 'VISTA' : 'ORA', nowX, 1);
   ctx.fillStyle = '#718788'; ctx.font = '9px Inter, sans-serif'; ctx.textAlign = 'left'; ctx.fillText('PASSATO', plot.left + 3, plot.bottom + 8); ctx.textAlign = 'right'; ctx.fillText('PROSSIME NOTE', plot.right - 3, plot.bottom + 8);
 }
@@ -1029,7 +1069,6 @@ function seekToMeasure(index, autoPlay = false) {
 async function togglePlayback() {
   if (state.fullScore) { showToast('Torna a “Mia parte” per avviare la prova.'); return; }
   if (!state.bundleApproved) { showToast('Serve l’approvazione admin di questo bundle.'); return; }
-  if (els.accompanimentMode.value !== 'guide') { showToast('Questa modalità audio non è ancora disponibile.'); return; }
   if (state.clock.snapshot().beat >= totalBeats()) state.clock.seekBeat(0);
   if (state.clock.running) {
     state.clock.pause();
@@ -1130,7 +1169,7 @@ async function toggleMicrophone() {
   if (state.microphoneStatus === 'active') { await stopMicrophone(); return; }
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
     state.microphoneStatus = 'error'; updateMicrophoneButton();
-    showToast('Il microfono richiede localhost o HTTPS e un browser compatibile.'); render(); return;
+    showToast('Il microfono richiede un contesto sicuro (HTTPS) e un browser compatibile.'); render(); return;
   }
   state.microphoneStatus = 'requesting'; updateMicrophoneButton();
   try {
@@ -1159,15 +1198,15 @@ function preferenceKey() {
 }
 
 const LAST_PRACTICE_PIECE_KEY = 'choir-last-practice-piece';
-const GLOBAL_DETECTOR_PREFERENCES_KEY = 'choir-detector-settings:v1';
+const GLOBAL_DETECTOR_PREFERENCES_KEY = PitchShared.PREFERENCE_KEY;
 
 function pitchHistoryKey() { return `${preferenceKey()}:pitch-history`; }
 
 function savePitchHistory() {
   try {
-    const samples = state.pitchSamples.slice(-12000).filter((sample) => Number.isFinite(sample.displayPitch)).map((sample) => ({
+    const samples = state.pitchSamples.slice(-12000).map((sample) => ({
       beat: Number(sample.beat.toFixed(3)), trackedPitch: Number.isFinite(sample.trackedPitch) ? Number(sample.trackedPitch.toFixed(2)) : null,
-      displayPitch: Number(sample.displayPitch.toFixed(2)),
+      displayPitch: Number.isFinite(sample.displayPitch) ? Number(sample.displayPitch.toFixed(2)) : null,
       confirmationState: sample.confirmationState === 'provisional' ? 'provisional' : 'confirmed',
       confidence: Number((sample.confidence ?? 0).toFixed(2)), takeId: sample.takeId,
     }));
@@ -1182,7 +1221,7 @@ function restorePitchHistory() {
       trackedPitch: Number.isFinite(sample.trackedPitch) ? sample.trackedPitch : sample.pitch,
       displayPitch: Number.isFinite(sample.displayPitch) ? sample.displayPitch : sample.pitch,
     })).filter((sample) => Number.isFinite(sample.beat)
-      && Number.isFinite(sample.displayPitch) && Number.isInteger(sample.takeId)).slice(-12000) : [];
+      && Number.isInteger(sample.takeId)).slice(-12000) : [];
     state.pitchSamples = samples;
     state.pitchTakeId = Math.max(1, Number.isInteger(saved?.pitchTakeId) ? saved.pitchTakeId : 1,
       ...samples.map((sample) => sample.takeId + 1));
@@ -1331,25 +1370,14 @@ function formatClock(seconds) {
 
 function benchmarkPitchBounds(take) {
   const targets = (take.targetEvents ?? []).filter((event) => Number.isFinite(event.midiPitch));
-  const frames = (take.frames ?? []).filter((frame) => Number.isFinite(frame.trackedHz) || Number.isFinite(frame.rawHz));
-  const pitches = [
-    ...targets.map((event) => event.midiPitch + (take.transpose ?? 0)),
-    ...frames.flatMap((frame) => [frame.trackedHz, frame.rawHz]
-      .filter(Number.isFinite)
-      .map((hz) => 69 + 12 * Math.log2(hz / 440))),
-    ...(take._v3Frames ?? []).map((frame) => frame.v3Hz)
-      .filter(Number.isFinite)
-      .map((hz) => 69 + 12 * Math.log2(hz / 440)),
-    ...(take._v4Frames ?? []).map((frame) => frame.v4Hz)
-      .filter(Number.isFinite)
-      .map((hz) => 69 + 12 * Math.log2(hz / 440)),
-    ...(take._v5Frames ?? []).map((frame) => frame.v5Hz)
-      .filter(Number.isFinite)
-      .map((hz) => 69 + 12 * Math.log2(hz / 440)),
-  ];
+  const targetPitches = targets.map((event) => event.midiPitch + (take.transpose ?? 0));
+  const targetMin = Math.min(...targetPitches, 57), targetMax = Math.max(...targetPitches, 62);
+  const observed = benchmarkDisplayFilteredFrames(take.frames ?? []).map((frame) => Number.isFinite(frame.displayHz) ? 69 + 12 * Math.log2(frame.displayHz / 440) : null)
+    .filter((pitch) => Number.isFinite(pitch) && pitch >= targetMin - 2 && pitch <= targetMax + 2);
+  const pitches = [...targetPitches, ...observed];
   return {
-    min: Math.floor(Math.min(...pitches, 57)) - 1,
-    max: Math.ceil(Math.max(...pitches, 62)) + 1,
+    min: Math.floor(Math.min(...pitches)) - 1,
+    max: Math.ceil(Math.max(...pitches)) + 1,
   };
 }
 
@@ -1533,9 +1561,25 @@ function ensureBenchmarkV4(take) {
 // v5 is deliberately an acoustic comparison, not a score-aware correction.
 // The model file is served with the app; ONNX Runtime is a pinned browser
 // dependency. Audio samples and derived frames remain in this browser.
-const CREPE_TINY_MODEL_URL = 'models/crepe_onnx_tiny.onnx';
-const CREPE_RUNTIME_BASE_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.0/dist/';
+const CREPE_TINY_MODEL_URL = RUNTIME_CONFIG.crepeModelUrl;
+const CREPE_RUNTIME_BASE_URL = RUNTIME_CONFIG.crepeRuntimeBaseUrl;
 let crepeSessionPromise = null;
+let crepeRuntimePromise = null;
+
+function loadCrepeRuntime() {
+  if (window.ort) return Promise.resolve();
+  if (!RUNTIME_CONFIG.crepeRuntimeScriptUrl) return Promise.reject(new Error('runtime ONNX non disponibile'));
+  if (!crepeRuntimePromise) {
+    crepeRuntimePromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = RUNTIME_CONFIG.crepeRuntimeScriptUrl;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('runtime ONNX non caricato: controlla la connessione'));
+      document.head.append(script);
+    });
+  }
+  return crepeRuntimePromise;
+}
 
 function normaliseCrepeFrame(samples) {
   let mean = 0;
@@ -1551,6 +1595,7 @@ function normaliseCrepeFrame(samples) {
 }
 
 async function crepeSession() {
+  await loadCrepeRuntime();
   const ort = window.ort;
   if (!ort?.InferenceSession || !ort?.Tensor) {
     throw new Error('runtime ONNX non caricato: controlla la connessione e ricarica la pagina');
@@ -1900,6 +1945,16 @@ function drawBenchmarkAnalysisRoll(take) {
     const y = yAt(event.midiPitch + (take.transpose ?? 0));
     const laneHeight = (plot.bottom - plot.top) / span;
     ctx.fillStyle = 'rgba(217,168,91,.72)'; ctx.fillRect(xAt(eventStart), y - laneHeight / 2 + 1, Math.max(1, xAt(eventEnd) - xAt(eventStart) - 1), Math.max(4, laneHeight - 2));
+    const feedback = take._vocalFeedback?.results?.find((item) => item.note.onsetBeat === event.onsetBeat && item.note.midiPitch === event.midiPitch);
+    if (feedback && feedback.category !== 'in-tune') {
+      const colours = { 'in-tune': '#91e6a7', 'stable-low': '#6faee8', 'stable-high': '#e8a56f', 'drifting-low': '#8d8be8', 'drifting-high': '#e88787', irregular: '#d7a2e8', uncertain: '#87999c' };
+      const icons = { 'in-tune': '✓', 'stable-low': '−', 'stable-high': '+', 'drifting-low': '↓', 'drifting-high': '↑', irregular: '≈', uncertain: '?' };
+      const colour = colours[feedback.category] ?? '#87999c', left = xAt(eventStart), noteWidth = Math.max(2, xAt(eventEnd) - left - 1), noteTop = y - laneHeight / 2 + 1, noteHeight = Math.max(4, laneHeight - 2);
+      ctx.fillStyle = `${colour}32`; ctx.fillRect(left, noteTop, noteWidth, noteHeight); ctx.strokeStyle = colour; ctx.lineWidth = 1.7; ctx.strokeRect(left + .5, noteTop + .5, Math.max(1, noteWidth - 1), Math.max(3, noteHeight - 1));
+      ctx.fillStyle = colour; ctx.fillRect(left, noteTop + noteHeight - 4, noteWidth, 4);
+      if (noteWidth >= 18) { ctx.fillStyle = '#071419'; ctx.font = '800 10px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(icons[feedback.category], left + noteWidth / 2, y); ctx.textBaseline = 'alphabetic'; }
+      if (event.onsetBeat <= view.selectedBeat && view.selectedBeat < event.onsetBeat + event.durationBeats) { ctx.strokeStyle = '#f4f7f3'; ctx.lineWidth = 1.5; ctx.strokeRect(xAt(eventStart), y - laneHeight / 2, Math.max(2, xAt(eventEnd) - xAt(eventStart)), Math.max(5, laneHeight)); }
+    }
   }
   for (let beat = Math.ceil(viewStartBeat); beat < viewEndBeat; beat += 1) { ctx.strokeStyle = 'rgba(180,207,203,.12)'; ctx.setLineDash([3, 5]); ctx.beginPath(); ctx.moveTo(Math.round(xAt(beat)) + .5, plot.top); ctx.lineTo(Math.round(xAt(beat)) + .5, plot.bottom); ctx.stroke(); }
   const measures = [...new Map(targets.filter((event) => event.onsetBeat >= viewStartBeat && event.onsetBeat <= viewEndBeat)
@@ -1908,13 +1963,15 @@ function drawBenchmarkAnalysisRoll(take) {
   // The raw estimate stays visible separately from the tracker. This is what
   // lets an inspection distinguish an onset error of YIN itself from a
   // transition introduced by the continuity/smoothing heuristic.
-  ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(159,180,200,.74)'; ctx.lineWidth = 1.15;
-  drawStablePitchSegments(ctx, stableVisualPitchSegments(frames.filter((frame) => frame.beat >= viewStartBeat && frame.beat <= viewEndBeat), {
-    pitchAt: (frame) => Number.isFinite(frame.rawHz) ? 69 + 12 * Math.log2(frame.rawHz / 440) : null,
-    timeAt: (frame) => frame.audioTimeSec,
-    maxGap: .12,
-    minimumFrames: 2,
-  }), (frame) => xAt(frame.beat), (pitch) => yAt(pitch));
+  if (state.benchmark.analysisLayers.raw) {
+    ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(159,180,200,.74)'; ctx.lineWidth = 1.15;
+    drawStablePitchSegments(ctx, stableVisualPitchSegments(frames.filter((frame) => frame.beat >= viewStartBeat && frame.beat <= viewEndBeat), {
+      pitchAt: (frame) => Number.isFinite(frame.rawHz) ? 69 + 12 * Math.log2(frame.rawHz / 440) : null,
+      timeAt: (frame) => frame.audioTimeSec,
+      maxGap: .12,
+      minimumFrames: 2,
+    }), (frame) => xAt(frame.beat), (pitch) => yAt(pitch));
+  }
   if (state.benchmark.analysisLayers.v1) {
     ctx.setLineDash([]); ctx.strokeStyle = '#63c8c2'; ctx.lineWidth = 2.2; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.shadowColor = 'rgba(99,200,194,.32)'; ctx.shadowBlur = 5;
     drawStablePitchSegments(ctx, stableVisualPitchSegments(frames.filter((frame) => frame.beat >= viewStartBeat && frame.beat <= viewEndBeat && frame.voicing === 'voiced'), {
@@ -1933,7 +1990,7 @@ function drawBenchmarkAnalysisRoll(take) {
       minimumFrames: 3,
     }), (frame) => xAt(frame.beat), (pitch) => yAt(pitch)); ctx.shadowBlur = 0;
   }
-  if (!take._v5Posteriors) {
+  if (state.benchmark.analysisLayers.raw && !take._v5Posteriors) {
     ctx.strokeStyle = '#f3a6d0'; ctx.lineWidth = 2; ctx.shadowColor = 'rgba(243,166,208,.25)'; ctx.shadowBlur = 4;
     drawStablePitchSegments(ctx, stableVisualPitchSegments(v5Frames.filter((frame) => frame.beat >= viewStartBeat && frame.beat <= viewEndBeat), {
       pitchAt: (frame) => Number.isFinite(frame.v5Hz) ? 69 + 12 * Math.log2(frame.v5Hz / 440) : null,
@@ -2051,7 +2108,7 @@ function resetBenchmarkAnalysisView(preserveSelection = true) {
   state.benchmark.analysisView = { timeZoom: 1, pitchZoom: 1, centerBeat: null, pitchOffset: 0, pointer: null, inspectBeat: null, selectedBeat };
   const take = selectedBenchmarkTake();
   if (take) drawBenchmarkAnalysisRoll(take);
-  els.benchmarkAnalysisInspect.textContent = 'Vista completa';
+  els.benchmarkAnalysisInspect.textContent = 'Panoramica completa';
 }
 
 function benchmarkBeatAtCanvasX(take, clientX) {
@@ -2079,6 +2136,7 @@ function selectBenchmarkAnalysisBeat(take, beat) {
   state.benchmark.analysisView.selectedBeat = selectedBeat;
   els.benchmarkAnalysisAudio.currentTime = benchmarkAudioTimeForBeat(take, selectedBeat);
   updateBenchmarkSelectionLabel(take);
+  renderFeedbackNote(take);
   drawBenchmarkAnalysisRoll(take);
 }
 
@@ -2127,8 +2185,10 @@ function updateBenchmarkInspection(take, event) {
   const beat = benchmarkBeatAtCanvasX(take, event.clientX);
   state.benchmark.analysisView.inspectBeat = beat;
   const active = (take.targetEvents ?? []).find((target) => target.onsetBeat <= beat && beat < target.onsetBeat + target.durationBeats);
+  const feedback = active && take._vocalFeedback?.results?.find((item) => item.note.onsetBeat === active.onsetBeat && item.note.midiPitch === active.midiPitch);
+  const feedbackDetail = feedback ? ` · ${feedback.message} · scarto ${Number.isFinite(feedback.metrics.medianCents) ? `${Math.round(feedback.metrics.medianCents)} cent` : 'incerto'}` : '';
   els.benchmarkAnalysisInspect.textContent = active
-    ? `Batt. ${active.measureNumber ?? '?'} · beat ${beat.toFixed(2)} · ${active.noteName ?? noteLabel(active.midiPitch + (take.transpose ?? 0))}`
+    ? `Batt. ${active.measureNumber ?? '?'} · ${active.noteName ?? noteLabel(active.midiPitch + (take.transpose ?? 0))}${feedbackDetail}`
     : `Beat ${beat.toFixed(2)} · nessun target`;
   return beat;
 }
@@ -2196,7 +2256,67 @@ function bindBenchmarkAnalysisCanvas() {
     if (event.code !== 'Space') return;
     event.preventDefault(); void toggleBenchmarkPlaybackFromSelection();
   });
-  canvas.addEventListener('pointerleave', () => { if (!state.benchmark.analysisView.pointer) { state.benchmark.analysisView.inspectBeat = null; els.benchmarkAnalysisInspect.textContent = 'Vista completa'; drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); } });
+  canvas.addEventListener('pointerleave', () => { if (!state.benchmark.analysisView.pointer) { state.benchmark.analysisView.inspectBeat = null; els.benchmarkAnalysisInspect.textContent = 'Panoramica completa'; drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); } });
+}
+
+function feedbackSignature(take) { return ['feedback-v3-musical', take.id, take.frames?.length ?? 0, take.targetEvents?.length ?? 0, take.stoppedAt ?? ''].join(':'); }
+function feedbackNotes(take) { return (take.targetEvents ?? []).filter((event) => Number.isFinite(event.midiPitch)).map((event, index) => ({ ...event, id: event.id ?? event.sourceEventId ?? `note-${index}`, targetHz: pitchToHz(event.midiPitch + (take.transpose ?? 0)) })); }
+function feedbackFrames(take) { const frames = benchmarkDisplayFilteredFrames(take.frames ?? []), origin = Number.isFinite(take.startAudioTimeSec) ? take.startAudioTimeSec : (frames[0]?.audioTimeSec ?? 0); return frames.map((frame) => ({ beat: frame.beat, time: (frame.audioTimeSec ?? origin) - origin, hz: Number.isFinite(frame.displayHz) ? frame.displayHz : null, confidence: frame.confidence ?? frame.clarity ?? 0 })); }
+function selectedFeedbackResult(take) { const beat = state.benchmark.analysisView.selectedBeat; return take?._vocalFeedback?.results?.find((result) => result.note.onsetBeat <= beat && beat < result.note.onsetBeat + result.note.durationBeats) ?? null; }
+function drawFeedbackCentChart(result) {
+  const canvas = els.feedbackCentChart, rect = canvas.getBoundingClientRect(); if (!result || rect.width < 2) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2), width = rect.width, height = rect.height || 150; canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
+  const ctx = canvas.getContext('2d'), plot = { left: 36, right: width - 9, top: 10, bottom: height - 22 }, series = result.series; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, width, height);
+  const extent = Math.max(40, Math.min(200, Math.ceil(Math.max(20, ...series.map((point) => Math.abs(point.cents))) / 20) * 20));
+  const x = (time) => plot.left + (time - (series[0]?.time ?? 0)) / Math.max(.01, (series.at(-1)?.time ?? 1) - (series[0]?.time ?? 0)) * (plot.right - plot.left), y = (cents) => plot.top + (extent - cents) / (extent * 2) * (plot.bottom - plot.top);
+  for (const cents of [-extent, 0, extent]) { ctx.strokeStyle = cents ? 'rgba(180,207,203,.12)' : 'rgba(217,168,91,.75)'; ctx.lineWidth = cents ? 1 : 1.5; ctx.beginPath(); ctx.moveTo(plot.left, y(cents)); ctx.lineTo(plot.right, y(cents)); ctx.stroke(); ctx.fillStyle = '#8da2a2'; ctx.font = '10px Inter'; ctx.textAlign = 'right'; ctx.fillText(`${cents > 0 ? '+' : ''}${cents}`, plot.left - 4, y(cents) + 3); }
+  const line = (key, colour, lineWidth) => { ctx.beginPath(); let active = false; for (const point of series) { if (!active) { ctx.moveTo(x(point.time), y(point[key])); active = true; } else ctx.lineTo(x(point.time), y(point[key])); } ctx.strokeStyle = colour; ctx.lineWidth = lineWidth; ctx.stroke(); }; line('cents', 'rgba(99,200,194,.55)', 1); line('centerCents', '#91e6a7', 2.2);
+}
+function renderFeedbackNote(take) {
+  els.feedbackNoteCard.hidden = true;
+  els.feedbackCorrected.disabled = !take?.audio || !(take._vocalFeedback?.results ?? []).some((item) => item.correctionAvailable);
+}
+function renderFeedbackPriorities(take) {
+  const analysis = take?._vocalFeedback?.signature === feedbackSignature(take) ? take._vocalFeedback : null;
+  const priorities = analysis?.priorities ?? []; els.feedbackPriorities.hidden = !analysis;
+  if (!priorities.length) { els.feedbackPriorityList.innerHTML = '<p class="analysis-empty">Non emergono passaggi che richiedano attenzione prioritaria.</p>'; return; }
+  els.feedbackPriorityList.replaceChildren(...priorities.map((priority, index) => {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'feedback-priority'; button.dataset.startBeat = priority.startBeat;
+    const measures = priority.measureEnd && priority.measureEnd !== priority.measureStart ? `Battute ${priority.measureStart}–${priority.measureEnd}` : `Battuta ${priority.measureStart ?? '?'}`;
+    button.innerHTML = `<small>${index + 1} · ${priority.kind === 'phrase' ? 'Frase musicale' : 'Passaggio'}</small><strong>${priority.title}</strong><span>${measures} · ${priority.message}</span>`;
+    return button;
+  }));
+}
+async function analyseBenchmarkFeedback() {
+  const take = selectedBenchmarkTake(); if (!take || !VocalFeedback) return; const signature = feedbackSignature(take); if (take._vocalFeedback?.signature === signature) { els.feedbackStatus.textContent = 'Analisi già disponibile per questa registrazione.'; renderFeedbackNote(take); renderFeedbackPriorities(take); return; }
+  els.feedbackAnalyse.disabled = true; els.feedbackStatus.textContent = 'Analisi della tenuta in corso…'; await new Promise((resolve) => setTimeout(resolve, 0));
+  try { const performance = VocalFeedback.analysePerformance(feedbackNotes(take), feedbackFrames(take)); take._vocalFeedback = { signature, ...performance }; els.feedbackStatus.textContent = performance.priorities.length ? `${performance.priorities.length} passaggi meritano un riascolto. Le piccole oscillazioni naturali non sono segnalate.` : 'Nessuna difficoltà prioritaria rilevata con sufficiente affidabilità.'; renderFeedbackNote(take); renderFeedbackPriorities(take); drawBenchmarkAnalysisRoll(take); } catch (error) { els.feedbackStatus.textContent = `Analisi non riuscita: ${error.message}`; } finally { els.feedbackAnalyse.disabled = false; }
+}
+function selectAdjacentFeedbackNote(direction) { const take = selectedBenchmarkTake(), results = take?._vocalFeedback?.results ?? []; if (!results.length) return; const index = Math.max(0, results.indexOf(selectedFeedbackResult(take))), next = results[Math.max(0, Math.min(results.length - 1, index + direction))]; selectBenchmarkAnalysisBeat(take, next.note.onsetBeat + Math.min(next.note.durationBeats / 2, .05)); renderFeedbackNote(take); }
+function audioBufferWavBlob(buffer) {
+  const channels = buffer.numberOfChannels, frames = buffer.length, bytesPerSample = 2, blockAlign = channels * bytesPerSample;
+  const data = new ArrayBuffer(44 + frames * blockAlign), view = new DataView(data), write = (offset, text) => { for (let index = 0; index < text.length; index += 1) view.setUint8(offset + index, text.charCodeAt(index)); };
+  write(0, 'RIFF'); view.setUint32(4, 36 + frames * blockAlign, true); write(8, 'WAVE'); write(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, channels, true); view.setUint32(24, buffer.sampleRate, true); view.setUint32(28, buffer.sampleRate * blockAlign, true); view.setUint16(32, blockAlign, true); view.setUint16(34, 16, true); write(36, 'data'); view.setUint32(40, frames * blockAlign, true);
+  const samples = Array.from({ length: channels }, (_, channel) => buffer.getChannelData(channel)); let offset = 44;
+  for (let frame = 0; frame < frames; frame += 1) for (let channel = 0; channel < channels; channel += 1) { const sample = Math.max(-1, Math.min(1, samples[channel][frame])); view.setInt16(offset, sample < 0 ? sample * 32768 : sample * 32767, true); offset += 2; }
+  return new Blob([data], { type: 'audio/wav' });
+}
+async function switchFeedbackPlayback(url, variant) {
+  const take = selectedBenchmarkTake(), audio = els.benchmarkAnalysisAudio; if (!take || !url) return;
+  const position = audio.ended ? 0 : audio.currentTime; state.benchmark.analysisView.selectedBeat = benchmarkBeatForAudioTime(take, position); audio.pause(); audio.src = url; audio.load();
+  if (audio.readyState < 1) await new Promise((resolve) => audio.addEventListener('loadedmetadata', resolve, { once: true }));
+  audio.currentTime = Math.min(position, Math.max(0, audio.duration - .01)); state.benchmark.audioVariant = variant; els.feedbackPlaybackKind.textContent = variant === 'corrected' ? 'Versione corretta' : 'Registrazione originale'; updateBenchmarkSelectionLabel(take); await audio.play();
+}
+function playFeedbackOriginal() { const take = selectedBenchmarkTake(); if (!take?.audio) return; void switchFeedbackPlayback(state.benchmark.analysisAudioUrl, 'original'); els.feedbackStatus.textContent = 'Riproduzione della registrazione originale dalla posizione del cursore.'; }
+async function playFeedbackCorrected() {
+  const take = selectedBenchmarkTake(), results = take?._vocalFeedback?.results?.filter((result) => result.correctionAvailable) ?? []; if (!take?.audio || !results.length) return; els.feedbackCorrected.disabled = true; els.feedbackStatus.textContent = 'Preparazione dell’intera take corretta…';
+  try { const strength = Number(els.feedbackStrength.value) / 100, key = `${feedbackSignature(take)}:${strength}`;
+    if (state.benchmark.correctedAudioKey !== key || !state.benchmark.correctedAudioUrl) { const context = new AudioContext(), decoded = await context.decodeAudioData(await take.audio.arrayBuffer()), output = context.createBuffer(decoded.numberOfChannels, decoded.length, decoded.sampleRate), regions = results.map((result) => ({ startSample: benchmarkAudioTimeForBeat(take, result.note.onsetBeat) * decoded.sampleRate, endSample: benchmarkAudioTimeForBeat(take, result.note.onsetBeat + result.note.durationBeats) * decoded.sampleRate, ratio: 2 ** (-(result.metrics.medianCents ?? 0) * strength / 1200) }));
+      for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) output.copyToChannel(VocalFeedback.pitchShiftRegions(decoded.getChannelData(channel), regions, { fadeSamples: Math.round(decoded.sampleRate * .04) }), channel);
+      if (state.benchmark.correctedAudioUrl) URL.revokeObjectURL(state.benchmark.correctedAudioUrl); state.benchmark.correctedAudioUrl = URL.createObjectURL(audioBufferWavBlob(output)); state.benchmark.correctedAudioKey = key; await context.close();
+    }
+    await switchFeedbackPlayback(state.benchmark.correctedAudioUrl, 'corrected'); els.feedbackStatus.textContent = `Versione corretta al ${Math.round(strength * 100)}% · ${results.length} note elaborate; le altre regioni sono originali.`;
+  } catch (error) { els.feedbackStatus.textContent = `Audio corretto non disponibile: ${error.message}`; } finally { els.feedbackCorrected.disabled = false; }
 }
 
 function renderBenchmarkArchive() {
@@ -2213,7 +2333,7 @@ function renderBenchmarkArchive() {
   if (!take) return;
   const seconds = Math.max(0, (take.endAudioTimeSec ?? 0) - (take.startAudioTimeSec ?? 0));
   els.benchmarkTakeSummary.textContent = `${benchmarkScenarioLabel(take.scenarioId)} · ${take.frames?.length ?? 0} frame · ${seconds.toFixed(1)} s · ${take.partId ?? 'parte non disponibile'}.`;
-  els.benchmarkAlgorithmLabel.textContent = take.configuration?.estimator?.id === 'yin-style-js' ? 'v1 · YIN' : 'v1';
+  els.benchmarkAlgorithmLabel.textContent = 'Analisi vocale';
 }
 
 function renderBenchmarkAnalysis() {
@@ -2230,15 +2350,22 @@ function renderBenchmarkAnalysis() {
   els.benchmarkAnalysisMeta.textContent = `${benchmarkScenarioLabel(take.scenarioId)} · ${take.partId ?? 'parte'} · ${new Date(take.acceptedAt ?? take.startedAt).toLocaleString('it-IT')}`;
   renderBenchmarkAnalysisMetrics(take);
   if (state.benchmark.analysisAudioUrl) URL.revokeObjectURL(state.benchmark.analysisAudioUrl);
+  if (state.benchmark.correctedAudioUrl) URL.revokeObjectURL(state.benchmark.correctedAudioUrl);
+  state.benchmark.correctedAudioUrl = null; state.benchmark.correctedAudioKey = null; state.benchmark.audioVariant = 'original';
   state.benchmark.analysisAudioUrl = take.audio ? URL.createObjectURL(take.audio) : null;
   els.benchmarkAnalysisAudio.src = state.benchmark.analysisAudioUrl ?? '';
+  els.feedbackPlaybackKind.textContent = 'Registrazione originale';
+  els.feedbackScoreImage.src = els.scoreImage.currentSrc || els.scoreImage.src || '';
   const duration = Math.max(0, (take.endAudioTimeSec ?? 0) - (take.startAudioTimeSec ?? 0));
   els.benchmarkAnalysisTime.textContent = `${formatClock(0)} / ${formatClock(duration)}`;
   state.benchmark.analysisView.selectedBeat ??= Number(take.startBeat) || 0;
   updateBenchmarkSelectionLabel(take);
   updateBenchmarkAnalysisPlayButton();
+  els.feedbackNoteCard.hidden = true;
+  renderFeedbackPriorities(take);
+  els.feedbackStatus.textContent = take._vocalFeedback?.signature === feedbackSignature(take) ? 'Analisi disponibile: colori e simboli sono mostrati direttamente sulle note.' : 'Premi “Analizza esecuzione” per visualizzare il feedback sulla traccia.';
+  if (take._vocalFeedback?.signature === feedbackSignature(take)) renderFeedbackNote(take);
   requestAnimationFrame(() => drawBenchmarkAnalysisRoll(take));
-  void ensureBenchmarkV5(take);
 }
 
 function openBenchmarkAnalysis() {
@@ -2333,7 +2460,8 @@ function appendBenchmarkFrame(estimate, beat) {
 }
 
 function reportBenchmarkEvent(action, details = {}) {
-  fetch('/api/benchmark-event', {
+  if (!RUNTIME_CONFIG.benchmarkEventUrl) return;
+  fetch(RUNTIME_CONFIG.benchmarkEventUrl, {
     method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, at: new Date().toISOString(), ...details }),
   }).catch(() => { /* The diagnostic endpoint is optional and never blocks recording. */ });
@@ -2523,8 +2651,8 @@ function savePreferences() {
   try {
     localStorage.setItem(preferenceKey(), JSON.stringify({ transpose: state.transpose,
       speed: els.playbackSpeed.value, volume: els.volume.value, metronome: els.metronomeVolume.value,
-      measure: measureIndexAt(state.clock.snapshot().beat), phrase: state.phrase,
-      autoLoop: state.autoLoop, noteNames: state.noteNames, noteNamesPreferenceVersion: 2,
+      measure: measureIndexAt(state.clock.snapshot().beat),
+      noteNames: state.noteNames, noteNamesPreferenceVersion: 2,
       scoreHeight: Math.round(els.scoreViewport.clientHeight), v1RmsThreshold: state.detectorSettings.rmsThreshold,
       v1FastAlpha: state.detectorSettings.fastAlpha, v1SlowAlpha: state.detectorSettings.slowAlpha,
       v1MedianWindowFrames: state.detectorSettings.medianWindowFrames,
@@ -2547,15 +2675,18 @@ function restorePreferences() {
   detectorSaved = detectorSaved && typeof detectorSaved === 'object' ? detectorSaved : saved;
   state.transpose = Number.isInteger(saved.transpose) && Math.abs(saved.transpose) <= 12 ? saved.transpose : 0;
   els.transpose.value = String(state.transpose);
-  state.autoLoop = saved.autoLoop === true; els.phraseLoop.checked = state.autoLoop;
+  // The current practice session must start on the complete piece.  A saved
+  // one-measure exercise is especially misleading: it can finish before a
+  // singer has had a full second of scoreable notes.  Phrase exercises are
+  // deliberately transient; only an explicit URL deep link may set one.
+  state.autoLoop = false; els.phraseLoop.checked = false;
   // Existing preferences used English as the implicit default. Migrate those
   // users to Italian while preserving any deliberate choice made from now on.
   state.noteNames = saved.noteNamesPreferenceVersion === 2 && saved.noteNames === 'international' ? 'international' : 'italian';
   els.noteNames.value = state.noteNames;
   const measures = buildOccurrenceMeasures(state.runtime);
   state.selectedMeasureIndex = Number.isInteger(saved.measure) ? Math.max(0, Math.min(measures.length - 1, saved.measure)) : 0;
-  state.phrase = saved.phrase && Number.isInteger(saved.phrase.start) && Number.isInteger(saved.phrase.end)
-    && saved.phrase.start >= 0 && saved.phrase.start <= saved.phrase.end && saved.phrase.end < measures.length ? saved.phrase : null;
+  state.phrase = null;
   els.playbackSpeed.value = ['0.5', '0.75', '1'].includes(saved.speed) ? saved.speed : '1';
   els.volume.value = Number.isFinite(Number(saved.volume)) ? Math.max(0, Math.min(100, Number(saved.volume))) : 62;
   els.metronomeVolume.value = Number.isFinite(Number(saved.metronome)) ? Math.max(0, Math.min(100, Number(saved.metronome))) : 0;
@@ -2645,6 +2776,7 @@ function changePart(partId) {
   if (state.clock.running) state.clock.pause();
   savePitchHistory();
   state.runtime.selectPart(partId);
+  state.selectedVoiceIds = new Set([partId]);
   restorePreferences();
   restorePitchHistory();
   const part = state.runtime.parts.find((item) => item.id === partId);
@@ -2667,6 +2799,16 @@ function bindControls() {
     if (event.target.closest('button')) event.currentTarget.removeAttribute('open');
   });
   document.getElementById('test-microphone').addEventListener('click', toggleMicrophone);
+  els.accompanimentMode.addEventListener('click', () => {
+    renderVoiceMixer();
+    if (!els.voiceMixerDialog.open) els.voiceMixerDialog.showModal();
+  });
+  els.voiceMixerClose.addEventListener('click', () => els.voiceMixerDialog.close());
+  els.voiceMixerOwn.addEventListener('click', () => {
+    state.selectedVoiceIds = new Set([state.runtime.selectedPartId]);
+    configureVoiceStems(); renderVoiceMixer();
+    if (state.clock.running) void playVoiceStems();
+  });
   window.addEventListener('pagehide', savePreferences);
   els.exercise.addEventListener('click', () => {
     state.clock.pause(); updatePlaybackButton();
@@ -2696,6 +2838,16 @@ function bindControls() {
   els.backingAudio.addEventListener('loadedmetadata', () => {
     if (state.pendingAudioTime != null) { state.clock.seekPerformanceTime(state.pendingAudioTime); state.pendingAudioTime = null; render(); }
   });
+  els.backingAudio.addEventListener('play', () => { void playVoiceStems(); });
+  els.backingAudio.addEventListener('pause', pauseVoiceStems);
+  els.backingAudio.addEventListener('seeking', () => {
+    for (const audio of state.voiceStemAudio.values()) audio.currentTime = els.backingAudio.currentTime;
+  });
+  els.backingAudio.addEventListener('timeupdate', () => {
+    for (const audio of state.voiceStemAudio.values()) {
+      if (Math.abs(audio.currentTime - els.backingAudio.currentTime) > .08) audio.currentTime = els.backingAudio.currentTime;
+    }
+  });
   els.transpose.addEventListener('change', () => {
     const snapshot = state.clock.snapshot();
     state.clock.pause();
@@ -2711,6 +2863,7 @@ function bindControls() {
   for (const control of [els.playbackSpeed, els.volume, els.metronomeVolume]) {
     control.addEventListener('change', savePreferences);
   }
+  els.volume.addEventListener('input', syncVoiceStemLevels);
   [['v1', els.pitchLayerV1], ['crepe', els.pitchLayerCrepe]].forEach(([layer, control]) => {
     control.addEventListener('change', () => {
       state.pitchLayers[layer] = control.checked;
@@ -2750,6 +2903,16 @@ function bindControls() {
   });
   els.benchmarkAnalysisReset.addEventListener('click', () => resetBenchmarkAnalysisView());
   els.benchmarkAnalysisPlaySelection.addEventListener('click', () => { void toggleBenchmarkPlaybackFromSelection(); });
+  els.feedbackAnalyse.addEventListener('click', () => { void analyseBenchmarkFeedback(); });
+  els.feedbackPrevious.addEventListener('click', () => selectAdjacentFeedbackNote(-1));
+  els.feedbackNext.addEventListener('click', () => selectAdjacentFeedbackNote(1));
+  els.feedbackOriginal.addEventListener('click', playFeedbackOriginal);
+  els.feedbackCorrected.addEventListener('click', () => { void playFeedbackCorrected(); });
+  els.feedbackStrength.addEventListener('input', () => { els.feedbackStrengthValue.value = `${els.feedbackStrength.value}%`; });
+  els.feedbackPriorityList.addEventListener('click', (event) => {
+    const item = event.target.closest('.feedback-priority'); const take = selectedBenchmarkTake(), beat = Number(item?.dataset.startBeat);
+    if (!take || !Number.isFinite(beat)) return; selectBenchmarkAnalysisBeat(take, beat); state.benchmark.analysisView.centerBeat = beat; state.benchmark.analysisView.timeZoom = Math.max(2, state.benchmark.analysisView.timeZoom); drawBenchmarkAnalysisRoll(take);
+  });
   [['v1', els.benchmarkAnalysisLayerV1], ['display', els.benchmarkAnalysisLayerDisplay], ['raw', els.benchmarkAnalysisLayerRaw], ['audio', els.benchmarkAnalysisLayerAudio], ['score', els.benchmarkAnalysisLayerScore]].forEach(([layer, control]) => {
     control.addEventListener('change', () => {
       state.benchmark.analysisLayers[layer] = control.checked;
@@ -2821,7 +2984,7 @@ function bindControls() {
     showToast('Guida melodica derivata dallo score selezionato.');
     render();
   });
-  els.volume.addEventListener('input', () => { els.backingAudio.volume = Number(els.volume.value) / 100; });
+  els.volume.addEventListener('input', syncBackingLevel);
   els.metronomeVolume.addEventListener('input', () => {
     const value = Number(els.metronomeVolume.value);
     if (value > 0) state.rememberedMetronomeVolume = value;
@@ -2901,7 +3064,20 @@ function bindControls() {
 }
 
 async function initialize() {
-  const libraryResponse = await fetch('/api/library', { cache: 'no-store' });
+  const diagnosticsEnabled = RUNTIME_CONFIG.features?.diagnostics !== false;
+  const crepeEnabled = diagnosticsEnabled && RUNTIME_CONFIG.features?.crepe !== false;
+  for (const element of [els.benchmark, document.getElementById('admin-review')]) {
+    if (element) element.hidden = !diagnosticsEnabled;
+  }
+  for (const element of [els.neuralLive, document.querySelector('.plume-key')]) {
+    if (element) element.hidden = !crepeEnabled;
+  }
+  const buildVersion = document.getElementById('build-version');
+  if (RUNTIME_CONFIG.buildVersion && buildVersion) {
+    buildVersion.textContent = `Build ${RUNTIME_CONFIG.buildVersion}`;
+    buildVersion.hidden = false;
+  }
+  const libraryResponse = await fetch(RUNTIME_CONFIG.libraryUrl, { cache: 'no-store' });
   if (!libraryResponse.ok) throw new Error('Libreria dei brani non disponibile');
   state.library = (await libraryResponse.json()).pieces ?? [];
   if (!state.library.length) throw new Error('Non ci sono brani MuseScore nella cartella sheets');
@@ -2931,9 +3107,9 @@ async function updateLibraryParts() {
     els.libraryOpen.disabled = true;
     els.libraryPart.replaceChildren(new Option('Preparazione parti…', ''));
     els.libraryNote.hidden = false;
-    els.libraryNote.textContent = 'Lettura del file MuseScore in corso…';
+    els.libraryNote.textContent = 'Preparo le parti vocali…';
     try {
-      const response = await fetch(`/api/library/${encodeURIComponent(piece.piece_id)}/bundle`, { cache: 'no-store' });
+      const response = await fetch(libraryBundleUrl(piece.piece_id), { cache: 'no-store' });
       if (!response.ok) throw new Error('Impossibile leggere il brano selezionato');
       const bundle = await response.json();
       piece.parts = bundle.parts ?? [];
@@ -2946,6 +3122,11 @@ async function updateLibraryParts() {
   if (els.libraryPiece.value !== piece?.piece_id) return;
   const parts = piece?.parts?.length ? piece.parts : [];
   els.libraryPart.replaceChildren(...parts.map((part) => new Option(part.name, part.id)));
+  let rememberedPart;
+  try { rememberedPart = localStorage.getItem(`choir-part:${piece?.piece_id}`); } catch (_) {}
+  const preferredPart = parts.find(part => part.id === rememberedPart)
+    ?? parts.find(part => part.id === state.runtime?.selectedPartId);
+  if (preferredPart) els.libraryPart.value = preferredPart.id;
   const message = piece?.monodic ? 'Brano monodico: Soprano e Contralto usano la melodia scritta; Tenore e Basso la cantano un’ottava sotto.' : (!parts.length ? 'Nessuna parte vocale disponibile nel file MuseScore.' : '');
   els.libraryNote.hidden = !message;
   els.libraryNote.textContent = message;
@@ -2989,7 +3170,7 @@ function restartPractice() {
 }
 
 async function loadPracticePiece(pieceId) {
-  const bundleResponse = await fetch(`/api/library/${encodeURIComponent(pieceId)}/bundle`, { cache: 'no-store' });
+  const bundleResponse = await fetch(libraryBundleUrl(pieceId), { cache: 'no-store' });
   if (!bundleResponse.ok) throw new Error('Manifest del brano non disponibile');
   const bundleManifest = await bundleResponse.json();
   try { localStorage.setItem(LAST_PRACTICE_PIECE_KEY, pieceId); } catch (_) { /* Optional convenience only. */ }
@@ -3015,6 +3196,7 @@ async function loadPracticePiece(pieceId) {
       && Boolean(approval?.reviewer)
       && bundleManifest.checks.every((check) => approval?.checks?.includes(check.id));
   } catch (_) { state.bundleApproved = false; }
+  if (bundleManifest.published) state.bundleApproved = true;
   els.assetStatus.textContent = state.bundleApproved
     ? 'APPROVATO LOCALMENTE · bundle coerente'
     : 'PENDING REVIEW · apri la revisione admin dal menu ⋯';
@@ -3022,14 +3204,19 @@ async function loadPracticePiece(pieceId) {
   els.assetStatus.textContent = bundleManifest.local_source
     ? 'SORGENTE MUSESCORE LOCALE · derivati pronti per la prova'
     : els.assetStatus.textContent;
+  if (bundleManifest.published) els.assetStatus.textContent = 'VERSIONE PUBBLICATA · bundle verificato';
+  els.assetStatus.hidden = state.bundleApproved;
+  if (!state.bundleApproved) els.assetStatus.textContent = 'Questo spartito è ancora in revisione.';
   const parts = vocalParts(state.runtime);
   els.partSelector.replaceChildren(...parts.map((part) => new Option(part.name, part.id)));
   let savedPart;
   try { savedPart = new URLSearchParams(window.location.search).get('part') ?? localStorage.getItem(`choir-part:${bundleManifest.piece_id ?? state.runtime.title}`); } catch (_) {}
   state.runtime.selectPart(parts.find((part) => part.id === savedPart)?.id ?? parts.find((part) => part.name.toLowerCase().includes('tenor'))?.id ?? parts[0]?.id);
+  state.selectedVoiceIds = new Set([state.runtime.selectedPartId]);
   els.partSelector.value = state.runtime.selectedPartId;
-  els.transpose.replaceChildren(...Array.from({ length: 25 }, (_, index) => {
-    const offset = index - 12;
+  const transposeValues = RUNTIME_CONFIG.features?.transpose === false
+    ? [0] : Array.from({ length: 25 }, (_, index) => index - 12);
+  els.transpose.replaceChildren(...transposeValues.map((offset) => {
     const label = offset === 0 ? 'Originale' : Math.abs(offset) === 12
       ? `${offset > 0 ? '+' : '−'}1 ottava` : `${offset > 0 ? '+' : ''}${offset} semitoni`;
     return new Option(label, String(offset));
@@ -3041,6 +3228,12 @@ async function loadPracticePiece(pieceId) {
   els.transpose.value = '0';
   restorePitchHistory();
   state.occurrenceMeasures = buildOccurrenceMeasures(state.runtime);
+  const deepLink = new URLSearchParams(window.location.search), phraseStart = Number(deepLink.get('phraseStart') ?? NaN),
+    phraseEnd = Number(deepLink.get('phraseEnd') ?? NaN);
+  if (Number.isInteger(phraseStart) && Number.isInteger(phraseEnd) && phraseStart >= 0 && phraseEnd >= phraseStart
+      && phraseEnd < state.occurrenceMeasures.length) {
+    state.phrase = { start: phraseStart, end: phraseEnd }; state.autoLoop = true; state.attemptActive = false;
+  }
   configureBacking();
   state.clock = new MediaPlaybackClock({ mediaElement: els.backingAudio, scoreRuntime: state.runtime });
   if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(Number(els.playbackSpeed.value));
@@ -3056,8 +3249,9 @@ async function loadPracticePiece(pieceId) {
   const libraryPiece = state.library.find((piece) => piece.piece_id === bundleManifest.piece_id);
   els.pieceTitle.textContent = libraryPiece ? pieceDisplayTitle(libraryPiece) : state.runtime.title.split('·')[0].trim();
   els.scorePartLabel.textContent = parts.find((part) => part.id === state.runtime.selectedPartId)?.name ?? 'Parte';
-  const restoredMeasure = state.selectedMeasureIndex;
+  const restoredMeasure = state.phrase?.start ?? state.selectedMeasureIndex;
   bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(restoredMeasure); updatePlaybackButton();
+  if (state.phrase && deepLink.get('autoplayPhrase') === '1') setTimeout(() => { if (!state.clock.running) togglePlayback(); }, 250);
   window.addEventListener('message', (event) => {
     if (event.origin === location.origin && event.data?.type === 'choir-bundle-approval') location.reload();
   });

@@ -1,0 +1,4 @@
+& "C:\Program Files\MuseScore 4\bin\MuseScore4.exe" `
+  -f `
+  -o "sheets\ave-verum\ave_verum.mscz" `
+  "sheets\ave-verum\ave_verum.xml"

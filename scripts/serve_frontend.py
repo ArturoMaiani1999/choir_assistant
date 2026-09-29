@@ -13,6 +13,7 @@ import sys
 import math
 import hashlib
 import time
+from copy import deepcopy
 from urllib.parse import urlparse, parse_qs
 from email.parser import BytesParser
 from email.policy import default
@@ -36,7 +37,7 @@ MUSESCORE_CANDIDATES = (
     Path(r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe"),
 )
 _library_lock = threading.Lock()
-LIBRARY_ASSET_LAYOUT_VERSION = 4
+LIBRARY_ASSET_LAYOUT_VERSION = 8
 
 
 def _musescore() -> str:
@@ -50,7 +51,11 @@ def _musescore() -> str:
 
 
 def _is_accompaniment(name: str) -> bool:
-    return bool(re.search(r"\b(organo|organ|piano|accompagnamento|accompaniment)\b", name, re.I))
+    return bool(re.search(
+        r"\b(organo|organ|piano|accompagnamento|accompaniment|archi|string(?:s)?|orchestra|viol(?:ino|ini|a|e)|cello|contrabbasso)\b",
+        name,
+        re.I,
+    ))
 
 
 def _library_sources() -> list[Path]:
@@ -70,7 +75,34 @@ def _wait_for_file(path: Path, timeout: float = 8.0) -> None:
     raise RuntimeError(f"MuseScore non ha prodotto {path.name}")
 
 
-def _export_part_svg(musicxml: Path, destination: Path, part_id: str, executable: str) -> list[str]:
+def _tempo_directions(root: ET.Element) -> list[tuple[int, str | None, ET.Element]]:
+    """Return score-level tempo directions that MuseScore may store in one part only."""
+    directions = []
+    for part in root.findall("part"):
+        for measure_index, measure in enumerate(part.findall("measure")):
+            for direction in measure.findall("direction"):
+                if direction.find(".//sound[@tempo]") is not None or direction.find(".//metronome") is not None:
+                    directions.append((measure_index, measure.get("number"), direction))
+    return directions
+
+
+def _ensure_global_tempo(root: ET.Element,
+                         directions: list[tuple[int, str | None, ET.Element]]) -> None:
+    """Keep filtered MusicXML stems at the same tempo as the complete score."""
+    measures = root.findall("./part/measure")
+    for measure_index, measure_number, direction in directions:
+        target = next((measure for measure in measures if measure_number is not None
+                       and measure.get("number") == measure_number), None)
+        if target is None and measure_index < len(measures):
+            target = measures[measure_index]
+        if target is None or target.find(".//sound[@tempo]") is not None or target.find(".//metronome") is not None:
+            continue
+        insertion_index = 1 if target.find("attributes") is not None else 0
+        target.insert(insertion_index, deepcopy(direction))
+
+
+def _export_part_svg(musicxml: Path, destination: Path, part_id: str, executable: str,
+                     tempo_directions: list[tuple[int, str | None, ET.Element]]) -> list[str]:
     """Render one vocal staff, never the SATB/organ full-score page."""
     tree = ET.parse(musicxml)
     root = tree.getroot()
@@ -83,6 +115,7 @@ def _export_part_svg(musicxml: Path, destination: Path, part_id: str, executable
     for part in list(root.findall("part")):
         if part.get("id") != part_id:
             root.remove(part)
+    _ensure_global_tempo(root, tempo_directions)
     source = destination / f"part-{part_id}.musicxml"
     tree.write(source, encoding="utf-8", xml_declaration=True)
     output = destination / f"part-{part_id}.svg"
@@ -95,6 +128,15 @@ def _export_part_svg(musicxml: Path, destination: Path, part_id: str, executable
     first_page = destination / f"part-{part_id}-1.svg"
     _wait_for_file(first_page)
     return [path.name for path in sorted(destination.glob(f"part-{part_id}-*.svg"))]
+
+
+def _export_audio_stem(source: Path, output: Path, executable: str) -> None:
+    output.unlink(missing_ok=True)
+    result = subprocess.run([executable, "-f", "-o", str(output), str(source)],
+                            capture_output=True, text=True, timeout=180, check=False)
+    if result.returncode:
+        raise RuntimeError((result.stderr or result.stdout or "MuseScore stem export failed").strip()[-600:])
+    _wait_for_file(output)
 
 
 def _build_library_piece(source: Path) -> dict:
@@ -134,10 +176,35 @@ def _build_library_piece(source: Path) -> dict:
         score_json = destination / "score.json"
         score_json.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         vocal_parts = [part for part in payload["parts"] if not _is_accompaniment(part["name"])]
+        complete_root = ET.parse(musicxml).getroot()
+        tempo_directions = _tempo_directions(complete_root)
         part_pages = {
-            part["id"]: _export_part_svg(musicxml, destination, part["id"], executable)
+            part["id"]: _export_part_svg(musicxml, destination, part["id"], executable, tempo_directions)
             for part in vocal_parts
         }
+        voice_stems = {}
+        for part in vocal_parts:
+            filename = f"voice-{part['id']}.mp3"
+            _export_audio_stem(destination / f"part-{part['id']}.musicxml", destination / filename, executable)
+            voice_stems[part["id"]] = filename
+        vocal_ids = {part["id"] for part in vocal_parts}
+        tree = ET.parse(musicxml)
+        root = tree.getroot()
+        part_list = root.find("part-list")
+        if part_list is not None:
+            for score_part in list(part_list.findall("score-part")):
+                if score_part.get("id") in vocal_ids:
+                    part_list.remove(score_part)
+        for part in list(root.findall("part")):
+            if part.get("id") in vocal_ids:
+                root.remove(part)
+        _ensure_global_tempo(root, tempo_directions)
+        accompaniment_file = None
+        if root.findall("part"):
+            accompaniment_source = destination / "accompaniment.musicxml"
+            tree.write(accompaniment_source, encoding="utf-8", xml_declaration=True)
+            accompaniment_file = "accompaniment.mp3"
+            _export_audio_stem(accompaniment_source, destination / accompaniment_file, executable)
         metadata = {
             "layout_version": LIBRARY_ASSET_LAYOUT_VERSION,
             "piece_id": piece_id,
@@ -148,6 +215,8 @@ def _build_library_piece(source: Path) -> dict:
             "monodic": len(vocal_parts) == 1,
             "score_pages": [path.name for path in sorted(destination.glob("score-*.svg"))],
             "part_pages": part_pages,
+            "voice_stems": voice_stems,
+            "accompaniment_file": accompaniment_file,
         }
         metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
         return metadata

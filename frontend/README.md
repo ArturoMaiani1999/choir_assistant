@@ -10,7 +10,11 @@ python scripts/serve_frontend.py
 
 Open `http://localhost:5173`. Press **Microfono** and grant permission to activate the live pitch detector; the cyan dot at **ORA** confirms the current detected note even before playback begins. The `Altre voci` accompaniment uses the existing part-specific backing file. Other accompaniment modes are UI/state mocks.
 
-The notation and target events come from the current draft fixture and MuseScore exports. They are not an approved publication. See `docs/PRACTICE_UX_SPEC.md`, `docs/PRACTICE_REDESIGN_PLAN.md`, and `docs/PRACTICE_REDESIGN_PROGRESS.md` for decisions and limitations.
+The notation and target events come from the current local MuseScore-derived
+bundle. They are not automatically approved for publication. See
+[`docs/product/practice-experience.md`](../docs/product/practice-experience.md)
+for the current product contract. Historical redesign plans and evidence are
+kept under `docs/archive/prototype-2026/`.
 
 ## Admin MuseScore correction loop
 
@@ -59,5 +63,44 @@ python scripts/browser_sync_smoke.py
 python scripts/browser_backing_smoke.py
 python -m unittest discover -s backend/choir_assistant/tests -t backend
 ```
+
+## Feedback vocale offline
+
+Le registrazioni conservate nell'archivio locale possono essere aperte nella
+vista **Revisione dell'esecuzione** e processate con **Analizza esecuzione**.
+La schermata mostra soltanto il riferimento e la traiettoria `v1+ display`; i
+confronti diagnostici tra estimatori non fanno parte dell'esperienza utente.
+L'analisi usa la traiettoria v1+ già derivata dai frame acquisiti, il clock
+audio/partitura e i target compilati dal MusicXML. Per ogni
+nota calcola scarto mediano, deriva robusta, stabilità residua, copertura e
+confidenza; attacchi e rilasci vengono esclusi in modo proporzionale alla durata.
+Il risultato non richiede di aprire un inspector: ogni blocco nota mostra
+direttamente un simbolo soltanto quando emerge una difficoltà (`−`, `+`, `↓`,
+`↑`, `≈`, `?`). Le note convincenti non ricevono indicatori invasivi e i valori
+in cent non sono stampati nella panoramica. Passando il puntatore sulla nota
+compare la spiegazione testuale sintetica sopra il grafico.
+
+La valutazione usa tre regimi iniziali configurabili: nota breve (<250 ms),
+intermedia (250–700 ms) e tenuta (>700 ms). Le note brevi sono valutate per
+altezza prevalente ed evidenza acustica senza inferire una deriva; sulle tenute
+sono abilitate anche tendenza lenta e stabilità residua. Affidabilità F0,
+allineamento, altezza prevalente e deriva restano misure distinte. Una seconda
+scala temporale confronta le note affidabili per rilevare una deriva comune
+della frase. La UI ordina queste evidenze e mostra al massimo tre passaggi
+prioritari da riascoltare.
+
+Il confronto **Originale/Corretta** elabora localmente il buffer del microfono
+con ricampionamento e riallineamento WSOLA a durata invariata. Il confronto
+riproduce l'intera registrazione e sposta il centro mediano di ogni nota affidabile,
+lasciando originali pause e regioni incerte; non viene offerto quando nessuna
+regione possiede dati e allineamento sufficienti. Originale e Corretta usano lo
+stesso player: il cursore del piano-roll segue entrambe e un clic sul grafico
+sposta la posizione di ascolto.
+L'audio originale non viene modificato né duplicato in IndexedDB.
+
+Le soglie iniziali sono raccolte in `vocal_feedback.js` e sono intenzionalmente
+conservative in attesa della validazione su un corpus più ampio. Il pitch
+shifter browser-local è adatto a confronti didattici con correzioni moderate,
+ma non è un algoritmo professionale di preservazione dei formanti.
 
 The browser suite validates six viewports and writes screenshots to `artifacts/practice-redesign/`.

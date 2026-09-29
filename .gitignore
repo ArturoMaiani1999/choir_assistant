@@ -10,6 +10,16 @@ automate_mscz/.worker.lock
 data/omr-consensus/
 
 artifacts/
+dist/
 frontend/score-assets/
 frontend/audio/
 frontend/library-assets/
+frontend/voice-lab-assets/
+
+.wrangler/
+
+# Rebuildable Voice Lab authoring cache. The browser-ready SVG files under
+# frontend/voice-lab-assets remain versioned so a static build needs no
+# MuseScore installation.
+/sheets/voice-lab/intervals/
+/sheets/voice-lab/notes/

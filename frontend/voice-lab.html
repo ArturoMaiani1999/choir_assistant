@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="it">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="theme-color" content="#081419" />
+  <title>Laboratorio della Voce · Choir Assistant</title>
+  <link rel="stylesheet" href="styles.css?v=20260928-voice-lab-v2" />
+  <link rel="stylesheet" href="studio.css?v=2" />
+  <script src="score_appearance.js?v=1"></script>
+  <script src="runtime-config.js" defer></script>
+  <script src="pitch_detector.js?v=20260926-v7-tracker-settings" defer></script>
+  <script src="pitch_shared.js?v=20260929-aurora-history" defer></script>
+  <script src="vocal_feedback.js?v=20260928-feedback-v1" defer></script>
+  <script src="voice_lab_core.js?v=20260928-v3" defer></script>
+  <script src="voice_lab.js?v=20260928-aurora" defer></script>
+</head>
+<body class="lab-body">
+  <header class="lab-toolbar"><a class="mode-button lab-back" href="index.html">← Brani</a><div><h1>Laboratorio della Voce</h1></div><button class="mode-button lab-guided" id="lab-guided" type="button">Allenamento di oggi</button><nav class="lab-mode-tabs" aria-label="Tipo di esercizio"><button data-activity="repeat" class="active">Trova la nota</button><button data-activity="sustain">Tieni la nota</button><button data-activity="ear">Riconosci</button><button data-activity="sing-interval">Canta intervalli</button></nav><button class="mode-button" id="lab-settings" type="button">Estensione</button></header>
+  <main class="lab-shell">
+    <section class="lab-intro"><div><p class="lab-eyebrow">ASCOLTO → LETTURA → RIPRODUZIONE → COMPRENSIONE</p><h2>Allena l’orecchio e il controllo della voce</h2><p>Ogni attività unisce ascolto, spartito e piano roll. Il microfono si attiva solo quando lo richiedi.</p></div><p class="lab-range" id="lab-range-label">Estensione: Do3–Do5</p></section>
+    <nav class="lab-categories" aria-label="Attività del laboratorio" hidden>
+      <button data-activity="repeat" class="active"><span>Intonazione</span><strong>Ascolta e ripeti</strong></button>
+      <button data-activity="sustain"><span>Intonazione</span><strong>Mantieni la nota</strong></button>
+      <button data-activity="ear"><span>Ascolto</span><strong>Riconosci intervalli</strong></button>
+      <button data-activity="sing-interval"><span>Intervalli e melodie</span><strong>Canta gli intervalli</strong></button>
+      <button disabled title="Disponibile in una milestone successiva"><span>Canto corale</span><strong>Con il coro</strong><small>Prossimamente</small></button>
+      <button disabled title="Disponibile in una milestone successiva"><span>Riscaldamento</span><strong>Routine guidata</strong><small>Prossimamente</small></button>
+    </nav>
+    <section class="lab-workspace" aria-live="polite">
+      <header><div><p class="lab-eyebrow" id="lab-kind">INTONAZIONE · LIVELLO 1</p><h2 id="lab-title">Ascolta e ripeti</h2><p id="lab-instruction">Ascolta la nota, poi prova a seguirla.</p></div><div class="lab-session-progress" id="lab-session-progress"></div><div class="lab-config" id="lab-config"></div></header>
+      <section class="lab-music-view" aria-label="Spartito e piano roll dell’esercizio">
+        <div class="lab-score-panel"><div class="lab-panel-heading"><span id="lab-target">—</span><small id="lab-frequency">Scegli un esercizio</small></div><div class="lab-score-curtain" id="lab-score-curtain" hidden><span aria-hidden="true">?</span><strong>Note nascoste durante l’ascolto</strong><small>Ascolta, scegli la risposta e poi confrontala con lo spartito.</small></div><img id="lab-score" alt="Spartito MuseScore dell’esercizio" /></div>
+        <div class="lab-roll-panel"><div class="lab-panel-heading"><span>INTONAZIONE</span><small>Riferimento e voce rilevata</small></div><canvas id="lab-roll" role="img" aria-label="Piano roll dell’esercizio"></canvas><div class="lab-live-readout"><span id="lab-state">PRONTO</span><strong id="lab-countdown">30.0</strong><meter id="lab-level" min="0" max="0.08" value="0" aria-label="Livello microfono"></meter></div></div>
+      </section>
+      <div class="lab-actions lab-transport" id="lab-actions"><button id="lab-new" type="button" title="Riprepara l’esercizio" aria-label="Riprepara l’esercizio">↺</button><button id="lab-listen" class="lab-play" type="button" aria-label="Ascolta il riferimento" title="Ascolta il riferimento" disabled>▶</button><button id="lab-continue" class="lab-continue" type="button" hidden>Continua</button><button id="lab-record" type="button" title="Attiva il microfono e inizia a cantare" disabled>Microfono</button></div>
+      <section class="lab-answer" id="lab-answer" hidden></section>
+      <section class="lab-feedback" id="lab-feedback" hidden><div class="lab-feedback-summary"><div><p class="lab-eyebrow">FEEDBACK</p><h3 id="lab-feedback-title">Risultato</h3><p id="lab-feedback-message"></p></div><dl id="lab-metrics"></dl></div><canvas id="lab-chart" aria-label="Andamento dell’intonazione in cent"></canvas><div class="lab-actions"><button id="lab-play-take" type="button" disabled>▶ Registrazione originale</button><button id="lab-retry" type="button">Riprova lo stesso</button><button id="lab-next" class="primary" type="button">Altra nota</button></div></section>
+      <p class="lab-note" id="lab-note"></p>
+    </section>
+  </main>
+  <dialog id="lab-settings-dialog" class="practice-dialog"><h2>Voce ed estensione</h2><p>Il ruolo imposta un punto di partenza prudente. Regola poi l’intervallo sulle note che canti comodamente.</p><label>Ruolo nel coro <select id="lab-role"><option value="soprano">Soprano</option><option value="alto">Contralto</option><option value="tenor">Tenore</option><option value="bass">Basso</option></select></label><label>Nota più bassa <select id="lab-low"></select></label><label>Nota più alta <select id="lab-high"></select></label><section class="lab-mic-check" aria-label="Controllo microfono"><div><strong>Controllo microfono</strong><span id="lab-mic-check-status">Prova libera, non valutata</span></div><meter id="lab-mic-check-level" min="0" max="0.08" value="0" aria-label="Livello del controllo microfono"></meter><button id="lab-mic-check" type="button">Avvia controllo</button></section><div class="dialog-actions"><button id="lab-settings-save" type="button">Salva</button><button id="lab-settings-close" type="button">Annulla</button></div></dialog>
+</body>
+</html>

@@ -1,5 +1,9 @@
 # Agentic PDF ingestion pipeline
 
+**Status:** canonical design; local implementation is partial
+**Owner:** project maintainer
+**Last reviewed:** 2026-09-28
+
 This document turns “upload a PDF and obtain a MuseScore for admin approval” into a repeatable product capability.
 
 ## Product contract

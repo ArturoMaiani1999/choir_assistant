@@ -1,5 +1,9 @@
 # Stati UX, interruzioni ed edge case della prova
 
+**Status:** canonical
+**Owner:** project maintainer
+**Last reviewed:** 2026-09-28
+
 ## Obiettivo
 
 Una prova vocale deve restare comprensibile anche quando il browser, il sistema operativo o il dispositivo interrompono il microfono. Il corista non deve chiedersi se il tempo stia continuando, se la voce venga ancora ascoltata o se la posizione sia stata persa.

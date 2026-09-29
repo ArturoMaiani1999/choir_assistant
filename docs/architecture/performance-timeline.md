@@ -1,5 +1,9 @@
 # Performance timeline slice
 
+**Status:** canonical
+**Owner:** project maintainer
+**Last reviewed:** 2026-09-28
+
 The MusicXML compiler now separates written measures from performance occurrences.
 
 For a repeat with a first and second ending, the written measures remain unique, while `NormalizedScore.performance_occurrences` can contain a sequence such as:
