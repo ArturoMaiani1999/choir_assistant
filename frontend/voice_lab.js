@@ -2,10 +2,11 @@
   'use strict';
   const Core = window.VoiceLabCore, Draw = window.VoiceDrawCore, { detectPitch, PitchSmoother } = window.ChoirPitch;
   const PitchShared = window.ChoirPitchShared;
+  const FluidPitchTrail = window.ChoirFluidPitchTrail;
   const $ = (id) => document.getElementById(id);
   const drawBoard = $('lab-draw-board'), drawLeft = $('lab-draw-left'), drawRight = $('lab-draw-right');
   const drawKeys = new Set();
-  const els = Object.fromEntries(['lab-range-label', 'lab-kind', 'lab-title', 'lab-instruction', 'lab-config', 'lab-session-progress', 'lab-score', 'lab-score-curtain', 'lab-roll', 'lab-target', 'lab-frequency', 'lab-state', 'lab-countdown', 'lab-level', 'lab-new', 'lab-listen', 'lab-continue', 'lab-record', 'lab-answer', 'lab-feedback', 'lab-feedback-title', 'lab-feedback-message', 'lab-metrics', 'lab-chart', 'lab-play-take', 'lab-retry', 'lab-next', 'lab-note', 'lab-guided', 'lab-settings', 'lab-settings-dialog', 'lab-role', 'lab-low', 'lab-high', 'lab-mic-check', 'lab-mic-check-level', 'lab-mic-check-status', 'lab-settings-save', 'lab-settings-close'].map((id) => [id.replaceAll('-', '_'), $(id)]));
+  const els = Object.fromEntries(['lab-range-label', 'lab-kind', 'lab-title', 'lab-instruction', 'lab-config', 'lab-session-progress', 'lab-score', 'lab-score-curtain', 'lab-roll', 'lab-fluid-layer', 'lab-target', 'lab-frequency', 'lab-state', 'lab-countdown', 'lab-level', 'lab-new', 'lab-listen', 'lab-continue', 'lab-record', 'lab-answer', 'lab-feedback', 'lab-feedback-title', 'lab-feedback-message', 'lab-metrics', 'lab-chart', 'lab-play-take', 'lab-retry', 'lab-next', 'lab-note', 'lab-guided', 'lab-settings', 'lab-settings-dialog', 'lab-role', 'lab-low', 'lab-high', 'lab-mic-check', 'lab-mic-check-level', 'lab-mic-check-status', 'lab-settings-save', 'lab-settings-close'].map((id) => [id.replaceAll('-', '_'), $(id)]));
   const STORE = 'choir-voice-lab:v1', MAX_RESULTS = 200;
   let soloStartedAt = null, preparing = false, preparationId = 0;
   const phase = document.createElement('div'); phase.className = 'lab-phase'; phase.setAttribute('role', 'status');
@@ -24,6 +25,7 @@
   const CHOIR_ANCHORS = Object.freeze({ soprano: [62, 68, 74], alto: [57, 63, 69], tenor: [50, 56, 62, 67], bass: [42, 48, 54, 59] });
   const FINAL_DIMINUENDO_SECONDS = 4.8;
   const sharedPitch = PitchShared.readPreferences();
+  const fluidTrailRenderer = new FluidPitchTrail.Renderer(els.lab_fluid_layer);
   const state = { activity: 'repeat', role: 'tenor', range: { ...ROLE_RANGES.tenor }, exercise: null, harmony: null, pitchSession: null, earSession: null, singSession: null, drawSession: null, drawFrame: null, guidedSession: null, autoCompleting: false, advanceTimer: null, countInTimers: [], countInFrame: null, countInStartedAt: 0, metronomeSources: [], accompanimentSources: [], countingIn: false, audio: null, voiceBuffers: new Map(), stringBuffers: new Map(), reference: null, referenceTimer: null, stream: null, analyser: null, input: null, recording: false, calibrationActive: false, calibrationGeneration: 0, mediaRecorder: null, chunks: [], generation: 0, frames: [], startedAt: 0, elapsedSeconds: 0, audioUrl: null, rollBounds: null, detectorSettings: sharedPitch.detector, plumeSettings: sharedPitch.plume };
   let needsRoleSetup = true;
   try { const savedRole = localStorage.getItem(`${STORE}:role`); needsRoleSetup = !savedRole; state.role = savedRole || state.role; state.range = { ...ROLE_RANGES[state.role] }; } catch (_) {}
@@ -38,7 +40,7 @@
   function canvasContext(canvas, height = 220) {
     const ratio = devicePixelRatio || 1, width = canvas.clientWidth || 560; height = canvas.clientHeight || height;
     canvas.width = Math.round(width * ratio); canvas.height = Math.round(height * ratio);
-    const context = canvas.getContext('2d'); context.scale(ratio, ratio); return { context, width, height };
+    const context = canvas.getContext('2d'); context.scale(ratio, ratio); return { context, width, height, ratio };
   }
   function exerciseNotes() {
     if (state.activity === 'draw') return [];
@@ -66,13 +68,11 @@
   }
   function drawRoll(reveal) {
     if (state.activity === 'draw') return;
-    const { context: ctx, width, height } = canvasContext(els.lab_roll), notes = exerciseNotes(); ctx.fillStyle = '#08171c'; ctx.fillRect(0, 0, width, height);
+    const { context: ctx, width, height, ratio } = canvasContext(els.lab_roll), notes = exerciseNotes(); ctx.fillStyle = '#08171c'; ctx.fillRect(0, 0, width, height);
+    fluidTrailRenderer.resize(width, height, ratio); fluidTrailRenderer.clear();
     const targets = notes.length ? notes.map((note) => note.midi) : [60];
-    const pitchWindow = state.frames;
-    const recentVoiced = pitchWindow.filter((frame) => Number.isFinite(frame.displayPitch) && frame.confidence >= .3).map((frame) => frame.displayPitch);
-    const visiblePitches = [...targets, ...recentVoiced], low = Math.min(...visiblePitches), high = Math.max(...visiblePitches), span = Math.max(8, high - low + 4), desired = { min: (low + high) / 2 - span / 2, max: (low + high) / 2 + span / 2 };
-    if (!state.rollBounds) state.rollBounds = desired;
-    else { const alpha = .14; state.rollBounds.min += (desired.min - state.rollBounds.min) * alpha; state.rollBounds.max += (desired.max - state.rollBounds.max) * alpha; }
+    const desired = Core.rollPitchBounds(targets);
+    state.rollBounds = desired;
     const { min: minMidi, max: maxMidi } = state.rollBounds;
     const yAt = (midi) => 16 + (maxMidi - midi) / Math.max(1, maxMidi - minMidi) * (height - 32), duration = state.exercise?.durationSeconds || 30;
     const rowHeight = (height - 32) / Math.max(1, maxMidi - minMidi), keyboardRight = 45;
@@ -121,13 +121,21 @@
     }
     const voiced = state.frames.filter((frame) => Number.isFinite(frame.displayPitch) && frame.confidence >= .3);
     const xAtFrame = (frame) => xAtTime(frame.time);
-    PitchShared.drawConfidencePlume(ctx, state.frames, xAtFrame, yAt, minMidi, maxMidi, { ...state.plumeSettings, nowX, trailStartX: keyboardRight, currentTime: elapsed, sortedTimeline: true, mode: state.recording ? 'live' : 'review' });
+    const plumeSettings = { ...state.plumeSettings, nowX, trailStartX: keyboardRight, currentTime: elapsed,
+      sortedTimeline: true, mode: state.recording ? 'live' : 'review' };
+    if (state.activity === 'repeat' || state.activity === 'sing-interval') {
+      const fluidSettings = { ...plumeSettings, dpr: ratio, width, height, ribbonScale: state.plumeSettings.width,
+        clip: { left: keyboardRight, top: 16, right: nowX, bottom: height - 16 },
+        animationTime: state.recording ? performance.now() / 1000 : elapsed };
+      if (!fluidTrailRenderer.render(state.frames, xAtFrame, yAt, fluidSettings))
+        FluidPitchTrail.drawFallback(ctx, state.frames, xAtFrame, yAt, fluidSettings);
+    } else PitchShared.drawConfidencePlume(ctx, state.frames, xAtFrame, yAt, minMidi, maxMidi, plumeSettings);
     const countInDuration = Core.INTERVAL_TIMING.countInBeats * 60 / Core.INTERVAL_TIMING.bpm;
     const countInFraction = state.countingIn ? Math.min(1, Math.max(0, (performance.now() - state.countInStartedAt) / 1000 / countInDuration)) : 0;
     const cursorX = state.countingIn ? keyboardRight + historyWidth * countInFraction : state.recording || state.frames.length ? nowX : keyboardRight;
     ctx.strokeStyle = '#8ee0d8'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cursorX, 0); ctx.lineTo(cursorX, height); ctx.stroke();
     const latest = voiced.at(-1);
-    if (latest && elapsed - latest.time < .2) { const midi = latest.displayPitch, y = yAt(midi), target = targets[0], cents = Math.round((midi - target) * 100); ctx.fillStyle = state.plumeSettings.presentColor; ctx.font = '700 12px system-ui'; ctx.fillText(`${Core.midiToName(Math.round(midi))}  ${cents > 0 ? '+' : ''}${cents}¢`, nowX + 12, Math.max(28, Math.min(height - 10, y + 4))); }
+    if (latest && elapsed - latest.time < .2) { const midi = latest.displayPitch, y = yAt(midi), target = targets[0], cents = Math.round((midi - target) * 100); ctx.fillStyle = '#72e0d2'; ctx.font = '700 12px system-ui'; ctx.fillText(`${Core.midiToName(Math.round(midi))}  ${cents > 0 ? '+' : ''}${cents}¢`, nowX + 12, Math.max(28, Math.min(height - 10, y + 4))); }
   }
   function drawDrawingBoard() {
     if (!state.drawSession || drawBoard.hidden) return;

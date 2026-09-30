@@ -112,4 +112,8 @@ const stableSinging = Array.from({ length: 8 }, () => ({ completed: true, exerci
 assert.equal(lab.buildRecommendedSession([...repertoireReady, ...stableSinging]).blocks.find((block) => block.activity === 'sing-interval').mode, 'memory');
 const stableMemory = Array.from({ length: 8 }, () => ({ completed: true, exerciseType: 'sing-interval', actualConfig: { mode: 'memory' }, analysis: { reliable: true, relativeCorrect: true } }));
 assert.equal(lab.buildRecommendedSession([...repertoireReady, ...stableSinging, ...stableMemory]).blocks.find((block) => block.activity === 'sing-interval').mode, 'construction');
-console.log('voice_lab_core: 63 assertions passed');
+assert.deepEqual(lab.rollPitchBounds([58]), { min: 53, max: 63 }, 'one-note roll follows the focused rehearsal viewport');
+assert.deepEqual(lab.rollPitchBounds([58, 65]), { min: 56, max: 67 }, 'interval roll includes both targets plus two semitones');
+assert.deepEqual(lab.rollPitchBounds([58, 70]), { min: 56, max: 72 }, 'wide intervals expand only as much as their targets require');
+assert.deepEqual(lab.rollPitchBounds([]), { min: 55, max: 67 }, 'missing targets use a bounded neutral viewport');
+console.log('voice_lab_core: 67 assertions passed');

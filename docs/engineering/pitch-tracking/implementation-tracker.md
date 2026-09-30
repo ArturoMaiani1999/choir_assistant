@@ -210,7 +210,7 @@ Con la metrica temporale comune il cluster produce 1 episodio v1 e 2 episodi CRE
 
 ### 2026-09-28 — Sensibilità per canto a bassissimo volume
 
-- Esteso il minimo regolabile della soglia v1 da `0,0001` a `0,00001 RMS`, mantenendo invariato il default `0,001 RMS` e la mappatura logaritmica dello slider.
+- Esteso il minimo regolabile della soglia v1 da `0,0001` a `0,000001 RMS`, mantenendo invariato il default `0,001 RMS` e la mappatura logaritmica dello slider.
 - Alla sola soglia personalizzata sotto il default, un segnale molto debole ma chiaramente periodico riceve un pavimento di confidence sufficiente a superare anche il gate del tracker. Il percorso e la baseline alla soglia predefinita restano invariati.
 
 ### 2026-09-28 — Preferenze globali e microfono su Play

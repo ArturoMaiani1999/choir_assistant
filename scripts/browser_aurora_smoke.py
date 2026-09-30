@@ -68,12 +68,28 @@ def main():
                       document.querySelectorAll('dialog[open]').forEach(d=>d.close());
                       const beat=6, now=state.runtime.secondsAtBeat(beat);
                       const pitch=state.runtime.targetAt(beat)?.midiPitch || 62;
-                      state.pitchSamples=Array.from({length:121},(_,i)=>({
-                        beat:state.runtime.beatAtSeconds(Math.max(0,now-3+i*.025)),
-                        displayPitch:pitch+.25*Math.sin(i*.025*30),confidence:.9,takeId:state.pitchTakeId}));
+                      state.pitchSamples=Array.from({length:121},(_,i)=>{
+                        const t=i*.025, transition=t<.65 ? -2.4+t/.65*2.4 : .16*Math.sin((t-.65)*23);
+                        const signalLost=(i>=70&&i<=71)||(i>=91&&i<=102);
+                        return {beat:state.runtime.beatAtSeconds(Math.max(0,now-3+t)),
+                          displayPitch:signalLost?null:pitch+transition+(i===52?1.5:0),
+                          confidence:signalLost?0:.9,takeId:state.pitchTakeId};
+                      });
                       state.clock.seekBeat(beat); render();
                       const before=state.pitchSamples.length;
-                      drawPitchLane(beat);drawPitchLane(beat);
+                      if(!fluidTrailRenderer.available)throw Error('WebGL2 fluid trail unavailable');
+                      const times=[];for(let i=0;i<90;i++){const start=performance.now();drawPitchLane(beat);times.push(performance.now()-start);}
+                      times.sort((a,b)=>a-b);
+                      const gl=fluidTrailRenderer.gl,pixels=new Uint8Array(fluidTrailRenderer.canvas.width*fluidTrailRenderer.canvas.height*4);
+                      gl.readPixels(0,0,fluidTrailRenderer.canvas.width,fluidTrailRenderer.canvas.height,gl.RGBA,gl.UNSIGNED_BYTE,pixels);
+                      let fluidPixels=0;for(let i=3;i<pixels.length;i+=4)if(pixels[i])fluidPixels++;
+                      if(fluidPixels<100)throw Error('Fluid overlay is empty');
+                      if(times[85]>20)throw Error('Fluid render p95 too slow: '+times[85]);
+                      const originalFallback=ChoirFluidPitchTrail.drawFallback;let fallbackCalls=0;
+                      ChoirFluidPitchTrail.drawFallback=(...args)=>{fallbackCalls++;return originalFallback(...args);};
+                      fluidTrailRenderer.fluidEnabled=false;drawPitchLane(beat);fluidTrailRenderer.fluidEnabled=true;
+                      ChoirFluidPitchTrail.drawFallback=originalFallback;
+                      if(fallbackCalls!==1)throw Error('Canvas fallback was not selected');
                       if(state.pitchSamples.length!==before) throw Error('Renderer changed history');
                       const oldTake=state.pitchTakeId;seekToMeasure(0);
                       if(state.pitchTakeId===oldTake) throw Error('Seek failed to isolate take');
@@ -81,7 +97,7 @@ def main():
                       const visible=state.pitchSamples.filter(s=>s.takeId===state.pitchTakeId);
                       if(visible.length) throw Error('Old take leaks after seek');
                       state.gridInspect.active=true;state.gridInspect.viewBeat=beat;render();
-                      return {historyPreserved:state.pitchSamples.length===before,seekIsolated:true,
+                      return {historyPreserved:state.pitchSamples.length===before,seekIsolated:true,fluidPixels,fluidP95Ms:times[85],fallbackCalls,
                         review:livePlumeSettings(beat,true,100,0).mode,
                         timeUnit:settings.currentTime};
                     })()"""
@@ -94,23 +110,24 @@ def main():
                     time.sleep(1)
                     expression = """(async () => {
                       document.querySelector('#lab-settings-close').click();
-                      const original=ChoirPitchShared.drawConfidencePlume;
-                      window.plumeChecks={live:0,review:0,voiced:0,errors:[]};
-                      window.addEventListener('error',e=>plumeChecks.errors.push(e.message));
-                      ChoirPitchShared.drawConfidencePlume=function(...args){
-                        const settings=args[6];plumeChecks[settings.mode==='review'?'review':'live']++;plumeChecks.lastMode=settings.mode;
-                        plumeChecks.voiced=Math.max(plumeChecks.voiced,args[1].filter(s=>Number.isFinite(s.displayPitch)&&s.confidence>=.3).length);
-                        return original(...args);
+                      const original=ChoirFluidPitchTrail.Renderer.prototype.render;
+                      window.fluidChecks={live:0,review:0,voiced:0,errors:[]};
+                      window.addEventListener('error',e=>fluidChecks.errors.push(e.message));
+                      ChoirFluidPitchTrail.Renderer.prototype.render=function(...args){
+                        const settings=args[3];fluidChecks[settings.mode==='review'?'review':'live']++;fluidChecks.lastMode=settings.mode;
+                        fluidChecks.voiced=Math.max(fluidChecks.voiced,args[0].filter(s=>Number.isFinite(s.displayPitch)&&s.confidence>=.3).length);
+                        return original.apply(this,args);
                       };
                       document.querySelector('#lab-listen').click();
                       await new Promise(r=>setTimeout(r,8500));
                       const button=document.querySelector('#lab-listen');
-                      plumeChecks.stopLabel=button.getAttribute('aria-label');plumeChecks.disabled=button.disabled;
-                      if(plumeChecks.lastMode==='live') button.click();
+                      fluidChecks.stopLabel=button.getAttribute('aria-label');fluidChecks.disabled=button.disabled;
+                      if(fluidChecks.lastMode==='live') button.click();
                       await new Promise(r=>setTimeout(r,150));
-                      plumeChecks.finalLabel=button.getAttribute('aria-label');plumeChecks.finalState=document.querySelector('#lab-state').textContent;
-                      if(plumeChecks.live<2||plumeChecks.review<1||plumeChecks.voiced<2)throw Error(JSON.stringify(plumeChecks));
-                      return plumeChecks;
+                      fluidChecks.finalLabel=button.getAttribute('aria-label');fluidChecks.finalState=document.querySelector('#lab-state').textContent;
+                      fluidChecks.webgl=Boolean(document.querySelector('#lab-fluid-layer').getContext('webgl2'));
+                      if(fluidChecks.live<2||fluidChecks.review<1||fluidChecks.voiced<2||!fluidChecks.webgl)throw Error(JSON.stringify(fluidChecks));
+                      return fluidChecks;
                     })()"""
                     result = command(socket, 9, "Runtime.evaluate", {"expression": expression, "awaitPromise": True, "returnByValue": True})
                     assert "exceptionDetails" not in result, result
@@ -119,6 +136,7 @@ def main():
                     (artifacts / "lab-stopped.png").write_bytes(base64.b64decode(screenshot["data"]))
                     result = command(socket, 11, "Runtime.evaluate", {"expression": """(async () => {
                       document.querySelector('[data-activity="sing-interval"]').click();
+                      const fluidRendersBefore=fluidChecks.live+fluidChecks.review;
                       const score=document.querySelector('#lab-score');
                       for(let i=0;i<50 && !score.naturalWidth;i++) await new Promise(r=>setTimeout(r,50));
                       if(!score.naturalWidth || !score.src.includes('/intervals/melodic-'))throw Error('Interval score missing: '+score.src);
@@ -127,7 +145,8 @@ def main():
                       for(let i=0;i<100 && document.querySelector('#lab-state').textContent!=='PREPARATI';i++)await new Promise(r=>setTimeout(r,50));
                       const countdown=document.querySelector('#lab-countdown').textContent;
                       if(!/^\\d \\/ 4$/.test(countdown))throw Error('Four-beat preparation missing: '+countdown);
-                      return {score:score.src.split('/').at(-1),countdown};
+                      if(fluidChecks.live+fluidChecks.review<=fluidRendersBefore)throw Error('Fluid ribbon not used by sung intervals');
+                      return {score:score.src.split('/').at(-1),countdown,fluidRenders:fluidChecks.live+fluidChecks.review};
                     })()""", "awaitPromise": True, "returnByValue": True})
                     assert "exceptionDetails" not in result, result
                     print(json.dumps(result["result"]["value"]))

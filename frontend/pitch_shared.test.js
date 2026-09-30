@@ -3,13 +3,11 @@ const shared = require('./pitch_shared.js');
 
 assert.equal(shared.PREFERENCE_KEY, 'choir-detector-settings:v1');
 const preferences = shared.readPreferences({ getItem: () => JSON.stringify({
-  v1RmsThreshold: .002, v1FastAlpha: .7, v1SlowAlpha: .25, v1MedianWindowFrames: 5,
-  v1PlumeWidth: 1.4, v1PlumeIntensity: .8, pitchTargetColor: '#fedcba',
-  v1PlumePresentColor: '#abcdef', v1PlumePastColor: '#123456', v1PlumeAdvanceMs: 120,
+  v1RmsThreshold: .002, v1WeakVoiceMode: true, v1FastAlpha: .7, v1SlowAlpha: .25, v1MedianWindowFrames: 5,
+  v1PlumeWidth: 1.4, v1PlumeIntensity: .8, v1PlumeColor: '#abcdef', v1PlumeAdvanceMs: 120,
 }) });
-assert.deepEqual(preferences.detector, { rmsThreshold: .002, fastAlpha: .7, slowAlpha: .25, medianWindowFrames: 5 });
-assert.deepEqual(preferences.plume, { width: 1.4, intensity: .8, targetColor: '#fedcba',
-  presentColor: '#abcdef', pastColor: '#123456', timeAdvanceMs: 120 });
+assert.deepEqual(preferences.detector, { rmsThreshold: .002, weakVoiceMode: true, fastAlpha: .7, slowAlpha: .25, medianWindowFrames: 5 });
+assert.deepEqual(preferences.plume, { width: 1.4, intensity: .8, color: '#72e0d2', timeAdvanceMs: 120 });
 const frame = (time, pitch = 60, confidence = .9, takeId = 1) => ({ time, displayPitch: pitch, confidence, takeId });
 const signal = (fn, count = 121, dt = .025) => Array.from({length: count}, (_,i) => frame(i*dt, fn(i*dt)));
 function columns(samples, options = {}) {
@@ -41,16 +39,16 @@ assert.equal(columns([frame(0),frame(.05),frame(1),frame(1.05)],{mode:'review'})
 assert.equal(columns([frame(0),frame(.05),frame(.1,72),frame(.15,72)],{mode:'review'}).model.segments.length, 2, 'octave jump is not a fabricated glissando');
 assert.equal(columns([frame(0),frame(.05),{...frame(.075),confirmationState:'provisional'},frame(.1),frame(.15)],{mode:'review'}).model.segments.length, 2);
 assert.equal(columns([frame(0),frame(.05),frame(.1,60,.1),frame(.15),frame(.2)],{mode:'review'}).model.segments.length, 2);
+assert.ok(columns([frame(0,60,.14),frame(.05,60,.14)],{mode:'review',minConfidence:.12}).result.length > 0,
+  'weak-voice rendering uses the configured confidence gate');
 assert.equal(columns([frame(0),frame(.05),frame(.1,60,.9,2),frame(.15,60,.9,2)],{mode:'review'}).model.segments.length, 2, 'never join takes');
 assert.deepEqual(shared.auroraStyle(0,1).color,[114,224,210]);
-assert.equal(shared.auroraStyle(3,1).alpha,shared.AURORA.historyOpacity);
-assert.equal(shared.auroraStyle(600,1).alpha,shared.AURORA.historyOpacity, 'old live history remains visible');
-assert.deepEqual(shared.auroraStyle(600,1).color,[75,127,155]);
+assert.ok(Math.abs(shared.auroraStyle(3,1).alpha-shared.AURORA.historyOpacity) < 1e-9);
+assert.ok(Math.abs(shared.auroraStyle(600,1).alpha-shared.AURORA.historyOpacity) < 1e-9, 'old live history remains faintly visible');
+assert.deepEqual(shared.auroraStyle(600,1).color,[114,224,210]);
 assert.deepEqual(shared.auroraStyle(0,1,{mode:'review'}).color,shared.auroraStyle(600,1,{mode:'review'}).color, 'review has a uniform colour');
-assert.deepEqual(shared.auroraStyle(0,1,{mode:'review'}).color,[75,127,155], 'review uses the final past colour');
-assert.deepEqual(shared.auroraStyle(0,1,{presentColor:'#00ff00',pastColor:'#0044ff'}).color,[0,255,0]);
-assert.deepEqual(shared.auroraStyle(99,1,{presentColor:'#00ff00',pastColor:'#0044ff'}).color,[0,68,255]);
-assert.ok(columns(stable).result.some(p => p.x > 15 && p.x < 40 && p.alpha > .4), 'live trace is not discarded outside recent colour window');
+assert.deepEqual(shared.auroraStyle(0,1,{mode:'review'}).color,[114,224,210], 'review keeps the single cyan hue');
+assert.ok(columns(stable).result.some(p => p.x > 15 && p.x < 40 && p.alpha > .04), 'live trace dissolves continuously instead of being hard-clipped');
 assert.ok(shared.auroraStyle(.5,.4).alpha < shared.auroraStyle(.5,.9).alpha);
 assert.ok(shared.auroraStyle(30,1,{mode:'review'}).alpha > 0, 'review retains full history');
 assert.ok(columns(stable,{currentTime:1}).result.every(p=>p.x<=200), 'seek clips future data');

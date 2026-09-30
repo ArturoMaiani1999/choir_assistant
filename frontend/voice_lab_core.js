@@ -24,6 +24,17 @@
   const midiToHz = (midi, tuning = 440) => tuning * 2 ** ((midi - 69) / 12);
   const midiToName = (midi) => `${['Do', 'Do♯', 'Re', 'Mi♭', 'Mi', 'Fa', 'Fa♯', 'Sol', 'La♭', 'La', 'Si♭', 'Si'][((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`;
   const centsBetween = (actualHz, targetHz) => 1200 * Math.log2(actualHz / targetHz);
+  function rollPitchBounds(targets, { padding = 2, minSpan = 9 } = {}) {
+    const pitches = targets.filter(Number.isFinite);
+    if (!pitches.length) return { min: 55, max: 67 };
+    let min = Math.floor(Math.min(...pitches)) - padding;
+    let max = Math.ceil(Math.max(...pitches)) + padding;
+    if (max - min < minSpan) {
+      const extra = (minSpan - (max - min)) / 2;
+      min -= extra; max += extra;
+    }
+    return { min: Math.floor(min), max: Math.ceil(max) };
+  }
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const randomInteger = (low, high, random = Math.random) => Math.floor(random() * (high - low + 1)) + low;
   const rollPixelsPerSecond = (plotWidth, bpm = INTERVAL_TIMING.bpm, visibleMeasures = ROLL_VISIBLE_MEASURES) => {
@@ -385,6 +396,6 @@
 
   return { INTERVALS, LEVEL_INTERVALS, ROLE_INTERVAL_BASES, INTERVAL_TIMING, ROLL_VISIBLE_MEASURES, rollPixelsPerSecond, HARMONY_RANGE, midiToHz, midiToName, centsBetween, validateRange, randomNote, allowedIntervals, planHarmony,
     generateInterval, generateScoredInterval, definition, result, analyseSustained, analyseSungInterval, EARLY_COMPLETION_DEFAULTS,
-    evaluatePitchProgress, pitchTrialOutcome, buildInitialPitchSession, buildEarTrainingBlock, scheduleEarRetry, buildSingingIntervalBlock,
+    evaluatePitchProgress, pitchTrialOutcome, buildInitialPitchSession, buildEarTrainingBlock, scheduleEarRetry, buildSingingIntervalBlock, rollPitchBounds,
     deriveCompetencies, extractRepertoirePhrase, competencePriority, categoriesConsolidated, buildRecommendedSession };
 });

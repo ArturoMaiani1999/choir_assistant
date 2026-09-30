@@ -52,8 +52,9 @@ button:disabled{cursor:not-allowed}
 .studio-wordmark,.studio-section-label{font-size:10px!important;font-weight:700;letter-spacing:.16em}
 .studio-welcome h2{position:relative;z-index:1;font-family:Georgia,serif;font-size:46px;line-height:1.12;font-weight:400;margin:55px 0 16px;letter-spacing:-.04em}
 .studio-welcome p{position:relative;z-index:1;color:#53605a;max-width:250px;font-size:15px}
+.studio-phrase{white-space:nowrap}
 .studio-staff{position:absolute;inset:auto -25px 25px;transform:rotate(-12deg);height:105px;display:grid;gap:15px;opacity:.5}
-.studio-staff i{border-top:1px solid #586f633d}
+.studio-staff i{border-top:3px solid #45564d3a}
 .studio-staff:after{content:'♪';position:absolute;right:80px;bottom:-50px;font:200px Georgia,serif;color:#355d4d}
 .studio-library-form{padding:42px 34px;align-self:center}
 .studio-library-form .studio-section-label{color:var(--amber);margin:0 0 28px}

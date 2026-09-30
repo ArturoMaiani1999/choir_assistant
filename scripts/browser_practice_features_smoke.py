@@ -95,25 +95,39 @@ def main():
                 'visual pitch advance is timestamp-only: ' + JSON.stringify({sourceBeat,shiftedBeat,shiftedSeconds}));
               els.settingsV1Rms.value = '0';
               els.settingsV1Rms.dispatchEvent(new Event('input'));
-              assert(Math.abs(state.detectorSettings.rmsThreshold - .00001) < 1e-10,
+              assert(Math.abs(state.detectorSettings.rmsThreshold - .000001) < 1e-12,
                 'extended quiet-voice sensitivity');
-              assert(els.settingsV1RmsValue.textContent.startsWith('0,00001'), 'low RMS value remains readable');
+              assert(els.settingsV1RmsValue.textContent.startsWith('0,000001'), 'low RMS value remains readable');
+              els.settingsWeakVoiceMode.checked = true;
+              els.settingsWeakVoiceMode.dispatchEvent(new Event('change'));
+              const weakRecognition = activeRecognitionSettings();
+              assert(state.detectorSettings.weakVoiceMode
+                && Math.abs(state.pitchSmoother.minConfidence - .12) < 1e-10
+                && Math.abs(state.pitchSmoother.minClarity - .35) < 1e-10
+                && state.pitchSmoother.weakSignalHoldFrames === 2
+                && weakRecognition.rmsThreshold <= .00003
+                && Math.abs(weakRecognition.yinThreshold - .55) < 1e-10
+                && Math.abs(livePlumeSettings(0,false,100,0).minConfidence - .12) < 1e-10,
+                'weak-voice mode lowers the complete recognition and rendering gates');
               savePreferences();
               const piecePreferences = JSON.parse(localStorage.getItem(preferenceKey()));
-              for (const key of ['v1RmsThreshold','v1FastAlpha','v1SlowAlpha','v1MedianWindowFrames','v1PlumeWidth',
+              for (const key of ['v1RmsThreshold','v1WeakVoiceMode','v1FastAlpha','v1SlowAlpha','v1MedianWindowFrames','v1PlumeWidth',
                 'v1PlumeIntensity','v1PlumeColor','v1PlumeAdvanceMs','displayPitchAlgorithm','pitchLayerV1','pitchLayerCrepe']) delete piecePreferences[key];
               localStorage.setItem(preferenceKey(), JSON.stringify(piecePreferences));
               assert(JSON.parse(localStorage.getItem(GLOBAL_DETECTOR_PREFERENCES_KEY)).v1PlumeAdvanceMs === 120,
                 'detector preferences saved globally');
               return {duration:els.backingAudio.duration, transpose:state.transpose, phrase:state.phrase,
-                plumeAdvanceMs:state.plumeSettings.timeAdvanceMs, rmsThreshold:state.detectorSettings.rmsThreshold};
+                plumeAdvanceMs:state.plumeSettings.timeAdvanceMs, rmsThreshold:state.detectorSettings.rmsThreshold,
+                weakVoiceMode:state.detectorSettings.weakVoiceMode};
             })()""")
             command(socket, 2, 'Page.reload')
             time.sleep(.8)
             restored = evaluate(socket, 3, """({transpose:state.transpose, phrase:state.phrase,
-              plumeAdvanceMs:state.plumeSettings.timeAdvanceMs, rmsThreshold:state.detectorSettings.rmsThreshold})""")
+              plumeAdvanceMs:state.plumeSettings.timeAdvanceMs, rmsThreshold:state.detectorSettings.rmsThreshold,
+              weakVoiceMode:state.detectorSettings.weakVoiceMode})""")
             assert (restored['transpose'] == 0 and restored['phrase'] is None
-                    and restored['plumeAdvanceMs'] == 120 and abs(restored['rmsThreshold'] - .00001) < 1e-10), restored
+                    and restored['plumeAdvanceMs'] == 120 and abs(restored['rmsThreshold'] - .000001) < 1e-12
+                    and restored['weakVoiceMode'] is True), restored
             print(json.dumps({'features': result, 'restored': restored}, indent=2))
         finally:
             if socket:

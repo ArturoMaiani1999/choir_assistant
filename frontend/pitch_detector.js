@@ -27,7 +27,7 @@
   }
 
   // YIN-style difference and cumulative mean normalized difference.
-  function detectPitch(buffer, sampleRate, { rmsThreshold = 0.001 } = {}) {
+  function detectPitch(buffer, sampleRate, { rmsThreshold = 0.001, yinThreshold = YIN_THRESHOLD } = {}) {
     const rms = rmsOf(buffer);
     const effectiveRmsThreshold = Number.isFinite(rmsThreshold) ? Math.max(0, rmsThreshold) : 0.001;
     if (rms < effectiveRmsThreshold) return { hz: null, rms, clarity: 0, confidence: 0 };
@@ -62,8 +62,9 @@
     }
 
     let tauEstimate = -1;
+    const effectiveYinThreshold = Number.isFinite(yinThreshold) ? Math.max(.05, Math.min(.8, yinThreshold)) : YIN_THRESHOLD;
     for (let tau = tauMin; tau < tauMax; tau += 1) {
-      if (cmnd[tau] < YIN_THRESHOLD) {
+      if (cmnd[tau] < effectiveYinThreshold) {
         while (tau + 1 < tauMax && cmnd[tau + 1] < cmnd[tau]) tau += 1;
         tauEstimate = tau;
         break;
@@ -272,6 +273,7 @@
       octaveConfirmFrames = 5,
       largeJumpConfirmFrames = 3,
       candidateConsistencyCents = 100,
+      weakSignalHoldFrames = 0,
     } = {}) {
       this.releaseFrames = releaseFrames;
       this.fastAlpha = fastAlpha;
@@ -285,6 +287,7 @@
       this.octaveConfirmFrames = octaveConfirmFrames;
       this.largeJumpConfirmFrames = largeJumpConfirmFrames;
       this.candidateConsistencyCents = candidateConsistencyCents;
+      this.weakSignalHoldFrames = weakSignalHoldFrames;
       this.hz = null;
       this.voicedFrames = 0;
       this.unvoicedFrames = 0;
@@ -294,10 +297,15 @@
       this.candidateFrames = 0;
     }
 
-    configure({ fastAlpha = this.fastAlpha, slowAlpha = this.slowAlpha, medianWindowFrames = this.medianWindowFrames } = {}) {
+    configure({ fastAlpha = this.fastAlpha, slowAlpha = this.slowAlpha, minClarity = this.minClarity,
+      minConfidence = this.minConfidence, medianWindowFrames = this.medianWindowFrames,
+      weakSignalHoldFrames = this.weakSignalHoldFrames } = {}) {
       const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
       if (Number.isFinite(fastAlpha)) this.fastAlpha = clamp(fastAlpha, .05, .95);
       if (Number.isFinite(slowAlpha)) this.slowAlpha = clamp(slowAlpha, .05, .95);
+      if (Number.isFinite(minClarity)) this.minClarity = clamp(minClarity, .05, .95);
+      if (Number.isFinite(minConfidence)) this.minConfidence = clamp(minConfidence, .05, .95);
+      if (Number.isFinite(weakSignalHoldFrames)) this.weakSignalHoldFrames = Math.max(0, Math.min(4, Math.round(weakSignalHoldFrames)));
       if (Number.isFinite(medianWindowFrames)) {
         this.medianWindowFrames = Math.max(1, Math.min(9, Math.round(medianWindowFrames)));
         this.rawSemitones = this.rawSemitones.slice(-this.medianWindowFrames);
@@ -321,6 +329,20 @@
         && estimate.confidence >= this.minConfidence;
       if (!hasReliablePitch) {
         this.unvoicedFrames += 1;
+        if (this.hz != null && this.unvoicedFrames <= this.weakSignalHoldFrames) {
+          this.lastTimestampMs = timestampMs;
+          return {
+            ...estimate,
+            hz: this.hz,
+            displayHz: this.hz,
+            rawHz,
+            stable: true,
+            accepted: true,
+            rejectionReason: 'weak-signal-held',
+            candidateFrames: this.candidateFrames,
+            confidence: this.minConfidence,
+          };
+        }
         this.voicedFrames = 0;
         if (this.unvoicedFrames >= this.releaseFrames) this.hz = null;
         this.rawSemitones = [];
