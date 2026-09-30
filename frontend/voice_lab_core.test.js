@@ -2,9 +2,24 @@ const assert = require('node:assert/strict');
 const lab = require('./voice_lab_core.js');
 
 assert.equal(lab.midiToHz(69), 440);
-assert.equal(lab.INTERVAL_TIMING.countInBeats, 2);
+assert.equal(lab.INTERVAL_TIMING.countInBeats, 4);
 assert.equal(lab.INTERVAL_TIMING.bpm, 100);
 assert.equal(lab.INTERVAL_TIMING.noteSeconds * 2, 4.8);
+assert.equal(lab.INTERVAL_TIMING.countInBeats * 60 / lab.INTERVAL_TIMING.bpm, lab.INTERVAL_TIMING.noteSeconds,
+  'the empty preparatory measure and each sung interval measure last equally long');
+assert.equal(lab.ROLL_VISIBLE_MEASURES, 3.5);
+assert.equal(lab.rollPixelsPerSecond(1400, 100), 1000 / 6,
+  '3.5 four-beat measures at 100 BPM fill exactly 1400 pixels');
+assert.equal(lab.rollPixelsPerSecond(700, 100), lab.rollPixelsPerSecond(1400, 100) / 2,
+  'time spacing scales with the viewport, not with exercise duration');
+const majorThirdHarmony = lab.planHarmony(60, { quality: 'major', targetDegree: 3 });
+assert.equal(majorThirdHarmony.rootPitchClass, 8);
+assert.deepEqual(majorThirdHarmony.notes.map((midi) => midi % 12), [8, 0, 3]);
+assert.ok(majorThirdHarmony.notes.every((midi) => midi >= 36 && midi <= 60));
+const minorFifthHarmony = lab.planHarmony(67, { quality: 'minor', targetDegree: 5 });
+assert.equal(minorFifthHarmony.rootPitchClass, 0);
+assert.deepEqual(new Set(minorFifthHarmony.notes.map((midi) => midi % 12)), new Set([0, 3, 7]));
+assert.throws(() => lab.planHarmony(60, { quality: 'diminished' }), /Qualit/);
 assert.equal(lab.generateInterval({ range: { lowMidi: 60, highMidi: 72 }, level: 2, semitones: 4, direction: 'ascending', random: () => 0 }).signedSemitones, 4);
 assert.equal(lab.generateInterval({ range: { lowMidi: 48, highMidi: 72 }, level: 2, semitones: 7, direction: 'ascending', random: () => 0 }).signedSemitones, 7);
 const descending = lab.generateInterval({ range: { lowMidi: 60, highMidi: 76 }, level: 2, semitones: 4, direction: 'descending', random: () => 0 });

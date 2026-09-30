@@ -29,14 +29,14 @@ const UI_CONFIG = Object.freeze({
 const els = Object.fromEntries([
   'transpose', 'settings-display-pitch-algorithm',
   'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-own', 'voice-mixer-close',
-  'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close', 'settings-dialog', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-color', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-reset', 'settings-close',
+  'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close', 'settings-dialog', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-target-color', 'settings-v1-plume-present-color', 'settings-v1-plume-past-color', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-reset', 'settings-close',
   'result-dialog', 'result-text', 'result-progress', 'retry', 'next-phrase', 'result-close',
   'phrase-loop', 'note-names',
   'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-title', 'library-title-save', 'library-part', 'library-note', 'library-open', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-mode', 'settings',
   'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
   'score-loading', 'score-pitch-divider', 'pitch-lane', 'intonation-readout', 'live-note', 'live-cents', 'live-state', 'pitch-layer-v1', 'pitch-layer-crepe',
   'feedback-analyse', 'feedback-status', 'feedback-priorities', 'feedback-priority-list', 'feedback-score-image', 'feedback-note-card', 'feedback-note-name', 'feedback-note-meta', 'feedback-cent-chart', 'feedback-note-metrics', 'feedback-message', 'feedback-previous', 'feedback-next', 'feedback-original', 'feedback-corrected', 'feedback-strength', 'feedback-strength-value', 'feedback-playback-kind',
-  'measure-counter', 'scoring-cue', 'previous-measure', 'toggle-playback', 'next-measure', 'volume', 'metronome-toggle', 'metronome-volume', 'backing-audio', 'toast', 'asset-status', 'microphone',
+  'measure-counter', 'scoring-cue', 'previous-measure', 'toggle-playback', 'next-measure', 'volume', 'metronome-toggle', 'metronome-volume', 'backing-audio', 'toast', 'asset-status',
 ].map((id) => [id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]));
 
 const state = {
@@ -100,6 +100,12 @@ const state = {
 
 const V1_RMS_THRESHOLD = Object.freeze({ default: .001, min: .00001, max: .01 });
 const V1_TRACKER_DEFAULTS = Object.freeze({ fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 });
+const validHexColor = value => /^#[0-9a-f]{6}$/i.test(value || '');
+
+function colorWithAlpha(color, alpha) {
+  const value = validHexColor(color) ? color : '#ffffff';
+  return `rgba(${Number.parseInt(value.slice(1,3),16)},${Number.parseInt(value.slice(3,5),16)},${Number.parseInt(value.slice(5,7),16)},${alpha})`;
+}
 
 function rmsThresholdFromSlider(value) {
   const ratio = Math.max(0, Math.min(1, Number(value) / 100));
@@ -133,7 +139,11 @@ function updateDetectorSettingsUi() {
   els.settingsV1MedianFramesValue.textContent = `${state.detectorSettings.medianWindowFrames} frame`;
   els.settingsV1PlumeWidth.value = String(Math.round(state.plumeSettings.width * 100));
   els.settingsV1PlumeWidthValue.textContent = `${Math.round(state.plumeSettings.width * 100)}%`;
-  els.settingsV1PlumeColor.value = state.plumeSettings.color;
+  els.settingsTargetColor.value = state.plumeSettings.targetColor;
+  els.settingsV1PlumePresentColor.value = state.plumeSettings.presentColor;
+  els.settingsV1PlumePastColor.value = state.plumeSettings.pastColor;
+  document.documentElement.style.setProperty('--pitch-target-color', state.plumeSettings.targetColor);
+  document.documentElement.style.setProperty('--pitch-voice-present-color', state.plumeSettings.presentColor);
   els.settingsV1PlumeIntensity.value = String(Math.round(state.plumeSettings.intensity * 100));
   els.settingsV1PlumeIntensityValue.textContent = `${Math.round(state.plumeSettings.intensity * 100)}%`;
   els.settingsV1PlumeAdvance.value = String(state.plumeSettings.timeAdvanceMs);
@@ -702,7 +712,7 @@ async function toggleNeuralLive() {
     await crepeSession();
     if (generation !== neural.generation) return;
     neural.loading = false; neural.enabled = true;
-    showToast('CREPE live attivo: plume rosa, score invariato.');
+    showToast('Seconda analisi live attiva: traccia secondaria, score invariato.');
   } catch (error) {
     if (generation !== neural.generation) return;
     neural.loading = false; neural.enabled = false; neural.error = 'runtime non caricato';
@@ -854,9 +864,10 @@ function drawPitchLane(beat) {
     // actual pitch region, especially on a tall piano roll.
     const blockHeight = rowHeight;
     const toleranceHeight = rowHeight * (UI_CONFIG.targetToleranceCents / 50);
-    ctx.fillStyle = 'rgba(217,168,91,.10)';
+    ctx.fillStyle = colorWithAlpha(state.plumeSettings.targetColor, .12);
     roundedRect(ctx, x, y - toleranceHeight / 2, endX - x, toleranceHeight, 3); ctx.fill();
-    ctx.fillStyle = event.onsetBeat <= beat && beat < event.onsetBeat + event.durationBeats ? '#e4b665' : '#bd8e4c';
+    ctx.fillStyle = event.onsetBeat <= beat && beat < event.onsetBeat + event.durationBeats
+      ? state.plumeSettings.targetColor : colorWithAlpha(state.plumeSettings.targetColor, .76);
     roundedRect(ctx, x, y - blockHeight / 2, Math.max(2, endX - x - 2), blockHeight, 3); ctx.fill();
     const graceEnd = timeToX(event.onsetBeat + event.attackGraceBeats, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
     ctx.fillStyle = 'rgba(7,19,25,.24)'; ctx.fillRect(x, y - blockHeight / 2, Math.max(0, graceEnd - x), blockHeight);
@@ -892,7 +903,7 @@ function drawPitchLane(beat) {
   for (let pitch = Math.ceil(bounds.min); pitch <= Math.floor(bounds.max); pitch += 1) {
     const y = pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
     const active = currentTarget && pitch === currentTarget.midiPitch + state.transpose;
-    ctx.fillStyle = active ? '#f0cf8f' : '#93a9a8';
+    ctx.fillStyle = active ? state.plumeSettings.targetColor : '#93a9a8';
     ctx.font = `${active ? '700 ' : ''}${Math.max(8, Math.min(12, rowHeight * .8))}px Inter, sans-serif`;
     ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
     ctx.fillText(noteLabel(pitch, beat), nowX - 8, y);
@@ -904,7 +915,6 @@ function drawPitchLane(beat) {
   }
 
   ctx.strokeStyle = '#f0cf8f'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(Math.round(nowX) + .5, plot.top); ctx.lineTo(Math.round(nowX) + .5, plot.bottom); ctx.stroke();
-  ctx.fillStyle = '#f0cf8f'; ctx.font = '700 9px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(inspecting ? 'VISTA' : 'ORA', nowX, 1);
   ctx.fillStyle = '#718788'; ctx.font = '9px Inter, sans-serif'; ctx.textAlign = 'left'; ctx.fillText('PASSATO', plot.left + 3, plot.bottom + 8); ctx.textAlign = 'right'; ctx.fillText('PROSSIME NOTE', plot.right - 3, plot.bottom + 8);
 }
 
@@ -1144,10 +1154,7 @@ function showToast(message) {
 }
 
 function updateMicrophoneButton() {
-  const active = state.microphoneStatus === 'active';
-  els.microphone.setAttribute('aria-pressed', String(active));
-  els.microphone.disabled = state.microphoneStatus === 'requesting';
-  els.microphone.textContent = state.microphoneStatus === 'requesting' ? 'Connessione…' : active ? 'Mic attivo' : 'Microfono';
+  els.togglePlayback.disabled = state.microphoneStatus === 'requesting';
 }
 
 async function stopMicrophone() {
@@ -2635,7 +2642,9 @@ function globalDetectorPreferences() {
     v1MedianWindowFrames: state.detectorSettings.medianWindowFrames,
     v1PlumeWidth: state.plumeSettings.width,
     v1PlumeIntensity: state.plumeSettings.intensity,
-    v1PlumeColor: state.plumeSettings.color,
+    pitchTargetColor: state.plumeSettings.targetColor,
+    v1PlumePresentColor: state.plumeSettings.presentColor,
+    v1PlumePastColor: state.plumeSettings.pastColor,
     v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
     displayPitchAlgorithm: state.displayPitchAlgorithm,
     pitchLayerV1: state.pitchLayers.v1,
@@ -2657,7 +2666,8 @@ function savePreferences() {
       v1FastAlpha: state.detectorSettings.fastAlpha, v1SlowAlpha: state.detectorSettings.slowAlpha,
       v1MedianWindowFrames: state.detectorSettings.medianWindowFrames,
       v1PlumeWidth: state.plumeSettings.width, v1PlumeIntensity: state.plumeSettings.intensity,
-      v1PlumeColor: state.plumeSettings.color, v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
+      pitchTargetColor: state.plumeSettings.targetColor, v1PlumePresentColor: state.plumeSettings.presentColor,
+      v1PlumePastColor: state.plumeSettings.pastColor, v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
       displayPitchAlgorithm: state.displayPitchAlgorithm, pitchLayerV1: state.pitchLayers.v1,
       pitchLayerCrepe: state.pitchLayers.crepe }));
     saveGlobalDetectorPreferences();
@@ -2704,8 +2714,13 @@ function restorePreferences() {
     ? Math.max(.35, Math.min(2.2, Number(detectorSaved.v1PlumeWidth))) : 1;
   state.plumeSettings.intensity = Number.isFinite(Number(detectorSaved.v1PlumeIntensity))
     ? Math.max(.15, Math.min(2, Number(detectorSaved.v1PlumeIntensity))) : 1;
-  state.plumeSettings.color = /^#[0-9a-f]{6}$/i.test(detectorSaved.v1PlumeColor ?? '')
-    ? detectorSaved.v1PlumeColor : '#63c8c2';
+  state.plumeSettings.targetColor = validHexColor(detectorSaved.pitchTargetColor)
+    ? detectorSaved.pitchTargetColor : PitchShared.PLUME_DEFAULTS.targetColor;
+  state.plumeSettings.presentColor = validHexColor(detectorSaved.v1PlumePresentColor)
+    ? detectorSaved.v1PlumePresentColor
+    : validHexColor(detectorSaved.v1PlumeColor) ? detectorSaved.v1PlumeColor : PitchShared.PLUME_DEFAULTS.presentColor;
+  state.plumeSettings.pastColor = validHexColor(detectorSaved.v1PlumePastColor)
+    ? detectorSaved.v1PlumePastColor : PitchShared.PLUME_DEFAULTS.pastColor;
   state.plumeSettings.timeAdvanceMs = Number.isFinite(Number(detectorSaved.v1PlumeAdvanceMs))
     ? Math.round(Math.max(0, Math.min(200, Number(detectorSaved.v1PlumeAdvanceMs))) / 10) * 10 : 200;
   state.displayPitchAlgorithm = detectorSaved.displayPitchAlgorithm === 'v1' ? 'v1' : 'v1+display-filter';
@@ -2950,7 +2965,6 @@ function bindControls() {
   els.benchmarkDialog.addEventListener('cancel', (event) => {
     if (state.benchmark.capture) { event.preventDefault(); els.benchmarkStatus.textContent = 'Interrompi o scarta prima la registrazione attiva.'; }
   });
-  els.microphone.addEventListener('click', toggleMicrophone);
   els.neuralLive.addEventListener('click', toggleNeuralLive);
   els.previousMeasure.addEventListener('click', () => seekToMeasure(Math.max(0, measureIndexAt(state.clock.snapshot().beat) - 1)));
   els.nextMeasure.addEventListener('click', () => seekToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(state.clock.snapshot().beat) + 1)));
@@ -3029,11 +3043,14 @@ function bindControls() {
   const updatePlumeSettings = () => {
     state.plumeSettings.width = Number(els.settingsV1PlumeWidth.value) / 100;
     state.plumeSettings.intensity = Number(els.settingsV1PlumeIntensity.value) / 100;
-    state.plumeSettings.color = els.settingsV1PlumeColor.value;
+    state.plumeSettings.targetColor = els.settingsTargetColor.value;
+    state.plumeSettings.presentColor = els.settingsV1PlumePresentColor.value;
+    state.plumeSettings.pastColor = els.settingsV1PlumePastColor.value;
     state.plumeSettings.timeAdvanceMs = Number(els.settingsV1PlumeAdvance.value);
     updateDetectorSettingsUi(); render();
   };
-  for (const control of [els.settingsV1PlumeWidth, els.settingsV1PlumeIntensity, els.settingsV1PlumeColor, els.settingsV1PlumeAdvance]) {
+  for (const control of [els.settingsV1PlumeWidth, els.settingsV1PlumeIntensity, els.settingsTargetColor,
+    els.settingsV1PlumePresentColor, els.settingsV1PlumePastColor, els.settingsV1PlumeAdvance]) {
     control.addEventListener('input', updatePlumeSettings);
     control.addEventListener('change', () => {
       savePreferences();
@@ -3043,7 +3060,7 @@ function bindControls() {
   els.settingsReset.addEventListener('click', () => {
     state.detectorSettings.rmsThreshold = V1_RMS_THRESHOLD.default;
     Object.assign(state.detectorSettings, V1_TRACKER_DEFAULTS);
-    state.plumeSettings = { width: 1, intensity: 1, color: '#63c8c2', timeAdvanceMs: 200 };
+    state.plumeSettings = { ...PitchShared.PLUME_DEFAULTS };
     state.displayPitchAlgorithm = 'v1+display-filter'; state.displayPitchFilter.reset();
     applyLiveTrackerSettings(); updateDetectorSettingsUi(); savePreferences();
     render(); showToast('Impostazioni v1 ripristinate ai valori predefiniti.');

@@ -10,9 +10,9 @@ SOURCE = ROOT / "sheets" / "voice-lab"
 PUBLIC = ROOT / "frontend" / "voice-lab-assets"
 MANIFEST = PUBLIC / "manifest.json"
 
-MAX_AUTHORING_BYTES = 32 * 1024 * 1024
+MAX_AUTHORING_BYTES = 40 * 1024 * 1024
 MAX_INTERVAL_SVG_BYTES = 8 * 1024 * 1024
-MAX_PUBLIC_BYTES = 10 * 1024 * 1024
+MAX_PUBLIC_BYTES = 64 * 1024 * 1024
 ALLOWED_AUTHORING_SUFFIXES = {".musicxml", ".mscz"}
 
 
@@ -28,11 +28,13 @@ def expected_pairs(low: int, high: int, distances: set[int]) -> tuple[set[tuple[
 
 
 def require_git_ignores() -> None:
-    sentinels = [SOURCE / "intervals" / "generated.mscz", SOURCE / "notes" / "generated.musicxml"]
+    sentinels = [SOURCE / "intervals" / "generated.mscz", SOURCE / "notes" / "generated.musicxml",
+                 SOURCE / "strings" / "generated.mscz"]
+    sentinels.append(SOURCE / "choir" / "generated.mscz")
     result = subprocess.run(["git", "check-ignore", *map(str, sentinels)], cwd=ROOT, capture_output=True, text=True)
     if result.returncode or len(result.stdout.splitlines()) != len(sentinels):
         raise AssertionError("Le cache di authoring Voice Lab devono restare in .gitignore")
-    tracked = subprocess.run(["git", "ls-files", "sheets/voice-lab/intervals", "sheets/voice-lab/notes"],
+    tracked = subprocess.run(["git", "ls-files", "sheets/voice-lab/intervals", "sheets/voice-lab/notes", "sheets/voice-lab/strings", "sheets/voice-lab/choir"],
                              cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
     if tracked:
         raise AssertionError(f"Artifact Voice Lab ricostruibili presenti nell'indice Git: {tracked.splitlines()[0]}")
@@ -51,24 +53,34 @@ def audit_voice_lab_artifacts(*, require_public: bool = True) -> dict[str, int]:
     melodic, harmonic = expected_pairs(low, high, distances)
     expected_intervals = len(melodic) + len(harmonic)
     expected_notes = high - low + 1
+    string_config = manifest.get("stringSamples", {})
+    string_low, string_high = int(string_config.get("lowMidi", 36)), int(string_config.get("highMidi", 60))
+    choir_config = manifest.get("choirSamples", {})
+    expected_choir = sum(len(role.get("anchors", [])) for role in choir_config.get("roles", {}).values())
 
     interval_svgs = list((PUBLIC / "intervals").glob("*.svg"))
     note_svgs = list((PUBLIC / "notes").glob("*.svg"))
+    string_samples = list((PUBLIC / "strings").glob("*.ogg"))
+    choir_samples = list((PUBLIC / "choir").glob("*.flac"))
     if require_public and len(interval_svgs) != expected_intervals:
         raise AssertionError(f"SVG intervalli: {len(interval_svgs)}, attesi {expected_intervals}")
     if require_public and len(note_svgs) != expected_notes:
         raise AssertionError(f"SVG note: {len(note_svgs)}, attesi {expected_notes}")
+    if require_public and len(string_samples) != string_high - string_low + 1:
+        raise AssertionError(f"Campioni archi: {len(string_samples)}, attesi {string_high - string_low + 1}")
+    if require_public and len(choir_samples) != expected_choir:
+        raise AssertionError(f"Campioni Muse Choir: {len(choir_samples)}, attesi {expected_choir}")
     expected_names = {f"melodic-{first}-{second}-1.svg" for first, second in melodic}
     expected_names |= {f"harmonic-{first}-{second}-1.svg" for first, second in harmonic}
     if require_public and {path.name for path in interval_svgs} != expected_names:
         raise AssertionError("La banca SVG contiene coppie mancanti o inattese")
 
-    authoring_files = [path for folder in (SOURCE / "intervals", SOURCE / "notes") if folder.is_dir()
+    authoring_files = [path for folder in (SOURCE / "intervals", SOURCE / "notes", SOURCE / "strings", SOURCE / "choir") if folder.is_dir()
                        for path in folder.iterdir() if path.is_file()]
     unexpected = [path for path in authoring_files if path.suffix.lower() not in ALLOWED_AUTHORING_SUFFIXES]
     if unexpected:
         raise AssertionError(f"Tipo di artifact inatteso: {unexpected[0].relative_to(ROOT)}")
-    expected_authoring = 2 * (expected_intervals + expected_notes)
+    expected_authoring = 2 * (expected_intervals + expected_notes + string_high - string_low + 1 + expected_choir)
     if authoring_files and len(authoring_files) != expected_authoring:
         raise AssertionError(f"Artifact di authoring: {len(authoring_files)}, attesi {expected_authoring}")
 

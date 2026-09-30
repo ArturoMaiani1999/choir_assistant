@@ -6,7 +6,7 @@
     <meta name="theme-color" content="#081419" />
     <title>Choir Assistant · Il tuo studio</title>
     <link rel="stylesheet" href="styles.css?v=20260926-v1-plume-custom" />
-    <link rel="stylesheet" href="studio.css?v=2" />
+    <link rel="stylesheet" href="studio.css?v=3" />
     <script src="score_appearance.js?v=1"></script>
     <script src="runtime-config.js" defer></script>
     <script src="practice_math.js?v=20260927-pickup-timing" defer></script>
@@ -16,7 +16,7 @@
     <script src="vocal_feedback.js?v=20260928-feedback-v1" defer></script>
     <script src="one_euro_filter.js?v=20260927-phase2" defer></script>
     <script src="pitch_test_harness.js?v=20260927-phase0" defer></script>
-    <script src="app.js?v=20260928-aurora" defer></script>
+    <script src="app.js?v=20260929-no-now-label" defer></script>
   </head>
   <body>
     <main class="practice-shell" aria-label="Strumento di prova">
@@ -32,7 +32,6 @@
           <button class="mode-button accompaniment-select" id="accompaniment-mode" type="button">Voci</button>
           <a class="mode-button voice-lab-link" href="voice-lab.html">Allena la voce</a>
           <button class="mode-button" id="exercise" type="button">Studia una frase</button>
-          <button class="mode-button microphone-button" id="microphone" type="button" aria-pressed="false">Microfono</button>
           <details class="toolbar-more">
             <summary aria-label="Altri strumenti">Altro</summary>
             <div class="toolbar-more-menu">
@@ -58,7 +57,7 @@
       <section class="score-region" aria-label="Spartito della parte selezionata">
         <div class="score-meta"><span id="score-part-label">Parte</span><span id="score-measure-label">Battuta 1</span><span id="score-transpose-label" hidden>Spartito originale</span></div>
         <div class="score-viewport" id="score-viewport">
-          <div class="score-sheet" id="score-sheet"><img id="score-image" alt="Spartito della parte selezionata" /><div class="score-cursor" id="score-cursor" aria-hidden="true"><span>ORA</span></div></div>
+          <div class="score-sheet" id="score-sheet"><img id="score-image" alt="Spartito della parte selezionata" /><div class="score-cursor" id="score-cursor" aria-hidden="true"></div></div>
           <div class="score-loading" id="score-loading" role="status">Preparazione spartito…</div>
         </div>
       </section>
@@ -67,7 +66,7 @@
 
       <section class="pitch-region" aria-label="Intonazione e tempo">
         <canvas id="pitch-lane" role="img" aria-describedby="pitch-description"></canvas>
-        <p class="sr-only" id="pitch-description">Le note target scorrono da destra verso la linea Ora fissa. La traiettoria mostra l’intonazione rilevata dal microfono.</p>
+        <p class="sr-only" id="pitch-description">Le note target scorrono verso il cursore fisso. La traiettoria mostra l’intonazione rilevata dal microfono.</p>
         <div class="intonation-readout" id="intonation-readout" aria-live="polite"><strong id="live-note">—</strong><span id="live-cents">— ¢</span><small id="live-state">in attesa</small></div>
         <div class="lane-legend" aria-label="Tracce visibili nel piano roll">
           <label class="pitch-layer-toggle voice-key"><input id="pitch-layer-v1" type="checkbox" checked /> La tua voce</label>
@@ -142,12 +141,17 @@
         <label class="detector-setting-label" for="settings-v1-plume-width">Larghezza</label>
         <input id="settings-v1-plume-width" type="range" min="35" max="220" step="5" value="100" />
         <div class="detector-setting-scale"><span>Più stretta</span><span>Più ampia</span></div>
-        <div class="detector-setting-colour"><label for="settings-v1-plume-color" hidden>Colore <input id="settings-v1-plume-color" type="color" value="#63c8c2" disabled /></label><label for="settings-v1-plume-intensity">Intensità <output id="settings-v1-plume-intensity-value">100%</output></label></div>
+        <div class="detector-setting-colours" aria-label="Colori della traccia vocale">
+          <label for="settings-target-color">Nota target <input id="settings-target-color" type="color" value="#e4b665" /></label>
+          <label for="settings-v1-plume-present-color">Scia adesso <input id="settings-v1-plume-present-color" type="color" value="#72e0d2" /></label>
+          <label for="settings-v1-plume-past-color">Scia nel passato <input id="settings-v1-plume-past-color" type="color" value="#4b7f9b" /></label>
+        </div>
+        <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-intensity">Intensità <output id="settings-v1-plume-intensity-value">100%</output></label>
         <input id="settings-v1-plume-intensity" type="range" min="15" max="200" step="5" value="100" />
         <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-advance">Anticipo temporale <output id="settings-v1-plume-advance-value">200 ms</output></label>
         <input id="settings-v1-plume-advance" type="range" min="0" max="200" step="10" value="200" />
         <div class="detector-setting-scale"><span>0 ms · timestamp reale</span><span>200 ms · più anticipata</span></div>
-        <p>La scia sfuma dal rosa al viola verso il passato. Larghezza e intensità sono visive: non rappresentano un intervallo di incertezza. Queste opzioni non cambiano il pitch o il punteggio.</p>
+        <p>Durante il canto la scia passa da “adesso” a “passato”. In pausa usa uniformemente il colore del passato. Larghezza e intensità sono visive: non rappresentano un intervallo di incertezza e non cambiano il punteggio.</p>
       </section>
       </details>
       <p class="library-note">Usa le cuffie per distinguere meglio la tua voce dall’accompagnamento.</p>

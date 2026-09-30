@@ -2,9 +2,19 @@
 
 **Status:** implementato e verificato; decisioni UX finali ancora da validare con utenti  
 **Owner:** project maintainer  
-**Last reviewed:** 2026-09-28
+**Last reviewed:** 2026-09-29
 
 ## Tracker di esecuzione
+
+Negli esercizi cantati, la partitura MuseScore inizia con una battuta di pausa
+in 4/4. Quattro pulsazioni a 100 BPM preparano l'ingresso (2,4 s); poi la
+nota richiesta resta il target del piano roll fino al termine della prova.
+Per l'intervallo melodico seguono due battute intere di canto, una per nota
+(2,4 s ciascuna). Il cursore percorre la battuta di preparazione e la voce
+viene tracciata sullo stesso asse temporale delle note. La nota intera nello
+spartito singolo indica l'altezza da sostenere; la durata effettiva, variabile
+per gli esercizi di nota singola, è quella mostrata dal piano roll e dal timer.
+Gli esercizi di solo riconoscimento rimangono esclusi dal pre-ingresso cantato.
 
 Questo documento è anche il tracker canonico del lavoro. Gli elementi vengono
 marcati completati soltanto quando esistono implementazione e test automatici.

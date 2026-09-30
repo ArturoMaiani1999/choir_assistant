@@ -17,7 +17,7 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 DEFAULT_CONFIG = ROOT / "deploy" / "repertoire.json"
 CORE_ASSETS = ("styles.css", "studio.css", "score_appearance.js", "practice_math.js", "score_runtime.js", "pitch_detector.js", "pitch_shared.js", "vocal_feedback.js",
-               "one_euro_filter.js", "app.js", "voice_lab_core.js", "voice_lab.js")
+               "one_euro_filter.js", "app.js", "voice_lab_core.js", "voice_draw_core.js", "voice_lab.js")
 FORBIDDEN_TEXT = ("__pitchTestHooks", "/api/", "cdn.jsdelivr", "unpkg", "localhost")
 FORBIDDEN_SUFFIXES = (".mscz", ".env", ".py", ".map", ".musicxml", ".xml", ".onnx")
 MAX_FILE_BYTES = 25 * 1024 * 1024

@@ -23,3 +23,5 @@ frontend/voice-lab-assets/
 # MuseScore installation.
 /sheets/voice-lab/intervals/
 /sheets/voice-lab/notes/
+/sheets/voice-lab/strings/
+/sheets/voice-lab/choir/

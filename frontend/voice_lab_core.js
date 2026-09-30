@@ -18,12 +18,45 @@
   const EARLY_COMPLETION_DEFAULTS = Object.freeze({ minConfidence: .45, attackIgnoreSeconds: .25, minVoicedSeconds: 1.4,
     stableWindowSeconds: .8, confirmationOffsetSeconds: .4, acquireCents: 35, stableCents: 20,
     minCoverage: .7, maxSpreadCents: 18, maxDriftCents: 18, minFrames: 8 });
-  const INTERVAL_TIMING = Object.freeze({ countInBeats: 2, bpm: 100, noteSeconds: 2.4, soloSeconds: 2 });
+  const INTERVAL_TIMING = Object.freeze({ countInBeats: 4, bpm: 100, noteSeconds: 2.4, soloSeconds: 2 });
+  const ROLL_VISIBLE_MEASURES = 3.5;
+  const HARMONY_RANGE = Object.freeze({ lowMidi: 36, highMidi: 60 });
   const midiToHz = (midi, tuning = 440) => tuning * 2 ** ((midi - 69) / 12);
   const midiToName = (midi) => `${['Do', 'Do♯', 'Re', 'Mi♭', 'Mi', 'Fa', 'Fa♯', 'Sol', 'La♭', 'La', 'Si♭', 'Si'][((midi % 12) + 12) % 12]}${Math.floor(midi / 12) - 1}`;
   const centsBetween = (actualHz, targetHz) => 1200 * Math.log2(actualHz / targetHz);
   const clamp = (value, low, high) => Math.max(low, Math.min(high, value));
   const randomInteger = (low, high, random = Math.random) => Math.floor(random() * (high - low + 1)) + low;
+  const rollPixelsPerSecond = (plotWidth, bpm = INTERVAL_TIMING.bpm, visibleMeasures = ROLL_VISIBLE_MEASURES) => {
+    if (!(plotWidth > 0) || !(bpm > 0) || !(visibleMeasures > 0)) throw new RangeError('Scala temporale non valida');
+    return plotWidth / (visibleMeasures * 4) * bpm / 60;
+  };
+
+  function planHarmony(targetMidi, { quality, targetDegree, lowMidi = HARMONY_RANGE.lowMidi,
+    highMidi = HARMONY_RANGE.highMidi, random = Math.random } = {}) {
+    if (!Number.isInteger(targetMidi) || !Number.isInteger(lowMidi) || !Number.isInteger(highMidi) || highMidi - lowMidi < 11)
+      throw new RangeError('Configurazione armonica non valida');
+    const resolvedQuality = quality ?? (random() < .5 ? 'major' : 'minor');
+    if (!['major', 'minor'].includes(resolvedQuality)) throw new RangeError('Qualità armonica non valida');
+    const resolvedDegree = targetDegree ?? [1, 3, 5][randomInteger(0, 2, random)];
+    if (![1, 3, 5].includes(resolvedDegree)) throw new RangeError('Grado armonico non valido');
+    const third = resolvedQuality === 'major' ? 4 : 3;
+    const targetOffset = resolvedDegree === 1 ? 0 : resolvedDegree === 3 ? third : 7;
+    const rootPitchClass = ((targetMidi - targetOffset) % 12 + 12) % 12;
+    const pitchClasses = [rootPitchClass, (rootPitchClass + third) % 12, (rootPitchClass + 7) % 12];
+    const candidates = pitchClasses.map((pitchClass) => Array.from({ length: highMidi - lowMidi + 1 }, (_, index) => lowMidi + index)
+      .filter((midi) => ((midi % 12) + 12) % 12 === pitchClass));
+    let best = null;
+    for (const first of candidates[0]) for (const second of candidates[1]) for (const fifth of candidates[2]) {
+      const notes = [first, second, fifth].sort((a, b) => a - b);
+      if (new Set(notes).size !== 3) continue;
+      const span = notes[2] - notes[0], center = (notes[0] + notes[2]) / 2;
+      const score = span * 4 + Math.abs(center - (lowMidi + highMidi) / 2);
+      if (!best || score < best.score || score === best.score && notes.join() < best.notes.join()) best = { notes, score };
+    }
+    if (!best) throw new RangeError('Accordo fuori dall’estensione disponibile');
+    return { targetMidi, targetPitchClass: ((targetMidi % 12) + 12) % 12, quality: resolvedQuality,
+      targetDegree: resolvedDegree, rootPitchClass, notes: best.notes };
+  }
 
   function validateRange(range) {
     const low = Number(range?.lowMidi), high = Number(range?.highMidi);
@@ -350,7 +383,7 @@
     return { competencies, blocks: blocks.slice(0, 4), estimatedMinutes: Math.max(3, Math.min(8, blocks.length * 2)) };
   }
 
-  return { INTERVALS, LEVEL_INTERVALS, ROLE_INTERVAL_BASES, INTERVAL_TIMING, midiToHz, midiToName, centsBetween, validateRange, randomNote, allowedIntervals,
+  return { INTERVALS, LEVEL_INTERVALS, ROLE_INTERVAL_BASES, INTERVAL_TIMING, ROLL_VISIBLE_MEASURES, rollPixelsPerSecond, HARMONY_RANGE, midiToHz, midiToName, centsBetween, validateRange, randomNote, allowedIntervals, planHarmony,
     generateInterval, generateScoredInterval, definition, result, analyseSustained, analyseSungInterval, EARLY_COMPLETION_DEFAULTS,
     evaluatePitchProgress, pitchTrialOutcome, buildInitialPitchSession, buildEarTrainingBlock, scheduleEarRetry, buildSingingIntervalBlock,
     deriveCompetencies, extractRepertoirePhrase, competencePriority, categoriesConsolidated, buildRecommendedSession };

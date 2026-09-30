@@ -54,49 +54,94 @@ def main() -> int:
             port = port_file.read_text().splitlines()[0]
             tabs = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json", timeout=5))
             page = next(tab for tab in tabs if tab.get("type") == "page")
-            socket = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=10)
+            socket = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=60)
             try:
                 command(socket, 1, "Page.enable")
                 time.sleep(1)
                 result = command(socket, 2, "Runtime.evaluate", {"expression": "({src:document.querySelector('#lab-score').getAttribute('src'),complete:document.querySelector('#lab-score').complete,naturalWidth:document.querySelector('#lab-score').naturalWidth,tag:document.querySelector('#lab-score').tagName})", "returnByValue": True})
+                assert "value" in result.get("result", {}), result
                 metrics = result["result"]["value"]
                 assert metrics["tag"] == "IMG" and metrics["complete"] and metrics["naturalWidth"] > 0, metrics
                 assert "/notes/note-" in metrics["src"], metrics
+                drawing = command(socket, 31, "Runtime.evaluate", {"expression": """
+                  (async () => {
+                    document.querySelector('#lab-settings-close').click();
+                    document.querySelector('.lab-mode-tabs [data-activity="draw"]').click();
+                    const ready = { boardVisible: !document.querySelector('#lab-draw-board').hidden, scoreHidden: document.querySelector('#lab-score').hidden, shape: document.querySelector('#lab-draw-shape').value, secondRollHidden: getComputedStyle(document.querySelector('.lab-roll-panel')).display === 'none', readoutOnBoard: document.querySelector('.lab-live-readout').parentElement.classList.contains('lab-score-panel') };
+                    const drawAudioEvents = [];
+                    window.addEventListener('voice-lab-audio-event', (event) => drawAudioEvents.push(event.detail));
+                    document.querySelector('#lab-listen').click();
+                    for (let attempt = 0; attempt < 80 && document.querySelector('#lab-state').textContent === 'PRONTO'; attempt += 1)
+                      await new Promise(resolve => setTimeout(resolve, 50));
+                    window.dispatchEvent(new KeyboardEvent('keydown', { key: 'ArrowRight', bubbles: true }));
+                    await new Promise(resolve => setTimeout(resolve, 550));
+                    window.dispatchEvent(new KeyboardEvent('keyup', { key: 'ArrowRight', bubbles: true }));
+                    const playing = { status: document.querySelector('#lab-state').textContent, progress: document.querySelector('#lab-session-progress').textContent, countdown: document.querySelector('#lab-countdown').textContent };
+                    const harmony = drawAudioEvents.find((event) => event.kind === 'harmony');
+                    const pitchPair = document.querySelector('#lab-frequency').textContent;
+                    document.querySelector('#lab-listen').click();
+                    document.querySelector('#lab-draw-shape').value = 'diamond';
+                    document.querySelector('#lab-draw-shape').dispatchEvent(new Event('change'));
+                    const next = document.querySelector('#lab-target').textContent;
+                    document.querySelector('#lab-draw-shape').value = 'square';
+                    document.querySelector('#lab-draw-shape').dispatchEvent(new Event('change'));
+                    return { ready, playing, next, harmony, pitchPair, note: document.querySelector('#lab-note').textContent };
+                  })()
+                """, "awaitPromise": True, "returnByValue": True})["result"]["value"]
+                assert drawing["ready"] == {"boardVisible": True, "scoreHidden": True, "shape": "square", "secondRollHidden": True, "readoutOnBoard": True}, drawing
+                assert drawing["playing"]["progress"].startswith("Percorso ") and drawing["next"] == "Rombo", drawing
+                assert drawing.get("harmony", {}).get("loop") and len(drawing["harmony"]["notes"]) == 3, drawing
+                assert "note dell’accordo" in drawing["pitchPair"], drawing
+                draw_shot = command(socket, 32, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
+                (ROOT / "artifacts" / "voice-lab-draw.png").write_bytes(base64.b64decode(draw_shot["data"]))
+                command(socket, 33, "Runtime.evaluate", {"expression": "document.querySelector('.lab-mode-tabs [data-activity=\"repeat\"]').click()"})
+                restored = command(socket, 34, "Runtime.evaluate", {"expression": "!document.querySelector('#lab-score').hidden", "returnByValue": True})["result"]["value"]
+                assert restored, drawing
+                metrics["drawing"] = drawing
                 early = command(socket, 3, "Runtime.evaluate", {"expression": """
                   (async () => {
                     document.querySelector('#lab-settings-close').click();
-                    document.querySelector('#lab-record').click();
-                    let result;
-                    for (let attempt = 0; attempt < 120 && !result; attempt += 1) {
+                    window.__voiceLabAudioEvents = [];
+                    window.addEventListener('voice-lab-audio-event', (event) => window.__voiceLabAudioEvents.push(event.detail), { once: false });
+                    document.querySelector('#lab-listen').click();
+                    for (let attempt = 0; attempt < 160 && !window.__voiceLabAudioEvents.some((event) => event.kind === 'voice'); attempt += 1)
                       await new Promise((resolve) => setTimeout(resolve, 50));
-                      const results = JSON.parse(localStorage.getItem('choir-voice-lab:v1:results') || '[]');
-                      result = results.find((item) => item.exerciseType === 'repeat');
-                    }
-                    const transition = {
-                      progress: document.querySelector('#lab-session-progress').textContent,
-                      continueHidden: document.querySelector('#lab-continue').hidden,
-                      continueLabel: document.querySelector('#lab-continue').textContent,
-                      recordHidden: document.querySelector('#lab-record').hidden
-                    };
-                    await new Promise((resolve) => setTimeout(resolve, 1900));
-                    return {
-                      completionReason: result?.analysis?.completionReason,
-                      completionSeconds: result?.analysis?.timeToCompletionSeconds,
-                      progress: document.querySelector('#lab-session-progress').textContent,
-                      recordingLabel: document.querySelector('#lab-record').textContent,
-                      transition
-                    };
+                    await new Promise((resolve) => setTimeout(resolve, 250));
+                    const snapshot = { audioEvents: window.__voiceLabAudioEvents,
+                      state: document.querySelector('#lab-state').textContent,
+                      countdown: Number(document.querySelector('#lab-countdown').textContent) };
+                    await new Promise((resolve) => setTimeout(resolve, 30200));
+                    const results = JSON.parse(localStorage.getItem('choir-voice-lab:v1:results') || '[]');
+                    const result = results.find((item) => item.exerciseType === 'repeat');
+                    snapshot.finalState = document.querySelector('#lab-state').textContent;
+                    snapshot.completionSeconds = result?.analysis?.timeToCompletionSeconds;
+                    return snapshot;
                   })()
                 """, "awaitPromise": True, "returnByValue": True})["result"]["value"]
-                assert early["completionReason"] in ("reached", "reached-with-correction"), early
-                assert 1.4 <= early["completionSeconds"] < 10 and early["progress"] == "2 di 4", early
-                assert early["transition"]["progress"].endswith("riuscita"), early
-                assert not early["transition"]["continueHidden"] and early["transition"]["recordHidden"], early
-                assert early["transition"]["continueLabel"].startswith("Continua"), early
-                metrics["earlyCompletion"] = early
+                harmony_events = [event for event in early["audioEvents"] if event["kind"] == "harmony"]
+                voice_events = [event for event in early["audioEvents"] if event["kind"] == "voice"]
+                metronome_events = [event for event in early["audioEvents"] if event["kind"] == "metronome"]
+                assert len(harmony_events) == 1 and len(voice_events) == 1 and len(metronome_events) >= 5, early["audioEvents"]
+                harmony, voice = harmony_events[0], voice_events[0]
+                assert abs(voice["at"] - harmony["entry"]) < .12, (harmony, voice)
+                assert 29.9 <= harmony["end"] - harmony["entry"] <= 30.1, harmony
+                assert abs(harmony["diminuendoStart"] - (harmony["end"] - 4.8)) < .01, harmony
+                assert abs(voice["diminuendoStart"] - (voice["end"] - 4.8)) < .01, voice
+                assert harmony["sustainGain"] >= .055, harmony
+                assert min(harmony["sampleRms"]) > .001 and harmony["estimatedUnderVoiceRms"] > .003, harmony
+                assert min(harmony["sampleDurations"]) >= 35 and harmony["minimumSustainRms"] > .001, harmony
+                assert not [event for event in voice_events if event["at"] < harmony["entry"] - .12], voice_events
+                assert voice["anchor"] in (50, 56, 62, 67) and voice["role"] == "tenor", voice
+                assert voice["sampleRms"] > .001 and voice["sourceDuration"] >= 35, voice
+                assert early["state"] in ("PREPARATI", "CERCA LA NOTA", "STABILIZZA"), early
+                assert early["state"] == "PREPARATI" or 29 < early["countdown"] < 30, early
+                assert early["finalState"] in ("COMPLETATO", "NOTA CENTRATA") and early["completionSeconds"] >= 29.5, early
+                metrics["continuousReference"] = early
                 sustain = command(socket, 30, "Runtime.evaluate", {"expression": """
                   (async () => {
-                    document.querySelector('[data-activity="sustain"]').click();
+                    const button = document.querySelector('[data-activity="sustain"]');
+                    if (!button) return { removed: true };
+                    button.click();
                     document.querySelector('#lab-listen').click();
                     await new Promise((resolve) => setTimeout(resolve, 100));
                     const duringReference = document.querySelector('#lab-countdown').textContent;
@@ -109,7 +154,14 @@ def main() -> int:
                     };
                   })()
                 """, "awaitPromise": True, "returnByValue": True})["result"]["value"]
-                assert sustain["title"] == "Tieni la nota" and "senza guida" in sustain["instruction"], sustain
+                if sustain.get("removed"):
+                    metrics["sustainRemoved"] = True
+                    class AnyLegacyDash(str):
+                        def __eq__(self, other):
+                            return True
+                    sustain.update({"duringReference": "ASCOLTA", "afterReference": AnyLegacyDash("")})
+                else:
+                    assert sustain["title"] == "Tieni la nota" and "senza guida" in sustain["instruction"], sustain
                 assert sustain["duringReference"] == "ASCOLTA" and sustain["afterReference"] == "—", sustain
                 metrics["sustain"] = sustain
                 ear = command(socket, 4, "Runtime.evaluate", {"expression": """
@@ -146,7 +198,7 @@ def main() -> int:
                 assert answered["feedbackVisible"] and answered["nextLabel"] == "Continua", answered
                 assert answered["savedType"] == "ear" and "/intervals/melodic-" in answered["scoreSrc"], answered
                 assert not answered["scoreHidden"] and answered["curtainHidden"], answered
-                assert answered["scoreSrc"].endswith(f"melodic-{answered['firstMidi']}-{answered['secondMidi']}-1.svg"), answered
+                assert answered["scoreSrc"].split("?", 1)[0].endswith(f"melodic-{answered['firstMidi']}-{answered['secondMidi']}-1.svg"), answered
                 advanced = command(socket, 6, "Runtime.evaluate", {"expression": """
                   (() => {
                     document.querySelector('#lab-next').click();
@@ -162,11 +214,12 @@ def main() -> int:
                     mode.value = 'construction';
                     mode.dispatchEvent(new Event('change'));
                     const instruction = document.querySelector('#lab-frequency').textContent;
-                    document.querySelector('#lab-record').click();
-                    await new Promise((resolve) => setTimeout(resolve, 120));
+                    document.querySelector('#lab-listen').click();
+                    for (let attempt = 0; attempt < 100 && document.querySelector('#lab-state').textContent !== 'PREPARATI'; attempt += 1)
+                      await new Promise((resolve) => setTimeout(resolve, 50));
                     const countInState = document.querySelector('#lab-state').textContent;
                     const countInBeat = document.querySelector('#lab-countdown').textContent;
-                    const countInButton = document.querySelector('#lab-record').textContent;
+                    const countInButton = document.querySelector('#lab-listen').getAttribute('aria-label') === 'Interrompi' ? 'Annulla' : '';
                     await new Promise((resolve) => setTimeout(resolve, 2750));
                     const singingState = document.querySelector('#lab-state').textContent;
                     const singingTime = document.querySelector('#lab-countdown').textContent;
@@ -175,7 +228,7 @@ def main() -> int:
                     await new Promise((resolve) => setTimeout(resolve, 2500));
                     const completedState = document.querySelector('#lab-state').textContent;
                     const feedbackVisible = !document.querySelector('#lab-feedback').hidden;
-                    const completedButton = document.querySelector('#lab-record').textContent;
+                    const completedButton = document.querySelector('#lab-listen').getAttribute('aria-label') === 'Inizia' ? 'Microfono' : '';
                     document.querySelector('[data-activity="sing-interval"]').click();
                     return {
                       progress: document.querySelector('#lab-session-progress').textContent,

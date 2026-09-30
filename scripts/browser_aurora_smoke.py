@@ -64,6 +64,7 @@ def main():
                     time.sleep(2)
                     expression = """(() => {
                       if (!state.runtime) throw Error('Practice did not load');
+                      if(document.querySelector('#score-cursor span')) throw Error('The score cursor still has a text label');
                       document.querySelectorAll('dialog[open]').forEach(d=>d.close());
                       const beat=6, now=state.runtime.secondsAtBeat(beat);
                       const pitch=state.runtime.targetAt(beat)?.midiPitch || 62;
@@ -102,7 +103,7 @@ def main():
                         return original(...args);
                       };
                       document.querySelector('#lab-listen').click();
-                      await new Promise(r=>setTimeout(r,6500));
+                      await new Promise(r=>setTimeout(r,8500));
                       const button=document.querySelector('#lab-listen');
                       plumeChecks.stopLabel=button.getAttribute('aria-label');plumeChecks.disabled=button.disabled;
                       if(plumeChecks.lastMode==='live') button.click();
@@ -116,6 +117,33 @@ def main():
                     print(json.dumps(result["result"]["value"]))
                     screenshot = command(socket, 10, "Page.captureScreenshot", {"format": "png"})
                     (artifacts / "lab-stopped.png").write_bytes(base64.b64decode(screenshot["data"]))
+                    result = command(socket, 11, "Runtime.evaluate", {"expression": """(async () => {
+                      document.querySelector('[data-activity="sing-interval"]').click();
+                      const score=document.querySelector('#lab-score');
+                      for(let i=0;i<50 && !score.naturalWidth;i++) await new Promise(r=>setTimeout(r,50));
+                      if(!score.naturalWidth || !score.src.includes('/intervals/melodic-'))throw Error('Interval score missing: '+score.src);
+                      if(score.naturalWidth/score.naturalHeight>12)throw Error('MuseScore measures are stretched too wide');
+                      document.querySelector('#lab-listen').click();
+                      for(let i=0;i<100 && document.querySelector('#lab-state').textContent!=='PREPARATI';i++)await new Promise(r=>setTimeout(r,50));
+                      const countdown=document.querySelector('#lab-countdown').textContent;
+                      if(!/^\\d \\/ 4$/.test(countdown))throw Error('Four-beat preparation missing: '+countdown);
+                      return {score:score.src.split('/').at(-1),countdown};
+                    })()""", "awaitPromise": True, "returnByValue": True})
+                    assert "exceptionDetails" not in result, result
+                    print(json.dumps(result["result"]["value"]))
+                    screenshot = command(socket, 12, "Page.captureScreenshot", {"format": "png"})
+                    (artifacts / "interval-count-in.png").write_bytes(base64.b64decode(screenshot["data"]))
+                    result = command(socket, 13, "Runtime.evaluate", {"expression": """(async () => {
+                      await new Promise(r=>setTimeout(r,5300));
+                      const stage=document.querySelector('#lab-state').textContent;
+                      if(!stage.includes('SECONDA NOTA'))throw Error('Second sung bar did not begin: '+stage);
+                      return {stage};
+                    })()""", "awaitPromise": True, "returnByValue": True})
+                    assert "exceptionDetails" not in result, result
+                    print(json.dumps(result["result"]["value"]))
+                    screenshot = command(socket, 14, "Page.captureScreenshot", {"format": "png"})
+                    (artifacts / "interval-second-bar.png").write_bytes(base64.b64decode(screenshot["data"]))
+                    command(socket, 15, "Runtime.evaluate", {"expression": "document.querySelector('#lab-listen').click()"})
             finally:
                 socket.close()
         finally:
