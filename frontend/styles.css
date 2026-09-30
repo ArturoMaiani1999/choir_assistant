@@ -112,7 +112,6 @@ select option { background: #102229; color: var(--text); }
 .score-sheet { position: absolute; top: 0; left: 0; width: 100%; will-change: transform; transition: transform 180ms ease; }
 .score-sheet img { display: block; width: 100%; height: auto; }
 .score-cursor { position: absolute; z-index: 4; width: 3px; min-height: 86px; transform: translate(-50%, -50%); background: #c87520; box-shadow: 0 0 0 3px rgba(255,248,229,.68), 0 0 12px rgba(189,116,36,.7); pointer-events: none; }
-.score-cursor::before { content: ""; position: absolute; top: -8px; left: -5px; width: 0; height: 0; border-right: 6px solid transparent; border-bottom: 8px solid #bd7424; border-left: 6px solid transparent; }
 .score-loading { position: absolute; inset: 0; display: grid; place-items: center; background: var(--paper); color: #72736d; font-size: .8rem; }
 .score-loading[hidden] { display: none; }
 .score-region.full-score .score-sheet { width: 100%; }
