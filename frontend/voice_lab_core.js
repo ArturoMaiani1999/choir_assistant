@@ -15,9 +15,18 @@
   ]);
   const LEVEL_INTERVALS = Object.freeze({ 1: [0, 2, 4], 2: [0, 2, 4, 5, 7, 12], 3: [0, 1, 2, 3, 4, 5, 7, 8, 9, 11, 12] });
   const ROLE_INTERVAL_BASES = Object.freeze({ soprano: 63, alto: 58, tenor: 51, bass: 43 });
+  // The amber target fills one chromatic piano-roll lane: its edges are
+  // exactly half a semitone (50 cents) from the target pitch.
+  const TARGET_BAND_HALF_WIDTH_CENTS = 50;
   const EARLY_COMPLETION_DEFAULTS = Object.freeze({ minConfidence: .45, attackIgnoreSeconds: .25, minVoicedSeconds: 1.4,
-    stableWindowSeconds: .8, confirmationOffsetSeconds: .4, acquireCents: 35, stableCents: 20,
-    minCoverage: .7, maxSpreadCents: 18, maxDriftCents: 18, minFrames: 8 });
+    stableWindowSeconds: .8, confirmationOffsetSeconds: .4, acquireCents: TARGET_BAND_HALF_WIDTH_CENTS,
+    stableCents: TARGET_BAND_HALF_WIDTH_CENTS,
+    minCoverage: .7, maxSpreadCents: 18, maxDriftCents: 18, minFrames: 8,
+    holdSeconds: 3, maxSignalGapSeconds: .18 });
+  const REPEAT_LEVELS = Object.freeze({
+    guided: Object.freeze({ stableCents: TARGET_BAND_HALF_WIDTH_CENTS, holdSeconds: 1.5, label: 'Guidato' }),
+    full: Object.freeze({ stableCents: TARGET_BAND_HALF_WIDTH_CENTS, holdSeconds: 3, label: 'Completo' }),
+  });
   const INTERVAL_TIMING = Object.freeze({ countInBeats: 4, bpm: 100, noteSeconds: 2.4, soloSeconds: 2 });
   const ROLL_VISIBLE_MEASURES = 3.5;
   const HARMONY_RANGE = Object.freeze({ lowMidi: 36, highMidi: 60 });
@@ -67,6 +76,45 @@
     if (!best) throw new RangeError('Accordo fuori dall’estensione disponibile');
     return { targetMidi, targetPitchClass: ((targetMidi % 12) + 12) % 12, quality: resolvedQuality,
       targetDegree: resolvedDegree, rootPitchClass, notes: best.notes };
+  }
+
+  function repeatLevelForIndex(index) {
+    return index === 0 ? 'guided' : 'full';
+  }
+
+  function buildRepeatTimeline(note, index = 0, random = Math.random) {
+    const targetMidi = note?.midi;
+    if (!Number.isInteger(targetMidi)) throw new RangeError('Nota target non valida');
+    const level = index === 0 ? 'beginner' : index < 3 ? 'intermediate' : 'advanced';
+    const targetDegree = level === 'beginner' ? 1 : level === 'intermediate' ? index === 1 ? 5 : 3 : [1, 3, 5][randomInteger(0, 2, random)];
+    const quality = level === 'beginner' || index === 1 ? 'major' : level === 'intermediate' ? 'minor' : random() < .5 ? 'major' : 'minor';
+    const harmony = planHarmony(targetMidi, { quality, targetDegree, random });
+    // Use the exact same three pitches for the plucked attack and the strings.
+    // Keep the target itself for the fourth-beat vocal cue, when possible.
+    const preparation = harmony.notes.map((midi) => {
+      if (midi !== targetMidi) return midi;
+      return midi - 12 >= HARMONY_RANGE.lowMidi ? midi - 12 : midi + 12;
+    }).sort((a, b) => a - b);
+    const events = [0, 1, 2].map((beat, position) => ({
+      id: `prepare-${beat}`, beat, durationBeats: 1.15, midi: preparation[Math.min(position, preparation.length - 1)],
+      timbre: 'pluck', gain: level === 'beginner' ? .09 : .075, role: 'harmonic-orientation',
+      phase: 'preparation', evaluated: false, highlightedMidi: null,
+    }));
+    events.push({ id: 'target', beat: 3, durationBeats: .82, midi: targetMidi, timbre: 'voice',
+      gain: .18, role: 'sing-this-note', phase: 'target-preview', evaluated: false, highlightedMidi: targetMidi });
+    return { bpm: INTERVAL_TIMING.bpm, countInBeats: 4, targetMidi, level, scoring: REPEAT_LEVELS[repeatLevelForIndex(index)],
+      harmony: { ...harmony, notes: preparation }, events };
+  }
+
+  function buildIntervalPreviewTimeline(interval, mode = 'imitation') {
+    if (!interval?.first || !interval?.second || !['imitation', 'memory', 'construction'].includes(mode))
+      throw new RangeError('Anteprima intervallo non valida');
+    const events = [{ id: 'first', beat: 0, durationBeats: 1.2, midi: interval.first.midi, timbre: 'voice',
+      gain: .15, role: 'model-first', phase: 'preview', evaluated: false, highlightedMidi: interval.first.midi }];
+    if (mode !== 'construction') events.push({ id: 'second', beat: 1.6, durationBeats: 1.2,
+      midi: interval.second.midi, timbre: 'voice', gain: .15, role: 'model-second',
+      phase: 'preview', evaluated: false, highlightedMidi: interval.second.midi });
+    return { bpm: INTERVAL_TIMING.bpm, mode, events, endBeat: mode === 'construction' ? 1.6 : mode === 'memory' ? 4.6 : 3.2 };
   }
 
   function validateRange(range) {
@@ -192,21 +240,36 @@
   function evaluatePitchProgress(target, frames, nowSeconds, options = {}) {
     const config = { ...EARLY_COMPLETION_DEFAULTS, ...options };
     const reliable = frames.filter((frame) => Number.isFinite(frame.hz) && (frame.confidence ?? 0) >= config.minConfidence);
-    if (!reliable.length) return { status: 'waiting', completed: false, reliable: false, reason: 'no-reliable-pitch' };
+    const emptyHold = { holdSeconds: 0, holdTargetSeconds: config.holdSeconds, timeToAcquireSeconds: null };
+    if (!reliable.length) return { status: 'waiting', completed: false, reliable: false, reason: 'no-reliable-pitch', ...emptyHold };
     const firstVoiced = reliable[0].time, voicedElapsed = nowSeconds - firstVoiced;
     const points = reliable.filter((frame) => frame.time >= firstVoiced + config.attackIgnoreSeconds)
       .map((frame) => ({ time: frame.time, cents: centsBetween(frame.hz, target.frequencyHz) }));
     const recentCenter = feedback.median(points.filter((point) => point.time >= nowSeconds - .35).map((point) => point.cents));
     const acquired = recentCenter != null && Math.abs(recentCenter) <= config.acquireCents;
-    if (voicedElapsed < config.minVoicedSeconds) return { status: acquired ? 'acquired' : 'searching', completed: false, reliable: true, recentCenterCents: recentCenter };
+    let holdStart = null, lastStable = null;
+    for (const frame of frames) {
+      if (frame.time < firstVoiced + config.attackIgnoreSeconds) continue;
+      const valid = Number.isFinite(frame.hz) && (frame.confidence ?? 0) >= config.minConfidence;
+      if (valid && Math.abs(centsBetween(frame.hz, target.frequencyHz)) <= config.stableCents) {
+        if (lastStable == null || frame.time - lastStable > config.maxSignalGapSeconds) holdStart = frame.time;
+        lastStable = frame.time;
+      } else if (valid || (lastStable != null && frame.time - lastStable > config.maxSignalGapSeconds)) {
+        holdStart = null; lastStable = null;
+      }
+    }
+    if (lastStable != null && nowSeconds - lastStable > config.maxSignalGapSeconds) { holdStart = null; lastStable = null; }
+    const holdSeconds = holdStart == null ? 0 : Math.min(config.holdSeconds, Math.max(0, lastStable - holdStart));
+    const hold = { holdSeconds, holdTargetSeconds: config.holdSeconds, timeToAcquireSeconds: holdStart };
+    if (voicedElapsed < config.minVoicedSeconds) return { status: acquired ? 'acquired' : 'searching', completed: false, reliable: true, recentCenterCents: recentCenter, ...hold };
     const current = windowStability(points, nowSeconds - config.stableWindowSeconds, nowSeconds, frames, config);
     const previous = windowStability(points, nowSeconds - config.stableWindowSeconds - config.confirmationOffsetSeconds,
       nowSeconds - config.confirmationOffsetSeconds, frames, config);
-    const completed = current.stable && previous.stable;
+    const completed = holdSeconds >= config.holdSeconds;
     const initial = feedback.median(points.filter((point) => point.time < firstVoiced + .6).map((point) => point.cents));
     return { status: completed ? (Math.abs(initial ?? 0) > config.acquireCents ? 'reached-with-correction' : 'reached')
       : acquired ? 'stabilizing' : 'searching', completed, reliable: true, recentCenterCents: recentCenter,
-      initialCents: initial, current, previous };
+      initialCents: initial, current, previous, ...hold };
   }
 
   function pitchTrialOutcome(completionReason, analysis = {}) {
@@ -299,9 +362,10 @@
     results.filter((item) => item?.completed !== false).forEach((item) => {
       const analysis = item.analysis ?? {};
       if (item.exerciseType === 'repeat') {
-        const reliable = analysis.metrics?.reliable === true, success = String(analysis.completionReason || '').startsWith('reached');
+        const success = String(analysis.completionReason || '').startsWith('reached');
+        const reliable = success || analysis.metrics?.reliable === true;
         evidence.noteReproduction.push({ reliable, success, completedAt: item.completedAt });
-        evidence.noteStability.push({ reliable, success: reliable && Math.abs(analysis.metrics?.driftCents ?? Infinity) <= 18, completedAt: item.completedAt });
+        evidence.noteStability.push({ reliable, success: success || (reliable && Math.abs(analysis.metrics?.driftCents ?? Infinity) <= 18), completedAt: item.completedAt });
       } else if (item.exerciseType === 'sustain') {
         const reliable = analysis.metrics?.reliable === true;
         evidence.noteStability.push({ reliable, success: reliable && Math.abs(analysis.metrics?.driftCents ?? Infinity) <= 18, completedAt: item.completedAt });
@@ -394,7 +458,7 @@
     return { competencies, blocks: blocks.slice(0, 4), estimatedMinutes: Math.max(3, Math.min(8, blocks.length * 2)) };
   }
 
-  return { INTERVALS, LEVEL_INTERVALS, ROLE_INTERVAL_BASES, INTERVAL_TIMING, ROLL_VISIBLE_MEASURES, rollPixelsPerSecond, HARMONY_RANGE, midiToHz, midiToName, centsBetween, validateRange, randomNote, allowedIntervals, planHarmony,
+  return { INTERVALS, LEVEL_INTERVALS, ROLE_INTERVAL_BASES, INTERVAL_TIMING, ROLL_VISIBLE_MEASURES, rollPixelsPerSecond, HARMONY_RANGE, TARGET_BAND_HALF_WIDTH_CENTS, REPEAT_LEVELS, repeatLevelForIndex, buildRepeatTimeline, buildIntervalPreviewTimeline, midiToHz, midiToName, centsBetween, validateRange, randomNote, allowedIntervals, planHarmony,
     generateInterval, generateScoredInterval, definition, result, analyseSustained, analyseSungInterval, EARLY_COMPLETION_DEFAULTS,
     evaluatePitchProgress, pitchTrialOutcome, buildInitialPitchSession, buildEarTrainingBlock, scheduleEarRetry, buildSingingIntervalBlock, rollPitchBounds,
     deriveCompetencies, extractRepertoirePhrase, competencePriority, categoriesConsolidated, buildRecommendedSession };

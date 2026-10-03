@@ -1,12 +1,13 @@
 (function () {
   'use strict';
   const Core = window.VoiceLabCore, Draw = window.VoiceDrawCore, { detectPitch, PitchSmoother } = window.ChoirPitch;
+  const { OneEuroFilter } = window.ChoirOneEuro;
   const PitchShared = window.ChoirPitchShared;
   const FluidPitchTrail = window.ChoirFluidPitchTrail;
   const $ = (id) => document.getElementById(id);
   const drawBoard = $('lab-draw-board'), drawLeft = $('lab-draw-left'), drawRight = $('lab-draw-right');
   const drawKeys = new Set();
-  const els = Object.fromEntries(['lab-range-label', 'lab-kind', 'lab-title', 'lab-instruction', 'lab-config', 'lab-session-progress', 'lab-score', 'lab-score-curtain', 'lab-roll', 'lab-fluid-layer', 'lab-target', 'lab-frequency', 'lab-state', 'lab-countdown', 'lab-level', 'lab-new', 'lab-listen', 'lab-continue', 'lab-record', 'lab-answer', 'lab-feedback', 'lab-feedback-title', 'lab-feedback-message', 'lab-metrics', 'lab-chart', 'lab-play-take', 'lab-retry', 'lab-next', 'lab-note', 'lab-guided', 'lab-settings', 'lab-settings-dialog', 'lab-role', 'lab-low', 'lab-high', 'lab-mic-check', 'lab-mic-check-level', 'lab-mic-check-status', 'lab-settings-save', 'lab-settings-close'].map((id) => [id.replaceAll('-', '_'), $(id)]));
+  const els = Object.fromEntries(['lab-range-label', 'lab-kind', 'lab-title', 'lab-instruction', 'lab-config', 'lab-session-progress', 'lab-conductor', 'lab-conductor-eyebrow', 'lab-conductor-message', 'lab-conductor-beats', 'lab-conductor-detail', 'lab-score', 'lab-score-curtain', 'lab-roll', 'lab-fluid-layer', 'lab-target', 'lab-frequency', 'lab-state', 'lab-countdown', 'lab-level', 'lab-hold-progress', 'lab-hold-time', 'lab-hold-track', 'lab-hold-fill', 'lab-hold-hint', 'lab-pitch-success', 'lab-success-index', 'lab-success-note', 'lab-success-hold', 'lab-success-time', 'lab-success-next', 'lab-new', 'lab-hint', 'lab-listen', 'lab-continue', 'lab-record', 'lab-answer', 'lab-feedback', 'lab-feedback-title', 'lab-feedback-message', 'lab-metrics', 'lab-chart', 'lab-play-take', 'lab-retry', 'lab-next', 'lab-note', 'lab-guided', 'lab-settings', 'lab-settings-dialog', 'lab-role', 'lab-low', 'lab-high', 'lab-mic-check', 'lab-mic-check-level', 'lab-mic-check-status', 'lab-settings-save', 'lab-settings-close'].map((id) => [id.replaceAll('-', '_'), $(id)]));
   const STORE = 'choir-voice-lab:v1', MAX_RESULTS = 200;
   let soloStartedAt = null, preparing = false, preparationId = 0;
   const phase = document.createElement('div'); phase.className = 'lab-phase'; phase.setAttribute('role', 'status');
@@ -14,24 +15,68 @@
   const liveReadout = document.querySelector('.lab-live-readout');
   rollPanel.append(phase);
   function setPhase(text, progress = 0) { phase.textContent = text; phase.style.setProperty('--progress', `${Math.min(100, progress * 100)}%`); }
+  const secondsLabel = value => Number.isFinite(value) ? value.toFixed(1).replace('.', ',') : '—';
+  function updateHoldProgress(progress) {
+    const held = progress?.holdSeconds ?? 0, target = progress?.holdTargetSeconds ?? Core.EARLY_COMPLETION_DEFAULTS.holdSeconds;
+    els.lab_hold_progress.hidden = false; phase.hidden = true;
+    els.lab_hold_time.textContent = `${secondsLabel(held)} / ${secondsLabel(target)} s`;
+    els.lab_hold_fill.style.width = `${Math.min(100, held / target * 100)}%`;
+    els.lab_hold_track.setAttribute('aria-valuenow', held.toFixed(1));
+    els.lab_hold_track.setAttribute('aria-valuemax', String(target));
+    els.lab_hold_hint.textContent = held > 0 ? 'Continua così: mantieni la stessa altezza'
+      : progress?.status === 'searching' ? 'Avvicinati alla nota dorata' : 'Trova la nota per iniziare';
+  }
+  function hideHoldProgress() { els.lab_hold_progress.hidden = true; phase.hidden = false; }
+  function setConductor(stage, beat = -1, detail = '') {
+    if (state.conductorStage === stage && state.conductorBeat === beat && !detail) return;
+    state.conductorStage = stage; state.conductorBeat = beat;
+    const labels = {
+      ready: ['PRONTO', 'Ascolta e canta'],
+      preview: ['ASCOLTA', 'L’accordo si costruisce'],
+      countIn: ['PREPARATI', 'Segui le pulsazioni'],
+      target: ['LA TUA NOTA', 'Ascolta questa nota'],
+      singing: ['CANTA', 'Ora tocca a te'],
+      feedback: ['RISULTATO', 'Ascolta il risultato'],
+      completed: ['COMPLETATO', 'Prova conclusa'],
+    };
+    [els.lab_conductor_eyebrow.textContent, els.lab_conductor_message.textContent] = labels[stage] || labels.ready;
+    els.lab_conductor_detail.textContent = detail || (stage === 'ready' ? 'La nota da cantare arriva sull’ultima pulsazione'
+      : stage === 'singing' ? '' : '');
+    [...els.lab_conductor_beats.children].forEach((dot, index) => {
+      dot.classList.toggle('active', index === beat);
+      dot.classList.toggle('done', beat >= 0 && index < beat);
+      dot.classList.toggle('target-beat', state.activity === 'repeat' && index === 3);
+    });
+    scorePanel.classList.toggle('target-preview', stage === 'target');
+  }
+  function evaluateCurrentPitchProgress() {
+    return Core.evaluatePitchProgress(state.exercise.music.note, state.frames, state.elapsedSeconds,
+      { ...state.repeatTimeline?.scoring,
+        minConfidence: state.detectorSettings.weakVoiceMode ? .12 : Core.EARLY_COMPLETION_DEFAULTS.minConfidence });
+  }
   document.querySelectorAll('[data-activity="sustain"]').forEach(button => button.remove());
   els.lab_record.hidden = true;
   function syncStart() {
     els.lab_record.hidden = true;
-    els.lab_listen.textContent = state.recording || preparing ? '■' : '▶';
-    els.lab_listen.setAttribute('aria-label', state.recording || preparing ? 'Interrompi' : 'Inizia');
+    const running = state.recording || preparing;
+    const idleLabel = state.activity === 'repeat' || state.activity === 'sing-interval' ? 'Ascolta e canta'
+      : state.activity === 'ear' ? 'Ascolta' : 'Inizia';
+    els.lab_listen.textContent = running ? '■' : idleLabel;
+    els.lab_listen.classList.toggle('is-running', running);
+    els.lab_listen.setAttribute('aria-label', running ? 'Interrompi' : idleLabel);
   }
   const ROLE_RANGES = Object.freeze({ soprano: { lowMidi: 60, highMidi: 77 }, alto: { lowMidi: 55, highMidi: 72 }, tenor: { lowMidi: 48, highMidi: 67 }, bass: { lowMidi: 40, highMidi: 60 } });
   const CHOIR_ANCHORS = Object.freeze({ soprano: [62, 68, 74], alto: [57, 63, 69], tenor: [50, 56, 62, 67], bass: [42, 48, 54, 59] });
   const FINAL_DIMINUENDO_SECONDS = 4.8;
   const sharedPitch = PitchShared.readPreferences();
   const fluidTrailRenderer = new FluidPitchTrail.Renderer(els.lab_fluid_layer);
-  const state = { activity: 'repeat', role: 'tenor', range: { ...ROLE_RANGES.tenor }, exercise: null, harmony: null, pitchSession: null, earSession: null, singSession: null, drawSession: null, drawFrame: null, guidedSession: null, autoCompleting: false, advanceTimer: null, countInTimers: [], countInFrame: null, countInStartedAt: 0, metronomeSources: [], accompanimentSources: [], countingIn: false, audio: null, voiceBuffers: new Map(), stringBuffers: new Map(), reference: null, referenceTimer: null, stream: null, analyser: null, input: null, recording: false, calibrationActive: false, calibrationGeneration: 0, mediaRecorder: null, chunks: [], generation: 0, frames: [], startedAt: 0, elapsedSeconds: 0, audioUrl: null, rollBounds: null, detectorSettings: sharedPitch.detector, plumeSettings: sharedPitch.plume };
+  const state = { activity: 'repeat', role: 'tenor', range: { ...ROLE_RANGES.tenor }, exercise: null, harmony: null, pitchSession: null, earSession: null, singSession: null, drawSession: null, drawFrame: null, drawGuideEnabled: false, guidedSession: null, autoCompleting: false, advanceTimer: null, countInTimers: [], countInFrame: null, countInStartedAt: 0, metronomeSources: [], accompanimentSources: [], countingIn: false, audio: null, voiceBuffers: new Map(), stringBuffers: new Map(), reference: null, referenceTimer: null, stream: null, analyser: null, input: null, recording: false, calibrationActive: false, calibrationGeneration: 0, mediaRecorder: null, chunks: [], generation: 0, frames: [], visualFrames: [], startedAt: 0, elapsedSeconds: 0, audioUrl: null, rollBounds: null, detectorSettings: sharedPitch.detector, plumeSettings: sharedPitch.plume };
+  state.repeatTimeline = null; state.takeAudioStart = 0; state.conductorStage = null; state.conductorBeat = -1; state.assisted = false; state.answerRevealed = false;
   let needsRoleSetup = true;
   try { const savedRole = localStorage.getItem(`${STORE}:role`); needsRoleSetup = !savedRole; state.role = savedRole || state.role; state.range = { ...ROLE_RANGES[state.role] }; } catch (_) {}
   try { state.range = { ...state.range, ...JSON.parse(localStorage.getItem(`${STORE}:range`)) }; } catch (_) {}
   const activityMeta = {
-    repeat: ['INTONAZIONE · LIVELLO 1', 'Trova la nota', 'Segui coro e accordo per tutta la prova; nelle ultime due battute accompagnali nel diminuendo.'],
+    repeat: ['INTONAZIONE · LIVELLO 1', 'Trova la nota', 'Ascolta il riferimento, trova la nota e tienila stabile per 3 secondi. Poi passerai alla prossima.'],
     sustain: ['INTONAZIONE · NOTA TENUTA', 'Tieni la nota', 'Ascolta il riferimento breve, poi mantieni la nota senza guida per tutta la durata.'],
     ear: ['ASCOLTO · EAR TRAINING', 'Riconosci intervalli', 'Ascolta senza guardare la risposta, poi scegli.'],
     'sing-interval': ['INTERVALLI · RIPRODUZIONE', 'Canta gli intervalli', 'Ascolta le note; quattro pulsazioni preparano l’attacco e il cambio.'],
@@ -54,10 +99,14 @@
   function drawScore(reveal) {
     if (state.activity === 'draw') { els.lab_score.hidden = true; els.lab_score_curtain.hidden = true; drawBoard.hidden = false; drawDrawingBoard(); return; }
     drawBoard.hidden = true;
-    const concealed = Boolean(state.exercise && !reveal);
+    const memoryHidden = state.activity === 'sing-interval' && state.exercise?.listeningMode === 'memory'
+      && state.recording && !state.answerRevealed;
+    const concealed = Boolean(state.exercise && (!reveal || memoryHidden));
     els.lab_score.hidden = concealed; els.lab_score_curtain.hidden = !concealed;
     if (!state.exercise || !reveal) { els.lab_score.removeAttribute('src'); delete els.lab_score.dataset.firstMidi; delete els.lab_score.dataset.secondMidi; els.lab_score.alt = ''; return; }
-    const notes = exerciseNotes();
+    const allNotes = exerciseNotes();
+    const notes = state.activity === 'sing-interval' && state.exercise?.listeningMode === 'construction'
+      && !state.answerRevealed && !state.assisted ? allNotes.slice(0, 1) : allNotes;
     const harmonic = state.exercise.listeningMode === 'harmonic';
     const scoreNotes = harmonic ? [...notes].sort((a, b) => a.midi - b.midi) : notes;
     els.lab_score.src = (notes.length === 1 ? `voice-lab-assets/notes/note-${notes[0].midi}-1.svg`
@@ -71,6 +120,11 @@
     const { context: ctx, width, height, ratio } = canvasContext(els.lab_roll), notes = exerciseNotes(); ctx.fillStyle = '#08171c'; ctx.fillRect(0, 0, width, height);
     fluidTrailRenderer.resize(width, height, ratio); fluidTrailRenderer.clear();
     const targets = notes.length ? notes.map((note) => note.midi) : [60];
+    const visibleNotes = state.activity === 'sing-interval' && !state.answerRevealed
+      ? state.exercise?.listeningMode === 'memory' && state.recording ? []
+        : state.exercise?.listeningMode === 'construction' && !state.assisted ? notes.slice(0, 1) : notes
+      : notes;
+    const visibleTargets = visibleNotes.map(note => note.midi);
     const desired = Core.rollPitchBounds(targets);
     state.rollBounds = desired;
     const { min: minMidi, max: maxMidi } = state.rollBounds;
@@ -84,13 +138,14 @@
       ctx.fillRect(0, y - rowHeight / 2, black ? keyboardRight * .66 : keyboardRight, rowHeight);
       ctx.strokeStyle = black ? '#20353b' : '#65787a'; ctx.lineWidth = .7; ctx.beginPath();
       ctx.moveTo(0, y + rowHeight / 2); ctx.lineTo(width, y + rowHeight / 2); ctx.stroke();
-      if (pitchClass === 0 || pitchClass === 5 || targets.some((target) => Math.round(target) === midi)) {
-        ctx.fillStyle = black ? '#adc0bf' : '#34484b'; ctx.font = `${targets.includes(midi) ? '700 ' : ''}10px system-ui`;
+      if (pitchClass === 0 || pitchClass === 5 || visibleTargets.some((target) => Math.round(target) === midi)) {
+        ctx.fillStyle = black ? '#adc0bf' : '#34484b'; ctx.font = `${visibleTargets.includes(midi) ? '700 ' : ''}10px system-ui`;
         ctx.fillText(Core.midiToName(midi), 3, y + 3);
       }
     }
     ctx.strokeStyle = '#65787a'; ctx.beginPath(); ctx.moveTo(keyboardRight + .5, 0); ctx.lineTo(keyboardRight + .5, height); ctx.stroke();
-    const nowX = Math.max(90, width * .375), elapsed = state.recording && !state.countingIn ? (performance.now() - state.startedAt) / 1000 : state.elapsedSeconds;
+    const nowX = Math.max(90, width * .375), elapsed = state.recording && !state.countingIn && state.takeAudioStart
+      ? Math.max(0, state.audio.currentTime - state.takeAudioStart) : state.elapsedSeconds;
     const historyWidth = nowX - keyboardRight, right = width - 12;
     const pixelsPerSecond = Core.rollPixelsPerSecond(right - keyboardRight);
     const xAtTime = (time) => nowX + (time - elapsed) * pixelsPerSecond;
@@ -100,7 +155,7 @@
         const x = keyboardRight + (nowX - keyboardRight) * beat / Core.INTERVAL_TIMING.countInBeats;
         ctx.strokeStyle = beat === 0 || beat === Core.INTERVAL_TIMING.countInBeats ? 'rgba(226,180,101,.55)' : 'rgba(184,210,207,.24)';
         ctx.setLineDash(beat % 4 ? [3, 5] : []); ctx.beginPath(); ctx.moveTo(Math.round(x) + .5, 0); ctx.lineTo(Math.round(x) + .5, height); ctx.stroke();
-        if (beat < Core.INTERVAL_TIMING.countInBeats) { ctx.setLineDash([]); ctx.fillStyle = '#91aaa9'; ctx.font = '10px system-ui'; ctx.fillText(String(beat + 1), x + 4, 13); }
+        if (beat < Core.INTERVAL_TIMING.countInBeats) { ctx.setLineDash([]); ctx.fillStyle = '#91aaa9'; ctx.font = '10px system-ui'; ctx.fillText(beat === 0 ? 'Preparazione · 1' : String(beat + 1), x + 4, 13); }
       }
     } else {
       const visibleStart = elapsed - (nowX - keyboardRight) / pixelsPerSecond, visibleEnd = elapsed + (right - nowX) / pixelsPerSecond;
@@ -109,29 +164,44 @@
         if (x < keyboardRight || x > right) continue;
         ctx.strokeStyle = measure ? 'rgba(226,180,101,.5)' : 'rgba(184,210,207,.18)'; ctx.setLineDash(measure ? [] : [3, 5]);
         ctx.beginPath(); ctx.moveTo(Math.round(x) + .5, 0); ctx.lineTo(Math.round(x) + .5, height); ctx.stroke();
-        if (measure) { ctx.setLineDash([]); ctx.fillStyle = '#d1a862'; ctx.font = '700 10px system-ui'; ctx.fillText(`B. ${Math.floor(beat / 4) + 1}`, x + 4, 13); }
+        if (measure) { ctx.setLineDash([]); ctx.fillStyle = '#d1a862'; ctx.font = '700 10px system-ui'; ctx.fillText(`Battuta ${Math.floor(beat / 4) + 1}`, x + 4, 13); }
       }
     }
     ctx.setLineDash([]);
-    if (state.exercise && reveal) {
-      ctx.save(); ctx.beginPath(); ctx.rect(keyboardRight, 0, right - keyboardRight, height); ctx.clip(); ctx.fillStyle = '#d29b52';
-      if (notes.length === 1) ctx.fillRect(xAtTime(0), yAt(notes[0].midi) - 7, duration * pixelsPerSecond, 14);
-      else { const split = duration / 2; ctx.fillRect(xAtTime(0), yAt(notes[0].midi) - 7, split * pixelsPerSecond, 14); ctx.fillRect(xAtTime(split), yAt(notes[1].midi) - 7, split * pixelsPerSecond, 14); }
+    if (state.exercise && reveal && visibleNotes.length) {
+      ctx.save(); ctx.beginPath(); ctx.rect(keyboardRight, 0, right - keyboardRight, height); ctx.clip();
+      // The song view uses a subdued amber target so the turquoise ribbon stays legible over it.
+      ctx.fillStyle = state.activity === 'repeat' ? 'rgba(189,142,76,.72)' : '#d29b52';
+      const targetHeight = rowHeight;
+      if (notes.length === 1) ctx.fillRect(xAtTime(0), yAt(notes[0].midi) - targetHeight / 2, duration * pixelsPerSecond, targetHeight);
+      else { const split = duration / 2; ctx.fillRect(xAtTime(0), yAt(notes[0].midi) - targetHeight / 2, split * pixelsPerSecond, targetHeight);
+        if (visibleNotes.length > 1) ctx.fillRect(xAtTime(split), yAt(notes[1].midi) - targetHeight / 2, split * pixelsPerSecond, targetHeight); }
+      if (state.countingIn && state.exercise.type === 'repeat' && state.conductorBeat === 3) {
+        ctx.fillStyle = '#e4b66542'; ctx.fillRect(keyboardRight, yAt(notes[0].midi) - 13, right - keyboardRight, 26);
+      }
       ctx.restore();
     }
-    const voiced = state.frames.filter((frame) => Number.isFinite(frame.displayPitch) && frame.confidence >= .3);
-    const xAtFrame = (frame) => xAtTime(frame.time);
-    const plumeSettings = { ...state.plumeSettings, nowX, trailStartX: keyboardRight, currentTime: elapsed,
-      sortedTimeline: true, mode: state.recording ? 'live' : 'review' };
+    const ribbonFrames = state.visualFrames;
+    const voiced = ribbonFrames.filter((frame) => Number.isFinite(frame.displayPitch) && frame.confidence >= .3);
+    const inspecting = !state.recording && !state.countingIn && state.frames.length > 0;
+    const advanceSeconds = Math.max(0, Math.min(.2, Number(state.plumeSettings.timeAdvanceMs) / 1000 || 0));
+    const xAtFrame = (frame) => inspecting ? xAtTime(frame.time)
+      : Math.min(nowX, xAtTime(Math.max(0, frame.time - advanceSeconds)));
+    const plumeSettings = { ...state.plumeSettings, nowX: inspecting ? right : nowX,
+      trailStartX: keyboardRight, currentTime: elapsed, timeAt: frame => frame.time,
+      minConfidence: state.detectorSettings.weakVoiceMode ? .12 : .30,
+      viewportLeft: keyboardRight, viewportRight: inspecting ? right : nowX,
+      sortedTimeline: true, mode: inspecting ? 'review' : 'live' };
     if (state.activity === 'repeat' || state.activity === 'sing-interval') {
       const fluidSettings = { ...plumeSettings, dpr: ratio, width, height, ribbonScale: state.plumeSettings.width,
-        clip: { left: keyboardRight, top: 16, right: nowX, bottom: height - 16 },
+        intensity: state.plumeSettings.intensity,
+        clip: { left: keyboardRight, top: 16, right: inspecting ? right : nowX, bottom: height - 16 },
         animationTime: state.recording ? performance.now() / 1000 : elapsed };
-      if (!fluidTrailRenderer.render(state.frames, xAtFrame, yAt, fluidSettings))
-        FluidPitchTrail.drawFallback(ctx, state.frames, xAtFrame, yAt, fluidSettings);
-    } else PitchShared.drawConfidencePlume(ctx, state.frames, xAtFrame, yAt, minMidi, maxMidi, plumeSettings);
+      if (!fluidTrailRenderer.render(ribbonFrames, xAtFrame, yAt, fluidSettings))
+        FluidPitchTrail.drawFallback(ctx, ribbonFrames, xAtFrame, yAt, fluidSettings);
+    } else PitchShared.drawConfidencePlume(ctx, ribbonFrames, xAtFrame, yAt, minMidi, maxMidi, plumeSettings);
     const countInDuration = Core.INTERVAL_TIMING.countInBeats * 60 / Core.INTERVAL_TIMING.bpm;
-    const countInFraction = state.countingIn ? Math.min(1, Math.max(0, (performance.now() - state.countInStartedAt) / 1000 / countInDuration)) : 0;
+    const countInFraction = state.countingIn ? Math.min(1, Math.max(0, (audioContext().currentTime - state.countInStartedAt) / countInDuration)) : 0;
     const cursorX = state.countingIn ? keyboardRight + historyWidth * countInFraction : state.recording || state.frames.length ? nowX : keyboardRight;
     ctx.strokeStyle = '#8ee0d8'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cursorX, 0); ctx.lineTo(cursorX, height); ctx.stroke();
     const latest = voiced.at(-1);
@@ -170,10 +240,23 @@
     ctx.shadowColor = 'rgba(235,188,108,.55)'; ctx.shadowBlur = 12;
     ctx.strokeStyle = '#e2b76e'; ctx.lineWidth = session.shape === 'square' ? .105 : .035; ctx.stroke(); ctx.restore();
     points.slice(0, -1).forEach(([x, offset], index) => {
-      const reached = session.bins.has(index * Draw.BINS_PER_EDGE) || session.bins.has(index * Draw.BINS_PER_EDGE + 1);
+      const reached = session.reachedVertices.has(index);
       ctx.beginPath(); ctx.arc(xAt(x), yAt(session.centerMidi + offset), index === 0 ? 6 : 4, 0, Math.PI * 2);
       ctx.fillStyle = reached ? '#8fd8cc' : index === 0 ? '#f4d293' : '#c09a63'; ctx.fill();
     });
+    if (state.drawGuideEnabled) {
+      const guide = Draw.guidePosition(session.guideTimeline, session.elapsed);
+      if (guide) {
+        const guideX = xAt(guide.x), guideY = yAt(session.centerMidi + guide.offset);
+        const pulse = guide.stopped ? 1 + .14 * Math.sin(session.elapsed * Math.PI * 4) : 1;
+        ctx.save();
+        ctx.shadowColor = '#8ff7e4'; ctx.shadowBlur = guide.stopped ? 24 : 17;
+        ctx.fillStyle = 'rgba(118,239,220,.18)'; ctx.beginPath(); ctx.arc(guideX, guideY, 13 * pulse, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#b9fff2'; ctx.beginPath(); ctx.arc(guideX, guideY, 6.5 * pulse, 0, Math.PI * 2); ctx.fill();
+        ctx.fillStyle = '#ffffff'; ctx.beginPath(); ctx.arc(guideX - 1.5, guideY - 1.5, 2.1, 0, Math.PI * 2); ctx.fill();
+        ctx.restore();
+      }
+    }
     const trace = session.trace;
     for (let index = 1; index < trace.length; index += 1) {
       const a = trace[index - 1], b = trace[index];
@@ -296,15 +379,15 @@
     if (!harmony) return [];
     return Promise.all(harmony.notes.map(loadStringSample));
   }
-  function playHarmony(harmony, at, crescendoSeconds, sustainSeconds = 30, { loop = false } = {}) {
+  function playHarmony(harmony, at, crescendoSeconds, sustainSeconds = 30, { loop = false, peakGain = .18, sustainGain = .06 } = {}) {
     if (!harmony) return [];
     const context = audioContext(), bus = context.createGain(), compressor = context.createDynamicsCompressor();
     const entry = at + crescendoSeconds;
     bus.gain.setValueAtTime(.0001, at);
     const end = entry + sustainSeconds, diminuendoStart = Math.max(entry + .1, end - FINAL_DIMINUENDO_SECONDS);
-    bus.gain.exponentialRampToValueAtTime(.18, Math.max(at + .05, entry - .08));
-    bus.gain.exponentialRampToValueAtTime(.06, entry + .08);
-    bus.gain.setValueAtTime(.06, diminuendoStart);
+    bus.gain.exponentialRampToValueAtTime(peakGain, Math.max(at + .05, entry - .08));
+    bus.gain.exponentialRampToValueAtTime(sustainGain, entry + .08);
+    bus.gain.setValueAtTime(sustainGain, diminuendoStart);
     bus.gain.exponentialRampToValueAtTime(.0001, end);
     compressor.threshold.value = -24; compressor.knee.value = 12; compressor.ratio.value = 3;
     bus.connect(compressor).connect(context.destination);
@@ -313,9 +396,9 @@
     const sustainWindows = (asset) => asset.windowRms.slice(loop ? 2 : 1, loop ? -2 : requiredWindows);
     if (assets.some((asset) => sustainWindows(asset).some((rms) => rms < .001)))
       throw new Error('Campione archi non continuo');
-    const estimatedUnderVoiceRms = Math.sqrt(assets.reduce((sum, asset) => sum + (asset.rms * asset.normalizationGain * .72 * .06) ** 2, 0));
-    reportAudioEvent('harmony', at, { entry, end, diminuendoStart, notes: [...harmony.notes], peakGain: .18,
-      sustainGain: .06, sampleRms: assets.map((asset) => asset.rms), sampleDurations: assets.map((asset) => asset.buffer.duration),
+    const estimatedUnderVoiceRms = Math.sqrt(assets.reduce((sum, asset) => sum + (asset.rms * asset.normalizationGain * .72 * sustainGain) ** 2, 0));
+    reportAudioEvent('harmony', at, { entry, end, diminuendoStart, notes: [...harmony.notes], peakGain,
+      sustainGain, sampleRms: assets.map((asset) => asset.rms), sampleDurations: assets.map((asset) => asset.buffer.duration),
       minimumSustainRms: Math.min(...assets.flatMap(sustainWindows)), estimatedUnderVoiceRms, loop });
     return harmony.notes.map((midi) => {
       const asset = state.stringBuffers.get(midi);
@@ -343,44 +426,141 @@
     reportAudioEvent('voice', at, { end: at + duration, diminuendoStart: fadeStart, midi: note.midi, anchor,
       role: state.role, gain: gainValue, sampleRms: asset.rms, sourceDuration: asset.buffer.duration }); return { source, gain };
   }
-  function stopReference() { if (state.reference) { try { state.reference.source.stop(); } catch (_) {} state.reference = null; } clearTimeout(state.referenceTimer); state.referenceTimer = null; if (els.lab_listen) els.lab_listen.textContent = '▶'; }
-  async function listen() {
-    if (!state.exercise) return;
-    if (state.reference) { stopReference(); return; }
-    const context = audioContext(); await context.resume(); try { await loadExerciseVoices(); } catch (error) { els.lab_note.textContent = error.message; return; } const now = context.currentTime + .03, music = state.exercise.music;
-    if (music.interval) {
-      if (state.exercise.listeningMode === 'construction') playTone(music.interval.first, now, 1.1, .12);
-      else if (state.exercise.listeningMode === 'harmonic') { playTone(music.interval.first, now, 1.1, .1); playTone(music.interval.second, now, 1.1, .1); }
-      else { playTone(music.interval.first, now, .72); playTone(music.interval.second, now + .88, .72); }
-    } else if (state.exercise.listeningMode === 'continuous') {
-      state.reference = playTone(music.note, now, 30, .11, FINAL_DIMINUENDO_SECONDS); els.lab_listen.textContent = '■'; els.lab_countdown.textContent = '30.0'; const started = performance.now();
-      const update = () => { if (!state.reference) return; const remaining = Math.max(0, 30 - (performance.now() - started) / 1000); els.lab_countdown.textContent = remaining.toFixed(1); if (remaining > 0) requestAnimationFrame(update); }; update(); state.referenceTimer = setTimeout(stopReference, 30050);
-    } else {
-      playTone(music.note, now, 1.35, .16); els.lab_countdown.textContent = 'ASCOLTA';
-      setTimeout(() => { if (!state.recording && state.exercise?.listeningMode !== 'continuous') els.lab_countdown.textContent = '—'; }, 1400);
+  function playGuidingVoice(note, at, scoringAt, endAt) {
+    const anchor = choirAnchor(note), asset = state.voiceBuffers.get(`${state.role}-${anchor}`);
+    if (!asset || typeof asset.then === 'function') throw new Error('Campione Muse Choir non ancora pronto');
+    const context = audioContext(), source = context.createBufferSource(), gain = context.createGain();
+    source.buffer = asset.buffer; source.playbackRate.value = 2 ** ((note.midi - anchor) / 12);
+    const available = asset.buffer.duration / source.playbackRate.value;
+    if (available < endAt - at) throw new Error('Campione Muse Choir troppo corto');
+    const transitionEnd = Math.min(endAt - .45, scoringAt + 1.4);
+    gain.gain.setValueAtTime(.0001, at);
+    gain.gain.exponentialRampToValueAtTime(.18, at + .14);
+    gain.gain.setValueAtTime(.18, at + .22);
+    // One uninterrupted, gentle slope bridges the presentation beat and the
+    // sustained accompaniment; no gain breakpoint is placed on the bar line.
+    gain.gain.exponentialRampToValueAtTime(.035, transitionEnd);
+    gain.gain.setValueAtTime(.035, Math.max(transitionEnd, endAt - .45));
+    gain.gain.exponentialRampToValueAtTime(.0001, endAt);
+    source.connect(gain).connect(context.destination); source.start(at); source.stop(endAt + .03);
+    reportAudioEvent('voice', at, { end: endAt, scoringAt, transitionEnd, sustainedGain: .035, midi: note.midi,
+      anchor, role: state.role, gain: .18, sampleRms: asset.rms, sourceDuration: asset.buffer.duration });
+    return source;
+  }
+  function playPluck(event, at, beatSeconds) {
+    const context = audioContext(), duration = event.durationBeats * beatSeconds;
+    const hz = Core.midiToHz(event.midi), sources = [];
+    for (const [harmonic, weight] of [[1, 1], [2, .28], [3, .11]]) {
+      const oscillator = context.createOscillator(), gain = context.createGain();
+      oscillator.type = 'sine'; oscillator.frequency.setValueAtTime(hz * harmonic, at);
+      gain.gain.setValueAtTime(.0001, at);
+      gain.gain.exponentialRampToValueAtTime(event.gain * weight, at + .009);
+      gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
+      oscillator.connect(gain).connect(context.destination);
+      oscillator.start(at); oscillator.stop(at + duration + .02); sources.push(oscillator);
     }
+    reportAudioEvent('pluck', at, { midi: event.midi, end: at + duration, role: event.role });
+    return sources;
+  }
+  function playLayeredStrings(timeline, startAt, endAt, sustainGain = .06) {
+    const context = audioContext(), beatSeconds = 60 / timeline.bpm;
+    return timeline.events.filter((event) => event.phase === 'preparation').map((event) => {
+      const asset = state.stringBuffers.get(event.midi);
+      if (!asset || typeof asset.then === 'function') throw new Error('Campioni archi non ancora pronti');
+      const at = startAt + event.beat * beatSeconds;
+      if (asset.buffer.duration < endAt - at) throw new Error(`Campione archi ${Core.midiToName(event.midi)} troppo corto`);
+      const source = context.createBufferSource(), gain = context.createGain();
+      source.buffer = asset.buffer;
+      gain.gain.setValueAtTime(.0001, at);
+      gain.gain.exponentialRampToValueAtTime(sustainGain * asset.normalizationGain * .72, at + .42);
+      gain.gain.setValueAtTime(sustainGain * asset.normalizationGain * .72, Math.max(at + .42, endAt - .25));
+      gain.gain.exponentialRampToValueAtTime(.0001, endAt);
+      source.connect(gain).connect(context.destination);
+      source.start(at); source.stop(endAt + .03);
+      reportAudioEvent('string-layer', at, { midi: event.midi, end: endAt, gain: sustainGain, beat: event.beat });
+      return source;
+    });
+  }
+  function scheduleMusicTimeline(timeline, startAt, options = {}) {
+    const beatSeconds = 60 / timeline.bpm, sources = [];
+    for (const event of timeline.events) {
+      const at = startAt + event.beat * beatSeconds;
+      if (event.timbre === 'pluck') sources.push(...playPluck(event, at, beatSeconds));
+      else if (event.timbre === 'voice' && Number.isFinite(options.sustainVoiceUntil))
+        sources.push(playGuidingVoice({ midi: event.midi }, at, startAt + timeline.countInBeats * beatSeconds, options.sustainVoiceUntil));
+      else if (event.timbre === 'voice') sources.push(playTone({ midi: event.midi }, at, event.durationBeats * beatSeconds, event.gain).source);
+    }
+    return sources;
+  }
+  function stopReference() { if (state.reference) { try { state.reference.source.stop(); } catch (_) {} state.reference = null; } clearTimeout(state.referenceTimer); state.referenceTimer = null; if (els.lab_listen) els.lab_listen.textContent = '▶'; }
+  function stopReplay() {
+    clearTimeout(state.replayTimer); state.replayTimer = null;
+    state.replaySources?.forEach(source => { try { source.stop(); } catch (_) {} });
+    state.replaySources = [];
+  }
+  async function replayReference() {
+    if (!state.exercise || state.recording || preparing || state.countingIn) return;
+    stopReplay();
+    const requested = state.exercise, context = audioContext();
+    try {
+      await Promise.all([loadExerciseVoices(), ...(state.activity === 'repeat' ? [loadHarmony()] : [])]); await context.resume();
+      if (state.exercise !== requested) return;
+      const startAt = context.currentTime + .06;
+      const timeline = state.activity === 'repeat' ? state.repeatTimeline
+        : Core.buildIntervalPreviewTimeline(state.exercise.music.interval, state.exercise.listeningMode);
+      state.replaySources = scheduleMusicTimeline(timeline, startAt);
+      if (state.activity === 'repeat') state.replaySources.push(...playLayeredStrings(timeline, startAt,
+        startAt + timeline.countInBeats * 60 / timeline.bpm, .045));
+      setConductor('preview', -1, 'Ascolta il modello, poi canta');
+      const duration = (timeline.endBeat ?? timeline.countInBeats) * 60 / timeline.bpm;
+      state.replayTimer = setTimeout(() => { stopReplay(); if (state.exercise === requested) setConductor('ready'); }, (duration + .08) * 1000);
+    } catch (error) { els.lab_note.textContent = error.message; }
+  }
+  async function previewInterval(token) {
+    const timeline = Core.buildIntervalPreviewTimeline(state.exercise.music.interval, state.exercise.listeningMode);
+    const context = audioContext(), startAt = context.currentTime + .06;
+    state.metronomeSources.push(...scheduleMusicTimeline(timeline, startAt));
+    reportAudioEvent('timeline', startAt, { events: timeline.events, mode: timeline.mode, previewEnd: startAt + timeline.endBeat * 60 / timeline.bpm });
+    setConductor('preview', -1, timeline.mode === 'construction' ? 'Ascolta la prima nota e costruisci la seconda'
+      : timeline.mode === 'memory' ? 'Ascolta entrambe le note e memorizzale' : 'Ascolta le due note nell’ordine');
+    const endAt = startAt + timeline.endBeat * 60 / timeline.bpm;
+    while (context.currentTime < endAt) {
+      if (token !== preparationId) return false;
+      if (timeline.mode === 'memory' && context.currentTime >= startAt + 3 * 60 / timeline.bpm)
+        setConductor('countIn', -1, 'Ricorda le due note prima di cantare');
+      await new Promise(resolve => setTimeout(resolve, 45));
+    }
+    return token === preparationId;
   }
   function configMarkup() {
-    if (state.activity === 'draw') return '<label>Figura <select id="lab-draw-shape"><option value="square">Rettangolo</option><option value="diamond">Rombo</option></select></label>';
+    if (state.activity === 'draw') return '<label>Figura <select id="lab-draw-shape"><option value="square">Rettangolo</option><option value="diamond">Rombo</option></select></label><label class="lab-guide-toggle" title="Guida sperimentale con arresto morbido ai vertici"><input id="lab-draw-guide" type="checkbox" /> Pallino guida</label>';
     if (state.activity === 'sustain') return '<label>Durata <select id="lab-duration"><option>2</option><option>4</option><option>6</option></select> s</label><label><input id="lab-auto-next" type="checkbox" /> Nuova altezza dopo il risultato</label>';
-    if (state.activity === 'repeat') return '<span class="lab-loop-label">Riferimento · 30 secondi</span>';
+    if (state.activity === 'repeat') return '<span class="lab-loop-label">Tempo massimo · 30 secondi</span>';
     if (state.activity === 'ear') return '<label>Livello <select id="lab-ear-level"><option value="1">1 · Direzione</option><option value="2">2 · Intervalli di riferimento</option><option value="3">3 · Maggiore e minore</option><option value="4">4 · Direzione indipendente</option><option value="5">5 · Armonico</option></select></label>';
     return '<label>Modalità <select id="lab-sing-mode"><option value="imitation">Imitazione guidata</option><option value="memory">Memoria breve</option><option value="construction">Costruzione</option></select></label><label>Difficoltà <select id="lab-sing-level"><option value="1">Intervalli base</option><option value="2">Maggiore e minore</option><option value="3">Completo</option></select></label>';
   }
   function renderActivity() {
     cancelPendingAdvance();
+    hideHoldProgress();
     document.body.dataset.activity = state.activity;
+    els.lab_conductor.hidden = !['repeat', 'sing-interval'].includes(state.activity);
+    els.lab_hint.hidden = true;
+    setConductor('ready');
     drawLeft.hidden = drawRight.hidden = state.activity !== 'draw';
     (state.activity === 'draw' ? scorePanel : rollPanel).append(liveReadout, phase);
     const meta = activityMeta[state.activity]; [els.lab_kind.textContent, els.lab_title.textContent, els.lab_instruction.textContent] = meta;
     els.lab_config.innerHTML = configMarkup(); els.lab_feedback.hidden = true; els.lab_answer.hidden = true; state.exercise = null;
     els.lab_target.textContent = '—'; els.lab_frequency.textContent = 'Genera il primo esercizio'; els.lab_listen.disabled = true; els.lab_record.disabled = true;
-    els.lab_new.textContent = '↺'; els.lab_session_progress.textContent = ''; state.frames = []; drawMusicViews(false);
+    els.lab_new.textContent = '↺'; els.lab_session_progress.textContent = ''; state.frames = []; state.visualFrames = []; drawMusicViews(false);
     els.lab_config.querySelectorAll('select').forEach((select) => select.addEventListener('change', () => {
       if (state.activity === 'ear') state.earSession = null;
       if (state.activity === 'sing-interval') state.singSession = null;
       newExercise(false);
     }));
+    $('lab-draw-guide')?.addEventListener('change', (event) => {
+      state.drawGuideEnabled = event.currentTarget.checked;
+      drawMusicViews(true);
+    });
   }
   function ensurePitchSession() {
     if (!state.pitchSession) state.pitchSession = { notes: Core.buildInitialPitchSession(state.range), index: 0, outcomes: [] };
@@ -398,15 +578,25 @@
   }
   function cancelPendingAdvance() {
     clearTimeout(state.advanceTimer); state.advanceTimer = null;
-    els.lab_continue.hidden = true; els.lab_record.hidden = true;
+    els.lab_continue.hidden = true; els.lab_record.hidden = true; els.lab_pitch_success.hidden = true;
   }
-  function offerPitchAdvance(completionReason) {
+  function offerPitchAdvance(completionReason, progress) {
     const session = state.pitchSession, completed = session.index + 1, total = session.notes.length;
+    const last = completed === total;
     els.lab_state.textContent = completionReason === 'reached-with-correction' ? 'NOTA TROVATA' : 'NOTA CENTRATA';
+    els.lab_countdown.textContent = `${secondsLabel(state.elapsedSeconds)} s`;
     els.lab_session_progress.textContent = `${completed} di ${total} · riuscita`;
-    els.lab_continue.textContent = `Continua · ${completed + 1} di ${total}`;
+    els.lab_success_index.textContent = `${String(completed).padStart(2, '0')} / ${String(total).padStart(2, '0')}`;
+    els.lab_success_note.textContent = `${session.notes[session.index].name}, centrata!`;
+    els.lab_success_hold.textContent = `Hai mantenuto la nota stabile per ${secondsLabel(progress?.holdTargetSeconds ?? 3)} secondi.`;
+    els.lab_success_time.textContent = `${secondsLabel(progress?.timeToAcquireSeconds)} s`;
+    els.lab_success_next.textContent = last ? 'Tra poco, il riepilogo del blocco' : 'Tra poco, la prossima nota';
+    els.lab_pitch_success.hidden = false;
+    setConductor('completed', -1, 'Hai trovato la nota e completato la tenuta');
+    els.lab_continue.textContent = last ? 'Vedi il riepilogo' : `Continua · ${completed + 1} di ${total}`;
     els.lab_continue.hidden = false; els.lab_record.hidden = true;
-    state.advanceTimer = setTimeout(() => { state.advanceTimer = null; advancePitchSession(); }, 1600);
+    els.lab_listen.disabled = true;
+    state.advanceTimer = setTimeout(() => { state.advanceTimer = null; advancePitchSession(); }, 3000);
   }
   function showPitchSessionSummary() {
     const outcomes = state.pitchSession?.outcomes.filter(Boolean) ?? [], reached = outcomes.filter((item) => item.completionReason.startsWith('reached')).length;
@@ -522,10 +712,12 @@
     preparationId += 1; preparing = false; soloStartedAt = null;
     stopDrawing(true);
     clearCountIn();
-    cancelPendingAdvance(); stopReference(); stopCapture(true); state.rollBounds = null; els.lab_feedback.hidden = true; els.lab_answer.hidden = true;
-    state.frames = []; state.elapsedSeconds = 0; state.harmony = null;
+    cancelPendingAdvance(); stopReference(); stopReplay(); stopCapture(true); hideHoldProgress(); state.rollBounds = null; els.lab_feedback.hidden = true; els.lab_answer.hidden = true;
+    state.frames = []; state.visualFrames = []; state.elapsedSeconds = 0; state.harmony = null; state.repeatTimeline = null; state.takeAudioStart = 0;
+    state.assisted = false; state.answerRevealed = false; els.lab_hint.hidden = true; setConductor('ready');
     if (state.activity === 'draw') {
       const shape = $('lab-draw-shape')?.value || 'square';
+      state.drawGuideEnabled = Boolean($('lab-draw-guide')?.checked);
       const centerMidi = Math.round((state.range.lowMidi + state.range.highMidi) / 2);
       state.harmony = Core.planHarmony(centerMidi);
       const chordPitchClasses = new Set(state.harmony.notes.map((midi) => ((midi % 12) + 12) % 12));
@@ -557,12 +749,19 @@
     } else {
       const note = state.activity === 'repeat' ? ensurePitchSession().notes[state.pitchSession.index] : Core.randomNote(state.range);
       const duration = state.activity === 'sustain' ? Number($('lab-duration')?.value || 2) : 30;
-      const listeningMode = state.activity === 'repeat' ? 'continuous' : 'before';
+      const listeningMode = state.activity === 'repeat' ? 'guided-preview' : 'before';
       state.exercise = Core.definition({ id: `${state.activity}-${Date.now()}`, type: state.activity, music: { note }, expectedTimeline: [{ midi: note.midi, at: 0, duration }], durationSeconds: duration, listeningMode, microphoneRequired: true, completion: { minReliableCoverage: .35 }, analysis: { sharedPipeline: 'VocalFeedback.analyseNote' } });
       els.lab_target.textContent = note.name; els.lab_frequency.textContent = `${note.frequencyHz.toFixed(1)} Hz`; els.lab_record.disabled = false;
+      if (state.activity === 'repeat') {
+        state.repeatTimeline = Core.buildRepeatTimeline(note, state.pitchSession.index);
+        state.harmony = state.repeatTimeline.harmony;
+        els.lab_kind.textContent = state.repeatTimeline.scoring.label === 'Guidato' ? 'INTONAZIONE · PRIMO PASSO' : 'INTONAZIONE · NOTA STABILE';
+        els.lab_instruction.textContent = `Ascolta l’accordo, riconosci l’ultima nota e tienila stabile per ${secondsLabel(state.repeatTimeline.scoring.holdSeconds)} secondi.`;
+      }
     }
     const harmonyTarget = state.exercise.music.note ?? state.exercise.music.interval?.first;
-    if (harmonyTarget) state.harmony = Core.planHarmony(harmonyTarget.midi);
+    if (harmonyTarget && !state.harmony) state.harmony = Core.planHarmony(harmonyTarget.midi);
+    els.lab_hint.hidden = state.activity !== 'sing-interval' || state.exercise.listeningMode !== 'construction';
     els.lab_listen.disabled = false; els.lab_state.textContent = 'PRONTO'; els.lab_countdown.textContent = '—';
     syncStart(); setPhase('Premi ▶ per iniziare');
     drawMusicViews(state.activity !== 'ear');
@@ -648,65 +847,96 @@
     state.countingIn = false;
   }
   function startIntervalCountIn(generation, beginTake) {
-    const { countInBeats, bpm } = Core.INTERVAL_TIMING, beatMilliseconds = 60000 / bpm;
-    const context = audioContext(), audioStart = context.currentTime + .04; state.countingIn = true; state.countInStartedAt = performance.now();
-    state.accompanimentSources = playHarmony(state.harmony, audioStart, countInBeats * beatMilliseconds / 1000, state.exercise.durationSeconds);
-    const animateCountIn = () => { if (!state.countingIn) return; drawRoll(true); state.countInFrame = requestAnimationFrame(animateCountIn); };
-    animateCountIn();
-    els.lab_record.textContent = 'Annulla';
-    for (let index = 0; index < countInBeats; index += 1) {
-      state.metronomeSources.push(metronomeClick(audioStart + index * beatMilliseconds / 1000, index === 0));
-      state.countInTimers.push(setTimeout(() => {
-        if (!state.recording || generation !== state.generation) return;
-        els.lab_state.textContent = 'PREPARATI'; els.lab_countdown.textContent = `${index + 1} / ${countInBeats}`;
-        setPhase(`Preparati · ${index + 1} / ${countInBeats}`, (index + 1) / countInBeats);
-      }, index * beatMilliseconds));
+    const { countInBeats, bpm } = Core.INTERVAL_TIMING, beatSeconds = 60 / bpm;
+    const context = audioContext(), audioStart = context.currentTime + .08;
+    state.countingIn = true; state.countInStartedAt = audioStart; state.takeAudioStart = audioStart + countInBeats * beatSeconds;
+    if (state.exercise.type === 'repeat') {
+      state.metronomeSources.push(...scheduleMusicTimeline(state.repeatTimeline, audioStart,
+        { sustainVoiceUntil: state.takeAudioStart + state.exercise.durationSeconds }));
+      reportAudioEvent('timeline', audioStart, { events: state.repeatTimeline.events, scoringStart: state.takeAudioStart });
+      state.accompanimentSources = playLayeredStrings(state.repeatTimeline, audioStart,
+        state.takeAudioStart + state.exercise.durationSeconds);
+    } else {
+      for (let index = 0; index < countInBeats; index += 1)
+        state.metronomeSources.push(metronomeClick(audioStart + index * beatSeconds, index === 0));
     }
+    if (state.exercise.type !== 'repeat') state.metronomeSources.push(metronomeClick(state.takeAudioStart, true));
+    if (state.exercise.type === 'sing-interval')
+      state.metronomeSources.push(metronomeClick(state.takeAudioStart + Core.INTERVAL_TIMING.noteSeconds, true));
+    els.lab_record.textContent = 'Annulla';
+    let displayedBeat = -1;
+    const animateCountIn = () => {
+      if (!state.countingIn || generation !== state.generation) return;
+      const beat = Math.max(0, Math.min(countInBeats - 1, Math.floor((context.currentTime - audioStart) / beatSeconds)));
+      if (beat !== displayedBeat) {
+        displayedBeat = beat;
+        const isTarget = state.exercise.type === 'repeat' && beat === countInBeats - 1;
+        els.lab_state.textContent = isTarget ? 'LA TUA NOTA' : state.exercise.type === 'repeat' ? 'ASCOLTA' : 'PREPARATI';
+        els.lab_countdown.textContent = `${beat + 1} / ${countInBeats}`;
+        setConductor(isTarget ? 'target' : state.exercise.type === 'repeat' && beat < 2 ? 'preview' : 'countIn', beat);
+        setPhase(isTarget ? 'La tua nota' : beat < 2 && state.exercise.type === 'repeat' ? 'Ascolta l’accordo' : 'Preparati', (beat + 1) / countInBeats);
+      }
+      drawRoll(true);
+      state.countInFrame = requestAnimationFrame(animateCountIn);
+    };
+    animateCountIn();
     state.countInTimers.push(setTimeout(() => {
       if (!state.recording || generation !== state.generation) return;
-      state.countInTimers = []; state.metronomeSources = []; state.countingIn = false;
+      state.countInTimers = []; state.countingIn = false;
       if (state.countInFrame != null) cancelAnimationFrame(state.countInFrame);
-      state.countInFrame = null; beginTake();
-    }, countInBeats * beatMilliseconds));
+      state.countInFrame = null; setConductor('singing'); beginTake();
+    }, Math.max(0, (state.takeAudioStart - context.currentTime) * 1000)));
   }
   async function startCapture() {
     if (!state.exercise || state.recording) return;
     const requestedExercise = state.exercise;
     els.lab_record.disabled = true;
-    try { await Promise.all([ensureMicrophone(), loadExerciseVoices(), loadHarmony()]); } catch (error) { els.lab_note.textContent = error.message; return; }
+    try { await Promise.all([ensureMicrophone(), loadExerciseVoices(), ...(state.activity === 'repeat' ? [loadHarmony()] : [])]); } catch (error) { els.lab_note.textContent = error.message; return; }
     finally { els.lab_record.disabled = !state.exercise; }
     if (state.exercise !== requestedExercise || state.recording) return;
-    const generation = ++state.generation, duration = state.exercise.durationSeconds; state.frames = []; state.elapsedSeconds = 0; state.autoCompleting = false; state.recording = true; state.startedAt = performance.now();
+    const generation = ++state.generation, duration = state.exercise.durationSeconds; state.frames = []; state.visualFrames = []; state.elapsedSeconds = 0; state.autoCompleting = false; state.recording = true; state.startedAt = performance.now();
     if (state.audioUrl) URL.revokeObjectURL(state.audioUrl); state.audioUrl = null; els.lab_play_take.disabled = true;
     els.lab_record.disabled = false; els.lab_record.textContent = 'Disattiva'; els.lab_new.disabled = true; els.lab_feedback.hidden = true; els.lab_state.textContent = 'IN ASCOLTO';
     const beginTake = () => {
       if (!state.recording || generation !== state.generation) return;
       state.startedAt = performance.now(); els.lab_record.textContent = 'Disattiva';
-      const entrance = audioContext().currentTime + .02;
-      state.metronomeSources.push(metronomeClick(entrance, true));
-      if (state.exercise.type === 'sing-interval')
-        state.metronomeSources.push(metronomeClick(entrance + Core.INTERVAL_TIMING.noteSeconds, true));
+      if (state.exercise.type === 'repeat') updateHoldProgress();
       if (window.MediaRecorder) {
         state.chunks = []; const recorder = new MediaRecorder(state.stream, MediaRecorder.isTypeSupported('audio/webm;codecs=opus') ? { mimeType: 'audio/webm;codecs=opus' } : undefined); state.mediaRecorder = recorder;
         recorder.ondataavailable = (event) => { if (event.data.size) state.chunks.push(event.data); };
         recorder.onstop = () => { if (!state.chunks.length) return; state.audioUrl = URL.createObjectURL(new Blob(state.chunks, { type: recorder.mimeType || 'audio/webm' })); els.lab_play_take.disabled = false; };
         recorder.start(250);
       }
-      if (state.exercise.listeningMode === 'continuous' && !state.reference) { const now = audioContext().currentTime + .02; state.reference = playTone(state.exercise.music.note, now, duration, .11, FINAL_DIMINUENDO_SECONDS); }
-      const buffer = new Float32Array(state.analyser.fftSize), smoother = new PitchSmoother(); smoother.configure(state.detectorSettings);
+      const buffer = new Float32Array(state.analyser.fftSize), smoother = new PitchSmoother(), displayPitchFilter = new OneEuroFilter(); smoother.configure(state.detectorSettings);
       const tick = () => {
         if (!state.recording || state.countingIn || generation !== state.generation) return;
-        state.analyser.getFloatTimeDomainData(buffer); const raw = detectPitch(buffer, audioContext().sampleRate, state.detectorSettings), estimate = smoother.update(raw, performance.now()); const elapsed = (performance.now() - state.startedAt) / 1000; state.elapsedSeconds = elapsed;
-        state.frames.push({ time: elapsed, hz: estimate.hz, displayPitch: Number.isFinite(estimate.displayHz) ? 69 + 12 * Math.log2(estimate.displayHz / 440) : null, confidence: estimate.confidence ?? 0, clarity: estimate.clarity ?? 0, confirmationState: estimate.accepted ? 'confirmed' : 'provisional' });
+        state.analyser.getFloatTimeDomainData(buffer); const nowMs = performance.now();
+        const raw = detectPitch(buffer, audioContext().sampleRate, state.detectorSettings), estimate = smoother.update(raw, nowMs); const elapsed = Math.max(0, audioContext().currentTime - state.takeAudioStart); state.elapsedSeconds = elapsed;
+        const trackedPitch = estimate.stable && estimate.accepted && Number.isFinite(estimate.hz)
+          ? 69 + 12 * Math.log2(estimate.hz / 440) : null;
+        const rawPitch = Number.isFinite(estimate.rawHz) ? 69 + 12 * Math.log2(estimate.rawHz / 440) : null;
+        const provisional = ['octave-transition', 'large-jump-transition'].includes(estimate.rejectionReason);
+        let displayPitch = null;
+        if (provisional) { displayPitchFilter.reset(); displayPitch = rawPitch; }
+        else if (trackedPitch == null) displayPitchFilter.reset();
+        else displayPitch = displayPitchFilter.filter(trackedPitch, nowMs / 1000);
+        const confirmationState = provisional ? 'provisional' : trackedPitch != null ? 'confirmed' : null;
+        const frame = { time: elapsed, hz: estimate.hz, displayPitch, confidence: estimate.confidence ?? 0,
+          clarity: estimate.clarity ?? 0, confirmationState };
+        state.frames.push(frame);
+        const previousVisual = state.visualFrames.at(-1);
+        if (!previousVisual || elapsed - previousVisual.time >= .025) state.visualFrames.push(frame);
         els.lab_level.value = raw.rms || 0; els.lab_countdown.textContent = Math.max(0, duration - elapsed).toFixed(1); drawRoll(true);
         if (state.exercise.type === 'sing-interval') {
           els.lab_state.textContent = elapsed < duration / 2 ? 'CANTA · PRIMA NOTA' : 'CAMBIA · SECONDA NOTA';
           setPhase(elapsed < duration / 2 ? 'Canta la prima nota' : 'Ora la seconda nota', elapsed / duration);
-        } else setPhase(elapsed < duration - FINAL_DIMINUENDO_SECONDS ? 'Segui coro e accordo' : 'Diminuendo', elapsed / duration);
-        const progress = state.exercise.type === 'repeat' ? Core.evaluatePitchProgress(state.exercise.music.note, state.frames, elapsed) : null;
+        } else if (state.exercise.type !== 'repeat') setPhase(elapsed < duration - FINAL_DIMINUENDO_SECONDS ? 'Segui coro e accordo' : 'Diminuendo', elapsed / duration);
+        const progress = state.exercise.type === 'repeat' ? evaluateCurrentPitchProgress() : null;
+        if (progress) updateHoldProgress(progress);
         if (progress?.status === 'acquired' || progress?.status === 'stabilizing') els.lab_state.textContent = 'STABILIZZA';
         else if (progress?.status === 'searching') els.lab_state.textContent = 'CERCA LA NOTA';
-        if (elapsed >= duration) finishCapture(generation, progress?.completed ? progress.status : 'completed'); else requestAnimationFrame(tick);
+        if (progress?.completed || elapsed >= duration) finishCapture(generation, progress?.completed ? progress.status : 'completed');
+        else requestAnimationFrame(tick);
       }; requestAnimationFrame(tick);
     };
     startIntervalCountIn(generation, beginTake); syncStart();
@@ -721,10 +951,10 @@
       catch (error) { if (token === preparationId) { preparing = false; setPhase(error.message); syncStart(); } }
       return;
     }
-    cancelPendingAdvance(); soloStartedAt = null;
+    cancelPendingAdvance(); stopReplay(); soloStartedAt = null;
     const token = ++preparationId; preparing = true; syncStart();
     try {
-      await Promise.all([loadExerciseVoices(), loadHarmony()]); await audioContext().resume();
+      await Promise.all([loadExerciseVoices(), ...(state.activity === 'sustain' ? [loadHarmony()] : [])]); await audioContext().resume();
       if (token !== preparationId) return;
       if (state.activity !== 'ear') await ensureMicrophone();
       if (token !== preparationId) return;
@@ -740,21 +970,26 @@
         const now = audioContext().currentTime + .03, music = state.exercise.music;
         if (music.interval) {
           state.metronomeSources.push(playTone(music.interval.first, now, .8).source);
-          if (state.exercise.listeningMode !== 'construction') state.metronomeSources.push(playTone(music.interval.second, now + .95, .8).source);
+          state.metronomeSources.push(playTone(music.interval.second, now + (state.exercise.listeningMode === 'harmonic' ? 0 : .95), .8).source);
         }
         await new Promise(resolve => setTimeout(resolve, 1850));
         if (token !== preparationId) return;
         preparing = false; setPhase('La seconda nota è…'); syncStart();
       } else {
+        if (state.activity === 'sing-interval' && !(await previewInterval(token))) return;
+        if (token !== preparationId) return;
         preparing = false;
         await startCapture();
       }
     } catch (error) { if (token === preparationId) { preparing = false; setPhase(error.message); syncStart(); } }
   }
-  function stopCapture(cancelled = false) { if (!state.recording) return; clearCountIn(); state.recording = false; state.generation += 1; if (state.mediaRecorder?.state === 'recording') { if (cancelled) state.mediaRecorder.onstop = null; state.mediaRecorder.stop(); } if (cancelled) state.chunks = []; els.lab_record.disabled = !state.exercise; els.lab_record.textContent = 'Microfono'; els.lab_new.disabled = false; els.lab_level.value = 0; if (cancelled) { els.lab_state.textContent = 'PRONTO'; if (!state.reference) els.lab_countdown.textContent = '—'; } drawRoll(true); }
+  function stopCapture(cancelled = false) { if (!state.recording) return; clearCountIn(); state.recording = false; state.generation += 1; if (state.mediaRecorder?.state === 'recording') { if (cancelled) state.mediaRecorder.onstop = null; state.mediaRecorder.stop(); } if (cancelled) state.chunks = []; els.lab_record.disabled = !state.exercise; els.lab_record.textContent = 'Microfono'; els.lab_new.disabled = false; els.lab_level.value = 0; hideHoldProgress(); if (cancelled) { els.lab_state.textContent = 'PRONTO'; if (!state.reference) els.lab_countdown.textContent = '—'; } drawRoll(true); }
   function finishCapture(generation, completionReason = 'manual') {
     if (!state.recording || generation !== state.generation) return; state.recording = false; if (state.mediaRecorder?.state === 'recording') state.mediaRecorder.stop(); els.lab_record.disabled = false; els.lab_record.textContent = 'Microfono'; els.lab_new.disabled = false; els.lab_level.value = 0; els.lab_state.textContent = 'COMPLETATO';
-    stopReference(); state.accompanimentSources = [];
+    hideHoldProgress();
+    stopReference(); clearCountIn();
+    state.answerRevealed = true;
+    setConductor('feedback');
     // Completion can advance without opening feedback: expose the full take
     // immediately rather than leaving the last live (temporally faded) frame.
     drawRoll(true);
@@ -762,17 +997,18 @@
     const exercise = state.exercise; let analysis;
     if (exercise.type === 'sing-interval') analysis = Core.analyseSungInterval(exercise.music.interval, state.frames, exercise.durationSeconds / 2, exercise.durationSeconds);
     else analysis = Core.analyseSustained(exercise.music.note, state.frames, exercise.durationSeconds);
-    if (exercise.type === 'repeat') analysis.incrementalProgress = Core.evaluatePitchProgress(exercise.music.note, state.frames, state.elapsedSeconds);
+    if (exercise.type === 'repeat') analysis.incrementalProgress = evaluateCurrentPitchProgress();
     analysis.completionReason = completionReason; analysis.timeToCompletionSeconds = state.elapsedSeconds;
+    if (exercise.type === 'sing-interval') analysis.assisted = state.assisted;
+    if (exercise.type === 'repeat') analysis.timeToAcquireSeconds = analysis.incrementalProgress.timeToAcquireSeconds;
     if (state.activity === 'repeat' && state.pitchSession) state.pitchSession.outcomes[state.pitchSession.index] = Core.pitchTrialOutcome(completionReason, analysis);
     if (state.activity === 'sing-interval' && state.singSession) state.singSession.outcomes[state.singSession.index] = {
       reliable: analysis.reliable, relativeCorrect: analysis.relativeCorrect, firstAbsoluteCorrect: analysis.firstAbsoluteCorrect,
-      secondAbsoluteCorrect: analysis.secondAbsoluteCorrect, mode: exercise.listeningMode, interval: exercise.music.interval.semitones };
-    saveResult(Core.result({ exercise, actualConfig: { ...exercise.music, role: state.role, range: state.range, mode: exercise.listeningMode }, analysis, confidence: analysis.metrics?.confidence ?? analysis.confidence ?? 0, feedbackShown: analysis.message, durationSeconds: state.elapsedSeconds }));
+      secondAbsoluteCorrect: analysis.secondAbsoluteCorrect, assisted: state.assisted, mode: exercise.listeningMode, interval: exercise.music.interval.semitones };
+    saveResult(Core.result({ exercise, actualConfig: { ...exercise.music, role: state.role, range: state.range, mode: exercise.listeningMode, assisted: state.assisted }, analysis, confidence: analysis.metrics?.confidence ?? analysis.confidence ?? 0, feedbackShown: analysis.message, durationSeconds: state.elapsedSeconds }));
     const earlySuccess = completionReason === 'reached' || completionReason === 'reached-with-correction';
     if (earlySuccess && state.activity === 'repeat' && state.pitchSession) {
-      if (state.pitchSession.index === state.pitchSession.notes.length - 1) showPitchSessionSummary();
-      else { els.lab_feedback.hidden = true; offerPitchAdvance(completionReason); }
+      els.lab_feedback.hidden = true; offerPitchAdvance(completionReason, analysis.incrementalProgress);
     } else showFeedback(analysis);
   }
   const number = (value) => Number.isFinite(value) ? `${value > 0 ? '+' : ''}${value.toFixed(0)} ¢` : '—';
@@ -789,6 +1025,8 @@
     els.lab_next.textContent = repeatOutcome && !repeatOutcome.reliable ? 'Riprova la stessa nota' : lastPitchTrial || lastSingTrial ? 'Concludi blocco' : 'Continua';
     const metrics = analysis.metrics ? [['Scarto mediano', number(analysis.metrics.medianCents)], ['Deriva', number(analysis.metrics.driftCents)], ['Copertura affidabile', `${Math.round(analysis.metrics.coverage * 100)}%`], ['Affidabilità', analysis.metrics.reliable ? 'Buona' : 'Insufficiente']]
       : [['Prima nota', number(analysis.firstErrorCents)], ['Seconda nota', number(analysis.secondErrorCents)], ['Errore relativo', number(analysis.relativeErrorCents)], ['Intervallo', analysis.relativeCorrect ? 'Corretto' : 'Da affinare'], ['Transizione', Number.isFinite(analysis.transitionSeconds) ? `${analysis.transitionSeconds.toFixed(2)} s` : '—']];
+    if (state.activity === 'sing-interval') metrics.push(['Aiuto', analysis.assisted ? 'Seconda nota mostrata' : 'Senza aiuto']);
+    els.lab_metrics.classList.toggle('lab-interval-metrics', state.activity === 'sing-interval');
     els.lab_metrics.innerHTML = metrics.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join(''); drawChart(analysis);
   }
   function drawChart(analysis) {
@@ -815,7 +1053,16 @@
     button.addEventListener('lostpointercapture', () => drawKeys.delete(key));
   }
   els.lab_guided.addEventListener('click', () => { stopDrawing(true); stopCapture(true); startGuidedSession().catch((error) => { els.lab_guided.disabled = false; els.lab_guided.textContent = 'Allenamento di oggi'; els.lab_note.textContent = error.message; }); });
-  els.lab_new.addEventListener('click', newExercise); els.lab_listen.addEventListener('click', startExercise); els.lab_continue.addEventListener('click', () => { cancelPendingAdvance(); advancePitchSession(); }); els.lab_retry.addEventListener('click', () => { els.lab_feedback.hidden = true; startExercise(); }); els.lab_next.addEventListener('click', advanceCurrentSession);
+  els.lab_new.addEventListener('click', () => { newExercise(false); void startExercise(); });
+  els.lab_listen.addEventListener('click', startExercise);
+  els.lab_hint.addEventListener('click', () => {
+    if (state.activity !== 'sing-interval' || state.exercise?.listeningMode !== 'construction' || state.assisted) return;
+    state.assisted = true; state.answerRevealed = true; els.lab_hint.hidden = true;
+    setConductor(state.recording ? 'singing' : 'ready', -1, 'Aiuto usato: la seconda nota è visibile');
+    drawMusicViews(true);
+    if (!state.recording && !preparing) replayReference();
+  });
+  els.lab_continue.addEventListener('click', () => { cancelPendingAdvance(); advancePitchSession(); }); els.lab_retry.addEventListener('click', () => { els.lab_feedback.hidden = true; startExercise(); }); els.lab_next.addEventListener('click', advanceCurrentSession);
   els.lab_play_take.addEventListener('click', () => { if (state.audioUrl) new Audio(state.audioUrl).play(); });
   for (let midi = 36; midi <= 84; midi += 1) { els.lab_low.add(new Option(Core.midiToName(midi), midi)); els.lab_high.add(new Option(Core.midiToName(midi), midi)); }
   els.lab_settings.addEventListener('click', () => { els.lab_role.value = state.role; els.lab_low.value = state.range.lowMidi; els.lab_high.value = state.range.highMidi; els.lab_settings_dialog.showModal(); });
@@ -823,7 +1070,7 @@
   els.lab_settings_close.addEventListener('click', () => { stopMicrophoneCheck(); els.lab_settings_dialog.close(); });
   els.lab_role.addEventListener('change', () => { const preset = ROLE_RANGES[els.lab_role.value]; els.lab_low.value = preset.lowMidi; els.lab_high.value = preset.highMidi; });
   els.lab_settings_save.addEventListener('click', () => { const next = { lowMidi: Number(els.lab_low.value), highMidi: Number(els.lab_high.value) }; if (!Core.validateRange(next)) { els.lab_note.textContent = 'La nota più alta deve essere uguale o superiore a quella più bassa.'; return; } stopMicrophoneCheck(); state.role = els.lab_role.value; state.range = next; state.pitchSession = null; state.earSession = null; state.singSession = null; localStorage.setItem(`${STORE}:role`, state.role); localStorage.setItem(`${STORE}:range`, JSON.stringify(next)); renderRange(); els.lab_settings_dialog.close(); state.exercise = null; renderActivity(); newExercise(false); });
-  window.addEventListener('beforeunload', () => { stopMicrophoneCheck(); stopReference(); stopCapture(true); state.stream?.getTracks().forEach((track) => track.stop()); });
+  window.addEventListener('beforeunload', () => { stopMicrophoneCheck(); stopReference(); stopReplay(); stopCapture(true); state.stream?.getTracks().forEach((track) => track.stop()); });
   window.addEventListener('resize', () => drawMusicViews(state.activity !== 'ear' || Boolean(els.lab_answer.dataset.answered)));
   renderRange(); renderActivity(); newExercise(false);
   if (needsRoleSetup) { els.lab_role.value = state.role; els.lab_low.value = state.range.lowMidi; els.lab_high.value = state.range.highMidi; els.lab_settings_dialog.showModal(); }

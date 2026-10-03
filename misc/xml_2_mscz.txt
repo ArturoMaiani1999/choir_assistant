@@ -1,4 +1,15 @@
 & "C:\Program Files\MuseScore 4\bin\MuseScore4.exe" `
   -f `
-  -o "sheets\ave-verum\ave_verum.mscz" `
-  "sheets\ave-verum\ave_verum.xml"
+  -o "sheets\cantico-dell-agnello\cantico-dell-agnello.mscz" `
+  "sheets\cantico-dell-agnello\cantico-dell-agnello.xml"
+
+  & "C:\Program Files\MuseScore 4\bin\MuseScore4.exe" `
+  -f `
+  -o "sheets\santo-frisina/santo-frisina.mscz" `
+  "sheets\santo-frisina/santo-frisina.xml"
+
+
+   & "C:\Program Files\MuseScore 4\bin\MuseScore4.exe" `
+  -f `
+  -o "sheets\alto-e-glorioso-dio\alto-e-glorioso-dio.mscz" `
+  "sheets\alto-e-glorioso-dio\alto-e-glorioso-dio.xml"

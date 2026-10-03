@@ -106,36 +106,77 @@ def main() -> int:
                     document.querySelector('#lab-listen').click();
                     for (let attempt = 0; attempt < 160 && !window.__voiceLabAudioEvents.some((event) => event.kind === 'voice'); attempt += 1)
                       await new Promise((resolve) => setTimeout(resolve, 50));
-                    await new Promise((resolve) => setTimeout(resolve, 250));
+                    await new Promise((resolve) => setTimeout(resolve, 900));
                     const snapshot = { audioEvents: window.__voiceLabAudioEvents,
                       state: document.querySelector('#lab-state').textContent,
                       countdown: Number(document.querySelector('#lab-countdown').textContent) };
-                    await new Promise((resolve) => setTimeout(resolve, 30200));
-                    const results = JSON.parse(localStorage.getItem('choir-voice-lab:v1:results') || '[]');
-                    const result = results.find((item) => item.exerciseType === 'repeat');
-                    snapshot.finalState = document.querySelector('#lab-state').textContent;
-                    snapshot.completionSeconds = result?.analysis?.timeToCompletionSeconds;
+                    snapshot.progressVisible = !document.querySelector('#lab-hold-progress').hidden;
+                    for (let attempt = 0; attempt < 100 && Number(document.querySelector('#lab-hold-track').getAttribute('aria-valuenow')) < .4; attempt += 1)
+                      await new Promise((resolve) => setTimeout(resolve, 100));
+                    snapshot.progressSeconds = Number(document.querySelector('#lab-hold-track').getAttribute('aria-valuenow'));
+                    snapshot.progressVisible = !document.querySelector('#lab-hold-progress').hidden;
                     return snapshot;
                   })()
                 """, "awaitPromise": True, "returnByValue": True})["result"]["value"]
+                assert early["progressVisible"] and .4 <= early["progressSeconds"] < 1.5, early
+                progress_shot = command(socket, 37, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
+                (ROOT / "artifacts" / "voice-lab-pitch-progress.png").write_bytes(base64.b64decode(progress_shot["data"]))
+                success = command(socket, 38, "Runtime.evaluate", {"expression": """
+                  (async () => {
+                    for (let attempt = 0; attempt < 100 && document.querySelector('#lab-pitch-success').hidden; attempt += 1)
+                      await new Promise((resolve) => setTimeout(resolve, 100));
+                    const success = {
+                      visible: !document.querySelector('#lab-pitch-success').hidden,
+                      note: document.querySelector('#lab-success-note').textContent,
+                      time: document.querySelector('#lab-success-time').textContent,
+                      hold: document.querySelector('#lab-hold-track').getAttribute('aria-valuenow'),
+                      state: document.querySelector('#lab-state').textContent,
+                    };
+                    const results = JSON.parse(localStorage.getItem('choir-voice-lab:v1:results') || '[]');
+                    const result = results.find((item) => item.exerciseType === 'repeat');
+                    return { success, completionSeconds: result?.analysis?.timeToCompletionSeconds,
+                      acquireSeconds: result?.analysis?.timeToAcquireSeconds };
+                  })()
+                """, "awaitPromise": True, "returnByValue": True})["result"]["value"]
+                early.update(success)
                 harmony_events = [event for event in early["audioEvents"] if event["kind"] == "harmony"]
                 voice_events = [event for event in early["audioEvents"] if event["kind"] == "voice"]
                 metronome_events = [event for event in early["audioEvents"] if event["kind"] == "metronome"]
-                assert len(harmony_events) == 1 and len(voice_events) == 1 and len(metronome_events) >= 5, early["audioEvents"]
-                harmony, voice = harmony_events[0], voice_events[0]
-                assert abs(voice["at"] - harmony["entry"]) < .12, (harmony, voice)
-                assert 29.9 <= harmony["end"] - harmony["entry"] <= 30.1, harmony
-                assert abs(harmony["diminuendoStart"] - (harmony["end"] - 4.8)) < .01, harmony
-                assert abs(voice["diminuendoStart"] - (voice["end"] - 4.8)) < .01, voice
-                assert harmony["sustainGain"] >= .055, harmony
-                assert min(harmony["sampleRms"]) > .001 and harmony["estimatedUnderVoiceRms"] > .003, harmony
-                assert min(harmony["sampleDurations"]) >= 35 and harmony["minimumSustainRms"] > .001, harmony
-                assert not [event for event in voice_events if event["at"] < harmony["entry"] - .12], voice_events
+                pluck_events = [event for event in early["audioEvents"] if event["kind"] == "pluck"]
+                string_events = [event for event in early["audioEvents"] if event["kind"] == "string-layer"]
+                timeline_events = [event for event in early["audioEvents"] if event["kind"] == "timeline"]
+                assert not harmony_events and len(pluck_events) == 3 and len(string_events) == 3 and len(voice_events) == 1 and not metronome_events and len(timeline_events) == 1, early["audioEvents"]
+                assert [(event["at"], event["midi"]) for event in string_events] == [(event["at"], event["midi"]) for event in pluck_events], early["audioEvents"]
+                assert all(event["end"] > timeline_events[0]["scoringStart"] + 29 for event in string_events), string_events
+                voice = voice_events[0]
+                assert pluck_events[0]["at"] < pluck_events[1]["at"] < pluck_events[2]["at"] < voice["at"] < timeline_events[0]["scoringStart"], early["audioEvents"]
+                assert voice["scoringAt"] == timeline_events[0]["scoringStart"], voice
+                assert voice["end"] > voice["scoringAt"] + 29 and 0 < voice["sustainedGain"] < voice["gain"], voice
+                assert voice["transitionEnd"] > voice["scoringAt"] + 1, voice
                 assert voice["anchor"] in (50, 56, 62, 67) and voice["role"] == "tenor", voice
-                assert voice["sampleRms"] > .001 and voice["sourceDuration"] >= 35, voice
-                assert early["state"] in ("PREPARATI", "CERCA LA NOTA", "STABILIZZA"), early
-                assert early["state"] == "PREPARATI" or 29 < early["countdown"] < 30, early
-                assert early["finalState"] in ("COMPLETATO", "NOTA CENTRATA") and early["completionSeconds"] >= 29.5, early
+                assert voice["sampleRms"] > .001, voice
+                assert early["state"] in ("ASCOLTA", "LA TUA NOTA", "CERCA LA NOTA", "STABILIZZA"), early
+                assert early["progressVisible"] and early["success"]["visible"], early
+                assert early["success"]["state"] in ("NOTA TROVATA", "NOTA CENTRATA"), early
+                assert early["success"]["hold"] == "1.5" and "s" in early["success"]["time"], early
+                assert 1.5 <= early["completionSeconds"] < 10 and 0 <= early["acquireSeconds"] < early["completionSeconds"] - 1.4, early
+                success_shot = command(socket, 35, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
+                (ROOT / "artifacts" / "voice-lab-pitch-success.png").write_bytes(base64.b64decode(success_shot["data"]))
+                command(socket, 39, "Emulation.setDeviceMetricsOverride", {"width": 390, "height": 780, "deviceScaleFactor": 1, "mobile": True})
+                mobile_shot = command(socket, 40, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
+                (ROOT / "artifacts" / "voice-lab-pitch-success-mobile.png").write_bytes(base64.b64decode(mobile_shot["data"]))
+                command(socket, 41, "Emulation.clearDeviceMetricsOverride")
+                advanced = command(socket, 36, "Runtime.evaluate", {"expression": """
+                  (async () => {
+                    for (let attempt = 0; attempt < 50 && !document.querySelector('#lab-session-progress').textContent.startsWith('2 di 4'); attempt += 1)
+                      await new Promise(resolve => setTimeout(resolve, 100));
+                    return { progress: document.querySelector('#lab-session-progress').textContent,
+                      cardHidden: document.querySelector('#lab-pitch-success').hidden,
+                      holdHidden: document.querySelector('#lab-hold-progress').hidden };
+                  })()
+                """, "awaitPromise": True, "returnByValue": True})["result"]["value"]
+                assert advanced["progress"] == "2 di 4" and advanced["cardHidden"] and advanced["holdHidden"], advanced
+                early["advanced"] = advanced
                 metrics["continuousReference"] = early
                 sustain = command(socket, 30, "Runtime.evaluate", {"expression": """
                   (async () => {
@@ -228,7 +269,7 @@ def main() -> int:
                     await new Promise((resolve) => setTimeout(resolve, 2500));
                     const completedState = document.querySelector('#lab-state').textContent;
                     const feedbackVisible = !document.querySelector('#lab-feedback').hidden;
-                    const completedButton = document.querySelector('#lab-listen').getAttribute('aria-label') === 'Inizia' ? 'Microfono' : '';
+                    const completedButton = document.querySelector('#lab-listen').getAttribute('aria-label') === 'Ascolta e canta' ? 'Microfono' : '';
                     document.querySelector('[data-activity="sing-interval"]').click();
                     return {
                       progress: document.querySelector('#lab-session-progress').textContent,

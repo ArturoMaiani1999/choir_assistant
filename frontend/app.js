@@ -4,6 +4,7 @@ const { detectPitch, PitchSmoother, OctaveAwarePitchTracker, yinCandidates, deco
 const PitchShared = window.ChoirPitchShared;
 const FluidPitchTrail = window.ChoirFluidPitchTrail;
 const { OneEuroFilter } = window.ChoirOneEuro;
+const UiPreferences = window.ChoirUiPreferences;
 const VocalFeedback = window.VocalFeedback;
 const RUNTIME_CONFIG = window.ChoirRuntimeConfig ?? Object.freeze({});
 
@@ -28,8 +29,8 @@ const UI_CONFIG = Object.freeze({
 });
 
 const els = Object.fromEntries([
-  'transpose', 'settings-display-pitch-algorithm',
-  'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-own', 'voice-mixer-close',
+  'transpose', 'settings-display-pitch-algorithm', 'settings-text-scale', 'settings-text-scale-value',
+  'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
   'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close', 'settings-dialog', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-reset', 'settings-close',
   'result-dialog', 'result-text', 'result-progress', 'retry', 'next-phrase', 'result-close',
   'phrase-loop', 'note-names',
@@ -41,6 +42,7 @@ const els = Object.fromEntries([
 ].map((id) => [id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]));
 
 const state = {
+  lyricTextScale: UiPreferences.read(),
   transpose: 0,
   phrase: null,
   autoLoop: false,
@@ -124,6 +126,8 @@ function formatRmsThreshold(value) {
 }
 
 function updateDetectorSettingsUi() {
+  els.settingsTextScale.value = String(Math.round(state.lyricTextScale * 100));
+  els.settingsTextScaleValue.textContent = `${Math.round(state.lyricTextScale * 100)}%`;
   const threshold = state.detectorSettings.rmsThreshold;
   els.settingsV1Rms.value = String(rmsSliderFromThreshold(threshold));
   els.settingsV1RmsValue.textContent = `${formatRmsThreshold(threshold)} RMS`;
@@ -334,8 +338,14 @@ function configureVoiceStems() {
     state.voiceStemAudio.set(partId, audio);
   }
   syncVoiceStemLevels();
-  els.accompanimentMode.textContent = !mixerAvailable ? 'Mix completo'
-    : state.voiceStemAudio.size ? `Voci · ${state.voiceStemAudio.size}` : 'Solo base';
+  const availableIds = Object.keys(stems), selectedCount = state.voiceStemAudio.size;
+  const ownPart = state.runtime?.parts.find((part) => part.id === state.runtime.selectedPartId);
+  els.accompanimentMode.textContent = !mixerAvailable ? 'Mix non separabile'
+    : selectedCount === availableIds.length ? 'Mix completo'
+      : selectedCount === 1 && state.voiceStemAudio.has(state.runtime.selectedPartId) ? `Solo ${ownPart?.name ?? 'la mia parte'}`
+        : selectedCount ? `Voci · ${selectedCount}` : state.backingManifest?.accompaniment_file ? 'Solo base' : 'Nessuna voce';
+  els.accompanimentMode.title = mixerAvailable
+    ? 'Scegli quali parti vocali ascoltare' : 'Questo brano dispone soltanto del mix audio completo';
 }
 
 async function playVoiceStems() {
@@ -879,7 +889,14 @@ function drawPitchLane(beat) {
     const graceEnd = timeToX(event.onsetBeat + event.attackGraceBeats, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
     ctx.fillStyle = 'rgba(7,19,25,.24)'; ctx.fillRect(x, y - blockHeight / 2, Math.max(0, graceEnd - x), blockHeight);
     const lyric = event.lyric ?? '';
-    if (lyric && endX - x > 18) { ctx.fillStyle = '#d6cbb6'; ctx.textAlign = 'left'; ctx.font = `${rect.width < 700 ? 9 : 11}px Georgia, serif`; ctx.fillText(lyric, x + 2, y - Math.max(9, blockHeight)); }
+    if (lyric && endX - x > 18) {
+      const lyricFontSize = (rect.width < 700 ? 9 : 11) * state.lyricTextScale;
+      ctx.fillStyle = '#d6cbb6';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.font = `${lyricFontSize}px Georgia, serif`;
+      ctx.fillText(lyric, x + 2, y - blockHeight / 2 - 2);
+    }
   });
 
   ctx.save();
@@ -926,7 +943,6 @@ function drawPitchLane(beat) {
   }
 
   ctx.strokeStyle = '#f0cf8f'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(Math.round(nowX) + .5, plot.top); ctx.lineTo(Math.round(nowX) + .5, plot.bottom); ctx.stroke();
-  ctx.fillStyle = '#718788'; ctx.font = '9px Inter, sans-serif'; ctx.textAlign = 'left'; ctx.fillText('PASSATO', plot.left + 3, plot.bottom + 8); ctx.textAlign = 'right'; ctx.fillText('PROSSIME NOTE', plot.right - 3, plot.bottom + 8);
 }
 
 function renderReadout(beat, running) {
@@ -2673,9 +2689,9 @@ function savePreferences() {
   try {
     localStorage.setItem(preferenceKey(), JSON.stringify({ transpose: state.transpose,
       speed: els.playbackSpeed.value, volume: els.volume.value, metronome: els.metronomeVolume.value,
-      measure: measureIndexAt(state.clock.snapshot().beat),
       noteNames: state.noteNames, noteNamesPreferenceVersion: 2,
-      scoreHeight: Math.round(els.scoreViewport.clientHeight), v1RmsThreshold: state.detectorSettings.rmsThreshold,
+      scoreHeight: Math.round(els.scoreViewport.clientHeight), scoreHeightPreferenceVersion: 2,
+      v1RmsThreshold: state.detectorSettings.rmsThreshold,
       v1WeakVoiceMode: state.detectorSettings.weakVoiceMode,
       v1FastAlpha: state.detectorSettings.fastAlpha, v1SlowAlpha: state.detectorSettings.slowAlpha,
       v1MedianWindowFrames: state.detectorSettings.medianWindowFrames,
@@ -2689,6 +2705,7 @@ function savePreferences() {
 }
 
 function restorePreferences() {
+  state.lyricTextScale = UiPreferences.apply(UiPreferences.read());
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(preferenceKey())) ?? {}; } catch (_) {}
   let detectorSaved = null;
@@ -2707,8 +2724,9 @@ function restorePreferences() {
   // users to Italian while preserving any deliberate choice made from now on.
   state.noteNames = saved.noteNamesPreferenceVersion === 2 && saved.noteNames === 'international' ? 'international' : 'italian';
   els.noteNames.value = state.noteNames;
-  const measures = buildOccurrenceMeasures(state.runtime);
-  state.selectedMeasureIndex = Number.isInteger(saved.measure) ? Math.max(0, Math.min(measures.length - 1, saved.measure)) : 0;
+  // Playback position is session-only. Opening a piece must always begin at
+  // the first measure instead of restoring a stale position from localStorage.
+  state.selectedMeasureIndex = 0;
   state.phrase = null;
   els.playbackSpeed.value = ['0.5', '0.75', '1'].includes(saved.speed) ? saved.speed : '1';
   els.volume.value = Number.isFinite(Number(saved.volume)) ? Math.max(0, Math.min(100, Number(saved.volume))) : 62;
@@ -2740,7 +2758,7 @@ function restorePreferences() {
   applyLiveTrackerSettings();
   updateDetectorSettingsUi();
   try { saveGlobalDetectorPreferences(); } catch (_) { /* Storage is optional. */ }
-  if (Number.isFinite(saved.scoreHeight)) setScoreHeight(saved.scoreHeight);
+  if (saved.scoreHeightPreferenceVersion === 2 && Number.isFinite(saved.scoreHeight)) setScoreHeight(saved.scoreHeight);
 }
 
 function scoreHeightLimits() {
@@ -2829,6 +2847,11 @@ function bindControls() {
   els.voiceMixerClose.addEventListener('click', () => els.voiceMixerDialog.close());
   els.voiceMixerOwn.addEventListener('click', () => {
     state.selectedVoiceIds = new Set([state.runtime.selectedPartId]);
+    configureVoiceStems(); renderVoiceMixer();
+    if (state.clock.running) void playVoiceStems();
+  });
+  els.voiceMixerAll.addEventListener('click', () => {
+    state.selectedVoiceIds = new Set(Object.keys(state.backingManifest?.voice_stems ?? {}));
     configureVoiceStems(); renderVoiceMixer();
     if (state.clock.running) void playVoiceStems();
   });
@@ -3022,6 +3045,15 @@ function bindControls() {
   els.backingAudio.addEventListener('pause', () => { updatePlaybackButton(); if (!state.clock.running) render(); });
   els.backingAudio.addEventListener('error', () => showToast(`Errore audio (${els.backingAudio.error?.code ?? 'sconosciuto'}).`));
   els.settings.addEventListener('click', openDetectorSettings);
+  els.settingsTextScale.addEventListener('input', () => {
+    state.lyricTextScale = UiPreferences.apply(Number(els.settingsTextScale.value) / 100);
+    els.settingsTextScaleValue.textContent = `${Math.round(state.lyricTextScale * 100)}%`;
+    render();
+  });
+  els.settingsTextScale.addEventListener('change', () => {
+    state.lyricTextScale = UiPreferences.write(Number(els.settingsTextScale.value) / 100);
+    showToast(`Testo del piano roll: ${Math.round(state.lyricTextScale * 100)}%.`);
+  });
   els.settingsDisplayPitchAlgorithm.addEventListener('change', () => {
     state.displayPitchAlgorithm = els.settingsDisplayPitchAlgorithm.value === 'v1' ? 'v1' : 'v1+display-filter';
     state.displayPitchFilter.reset(); savePreferences(); render();
@@ -3070,6 +3102,7 @@ function bindControls() {
     });
   }
   els.settingsReset.addEventListener('click', () => {
+    state.lyricTextScale = UiPreferences.write(UiPreferences.DEFAULT_LYRIC_SCALE);
     state.detectorSettings.rmsThreshold = V1_RMS_THRESHOLD.default;
     state.detectorSettings.weakVoiceMode = false;
     Object.assign(state.detectorSettings, V1_TRACKER_DEFAULTS);
@@ -3279,8 +3312,8 @@ async function loadPracticePiece(pieceId) {
   const libraryPiece = state.library.find((piece) => piece.piece_id === bundleManifest.piece_id);
   els.pieceTitle.textContent = libraryPiece ? pieceDisplayTitle(libraryPiece) : state.runtime.title.split('·')[0].trim();
   els.scorePartLabel.textContent = parts.find((part) => part.id === state.runtime.selectedPartId)?.name ?? 'Parte';
-  const restoredMeasure = state.phrase?.start ?? state.selectedMeasureIndex;
-  bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(restoredMeasure); updatePlaybackButton();
+  const initialMeasure = state.phrase?.start ?? 0;
+  bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(initialMeasure); updatePlaybackButton();
   if (state.phrase && deepLink.get('autoplayPhrase') === '1') setTimeout(() => { if (!state.clock.running) togglePlayback(); }, 250);
   window.addEventListener('message', (event) => {
     if (event.origin === location.origin && event.data?.type === 'choir-bundle-approval') location.reload();

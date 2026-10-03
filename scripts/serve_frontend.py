@@ -13,6 +13,7 @@ import sys
 import math
 import hashlib
 import time
+import zipfile
 from copy import deepcopy
 from urllib.parse import urlparse, parse_qs
 from email.parser import BytesParser
@@ -37,7 +38,12 @@ MUSESCORE_CANDIDATES = (
     Path(r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe"),
 )
 _library_lock = threading.Lock()
-LIBRARY_ASSET_LAYOUT_VERSION = 8
+LIBRARY_ASSET_LAYOUT_VERSION = 9
+DEFAULT_SCORE_TEMPO_BPM = 80.0
+SOURCE_FINGERPRINT_VERSION = 1
+_IGNORED_MSCZ_MEMBERS = frozenset({"META-INF/container.xml", "viewsettings.json"})
+_IGNORED_MSCX_SCORE_TAGS = frozenset({"showInvisible", "showUnprintable", "showFrames", "showMargins", "open"})
+_IGNORED_MSCX_META_TAGS = frozenset({"audioComUrl", "platform", "sourceRevisionId"})
 
 
 def _musescore() -> str:
@@ -66,6 +72,108 @@ def _piece_id(value: str) -> str:
     return value.lower().replace("_", "-")
 
 
+def _strip_xml_indentation(element: ET.Element) -> None:
+    if element.text is not None and not element.text.strip():
+        element.text = None
+    if element.tail is not None and not element.tail.strip():
+        element.tail = None
+    for child in element:
+        _strip_xml_indentation(child)
+
+
+def _canonical_mscx(payload: bytes) -> bytes:
+    """Remove editor-only state while preserving notation, layout and playback data."""
+    root = ET.fromstring(payload)
+    score = root.find("Score")
+    if score is not None:
+        for child in list(score):
+            if child.tag in _IGNORED_MSCX_SCORE_TAGS:
+                score.remove(child)
+            elif child.tag == "metaTag" and child.get("name") in _IGNORED_MSCX_META_TAGS:
+                score.remove(child)
+    for parent in root.iter():
+        for child in list(parent):
+            if child.tag == "eid":
+                parent.remove(child)
+    _strip_xml_indentation(root)
+    xml = ET.tostring(root, encoding="unicode")
+    return ET.canonicalize(xml_data=xml).encode("utf-8")
+
+
+def _canonical_json(payload: bytes) -> bytes:
+    try:
+        value = json.loads(payload.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError):
+        return payload
+    return json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
+
+
+def _source_hashes(source: Path) -> tuple[str, str]:
+    """Return raw provenance and a stable build fingerprint for a MuseScore archive."""
+    payload = source.read_bytes()
+    raw_hash = hashlib.sha256(payload).hexdigest()
+    if source.suffix.lower() != ".mscz":
+        return raw_hash, raw_hash
+    try:
+        digest = hashlib.sha256()
+        with zipfile.ZipFile(source) as archive:
+            members = sorted(name for name in archive.namelist()
+                             if name not in _IGNORED_MSCZ_MEMBERS
+                             and not name.lower().startswith("thumbnails/"))
+            for name in members:
+                member = archive.read(name)
+                if name.lower().endswith(".mscx"):
+                    member = _canonical_mscx(member)
+                elif name.lower().endswith(".json"):
+                    member = _canonical_json(member)
+                encoded_name = name.encode("utf-8")
+                digest.update(len(encoded_name).to_bytes(4, "big"))
+                digest.update(encoded_name)
+                digest.update(len(member).to_bytes(8, "big"))
+                digest.update(member)
+        return raw_hash, digest.hexdigest()
+    except (OSError, ValueError, zipfile.BadZipFile, ET.ParseError):
+        return raw_hash, raw_hash
+
+
+def _write_json_atomic(path: Path, payload: dict) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    handle, temporary_name = tempfile.mkstemp(prefix=f".{path.name}.", suffix=".tmp", dir=path.parent)
+    try:
+        with os.fdopen(handle, "w", encoding="utf-8") as temporary:
+            json.dump(payload, temporary, ensure_ascii=False)
+        os.replace(temporary_name, path)
+    finally:
+        if os.path.exists(temporary_name):
+            os.unlink(temporary_name)
+
+
+def _cached_library_metadata(metadata_path: Path, raw_hash: str, semantic_hash: str) -> dict | None:
+    if not metadata_path.is_file():
+        return None
+    try:
+        metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    if metadata.get("layout_version") != LIBRARY_ASSET_LAYOUT_VERSION:
+        return None
+    semantic_match = (metadata.get("source_fingerprint_version") == SOURCE_FINGERPRINT_VERSION
+                      and metadata.get("source_semantic_sha256") == semantic_hash)
+    legacy_raw_match = metadata.get("source_semantic_sha256") is None and metadata.get("source_sha256") == raw_hash
+    if not semantic_match and not legacy_raw_match:
+        return None
+    if legacy_raw_match:
+        metadata["source_fingerprint_version"] = SOURCE_FINGERPRINT_VERSION
+        metadata["source_semantic_sha256"] = semantic_hash
+        _write_json_atomic(metadata_path, metadata)
+    elif metadata.get("source_sha256") != raw_hash:
+        # Preserve the latest archive checksum for diagnostics without
+        # invalidating derivatives whose meaningful contents are unchanged.
+        metadata["source_sha256"] = raw_hash
+        _write_json_atomic(metadata_path, metadata)
+    return metadata
+
+
 def _wait_for_file(path: Path, timeout: float = 8.0) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
@@ -84,6 +192,25 @@ def _tempo_directions(root: ET.Element) -> list[tuple[int, str | None, ET.Elemen
                 if direction.find(".//sound[@tempo]") is not None or direction.find(".//metronome") is not None:
                     directions.append((measure_index, measure.get("number"), direction))
     return directions
+
+
+def _ensure_explicit_tempo(root: ET.Element, bpm: float = DEFAULT_SCORE_TEMPO_BPM) -> bool:
+    """Give MuseScore the same fallback tempo used by the timeline compiler."""
+    if _tempo_directions(root):
+        return False
+    first_measure = root.find("./part/measure")
+    if first_measure is None:
+        return False
+    tempo_text = f"{bpm:g}"
+    direction = ET.Element("direction", {"placement": "above"})
+    direction_type = ET.SubElement(direction, "direction-type")
+    metronome = ET.SubElement(direction_type, "metronome")
+    ET.SubElement(metronome, "beat-unit").text = "quarter"
+    ET.SubElement(metronome, "per-minute").text = tempo_text
+    ET.SubElement(direction, "sound", {"tempo": tempo_text})
+    insertion_index = 1 if first_measure.find("attributes") is not None else 0
+    first_measure.insert(insertion_index, direction)
+    return True
 
 
 def _ensure_global_tempo(root: ET.Element,
@@ -143,14 +270,18 @@ def _build_library_piece(source: Path) -> dict:
     """Build browser-only derivatives of a user-owned MSCZ source on demand."""
     piece_id = _piece_id(source.parent.name)
     destination = LIBRARY_ASSETS_ROOT / piece_id
-    source_hash = hashlib.sha256(source.read_bytes()).hexdigest()
     metadata_path = destination / "metadata.json"
+    raw_source_hash, semantic_source_hash = _source_hashes(source)
+    cached = _cached_library_metadata(metadata_path, raw_source_hash, semantic_source_hash)
+    if cached is not None:
+        return cached
     with _library_lock:
-        if metadata_path.is_file():
-            metadata = json.loads(metadata_path.read_text(encoding="utf-8"))
-            if (metadata.get("source_sha256") == source_hash
-                    and metadata.get("layout_version") == LIBRARY_ASSET_LAYOUT_VERSION):
-                return metadata
+        # Another request may have completed this piece while we waited. Also
+        # re-read the source in case MuseScore saved it during that interval.
+        raw_source_hash, semantic_source_hash = _source_hashes(source)
+        cached = _cached_library_metadata(metadata_path, raw_source_hash, semantic_source_hash)
+        if cached is not None:
+            return cached
         destination.mkdir(parents=True, exist_ok=True)
         musicxml = destination / "score.musicxml"
         score_svg = destination / "score.svg"
@@ -160,9 +291,24 @@ def _build_library_piece(source: Path) -> dict:
             output.unlink(missing_ok=True)
         for old_svg in destination.glob("score-*.svg"):
             old_svg.unlink(missing_ok=True)
-        for output in (musicxml, score_svg, score_audio):
+        # Export MusicXML first, then make its tempo explicit. The timeline
+        # compiler defaults to 80 BPM for scores without a tempo marking,
+        # whereas MuseScore's audio exporter defaults to 120 BPM. Exporting
+        # audio from this normalized MusicXML keeps both clocks identical.
+        result = subprocess.run(
+            [executable, "-f", "-o", str(musicxml), str(source)],
+            capture_output=True, text=True, timeout=180, check=False,
+        )
+        if result.returncode:
+            raise RuntimeError((result.stderr or result.stdout or "MuseScore export failed").strip()[-600:])
+        _wait_for_file(musicxml)
+        musicxml_tree = ET.parse(musicxml)
+        if _ensure_explicit_tempo(musicxml_tree.getroot()):
+            musicxml_tree.write(musicxml, encoding="utf-8", xml_declaration=True)
+
+        for output, export_source in ((score_svg, source), (score_audio, musicxml)):
             result = subprocess.run(
-                [executable, "-f", "-o", str(output), str(source)],
+                [executable, "-f", "-o", str(output), str(export_source)],
                 capture_output=True, text=True, timeout=180, check=False,
             )
             if result.returncode:
@@ -170,7 +316,7 @@ def _build_library_piece(source: Path) -> dict:
             # MuseScore names multipage SVG output score-1.svg, score-2.svg…
             # rather than the requested score.svg.
             _wait_for_file(destination / "score-1.svg" if output == score_svg else output)
-        score_version_id = f"local-{piece_id}-{source_hash[:12]}"
+        score_version_id = f"local-{piece_id}-{semantic_source_hash[:12]}"
         score = compile_musicxml(musicxml, score_version_id=score_version_id)
         payload = score.to_dict()
         score_json = destination / "score.json"
@@ -209,7 +355,9 @@ def _build_library_piece(source: Path) -> dict:
             "layout_version": LIBRARY_ASSET_LAYOUT_VERSION,
             "piece_id": piece_id,
             "title": payload["title"],
-            "source_sha256": source_hash,
+            "source_sha256": raw_source_hash,
+            "source_fingerprint_version": SOURCE_FINGERPRINT_VERSION,
+            "source_semantic_sha256": semantic_source_hash,
             "score_version_id": score_version_id,
             "parts": vocal_parts,
             "monodic": len(vocal_parts) == 1,
@@ -218,7 +366,7 @@ def _build_library_piece(source: Path) -> dict:
             "voice_stems": voice_stems,
             "accompaniment_file": accompaniment_file,
         }
-        metadata_path.write_text(json.dumps(metadata, ensure_ascii=False), encoding="utf-8")
+        _write_json_atomic(metadata_path, metadata)
         return metadata
 
 
@@ -227,14 +375,13 @@ def _library_listing() -> list[dict]:
     for source in _library_sources():
         piece_id = _piece_id(source.parent.name)
         cached = LIBRARY_ASSETS_ROOT / piece_id / "metadata.json"
-        if cached.is_file():
+        raw_hash, semantic_hash = _source_hashes(source)
+        metadata = _cached_library_metadata(cached, raw_hash, semantic_hash)
+        if metadata is not None:
             try:
-                metadata = json.loads(cached.read_text(encoding="utf-8"))
-                if (metadata.get("source_sha256") == hashlib.sha256(source.read_bytes()).hexdigest()
-                        and metadata.get("layout_version") == LIBRARY_ASSET_LAYOUT_VERSION):
-                    items.append({key: metadata[key] for key in ("piece_id", "title", "parts", "monodic")})
-                    continue
-            except (OSError, ValueError, KeyError):
+                items.append({key: metadata[key] for key in ("piece_id", "title", "parts", "monodic")})
+                continue
+            except KeyError:
                 pass
         # The full build happens only after the singer chooses the piece.
         items.append({"piece_id": piece_id, "title": source.stem.replace("-", " ").title(), "parts": [], "monodic": False})
@@ -320,6 +467,8 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
             (asset_root / "audio-manifest.json").write_text(json.dumps({
                 "score_version_id": metadata["score_version_id"], "timeline_hash": timeline_hash,
                 "mixes": {part_id: {"file": "score.mp3", "files_by_speed": {}} for part_id in part_ids},
+                "accompaniment_file": metadata.get("accompaniment_file"),
+                "voice_stems": metadata.get("voice_stems", {}),
             }), encoding="utf-8")
             self._send_json({
                 "piece_id": piece_id,

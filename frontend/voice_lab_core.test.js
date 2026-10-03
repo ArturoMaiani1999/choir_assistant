@@ -49,19 +49,66 @@ const exercise = lab.definition({ id: 'repeat', type: 'listen-repeat', music: { 
 assert.equal(exercise.music.midi, 60, 'same exercise keeps its musical configuration');
 const session = lab.buildInitialPitchSession({ lowMidi: 48, highMidi: 67 }, () => .5);
 assert.equal(session.length, 4); assert.ok(session.every((item) => item.midi >= 50 && item.midi <= 65));
-const stableFrames = Array.from({ length: 45 }, (_, index) => ({ time: index * .05, hz: 440 * 2 ** ((index < 12 ? 45 : 5) / 1200), confidence: .9 }));
-let progress = lab.evaluatePitchProgress({ frequencyHz: 440 }, stableFrames, 2.2);
+const guidedIntro = lab.buildRepeatTimeline({ midi: 64 }, 0, () => .5);
+assert.deepEqual(guidedIntro.events.map(event => event.beat), [0, 1, 2, 3]);
+assert.equal(guidedIntro.events.at(-1).midi, 64, 'the exact target octave is the last preview event');
+assert.ok(guidedIntro.events.slice(0, 3).every(event => event.midi < 64 && event.timbre === 'pluck' && !event.evaluated));
+assert.deepEqual(guidedIntro.events.slice(0, 3).map(event => event.midi), guidedIntro.harmony.notes,
+  'each plucked attack introduces the same note that the strings sustain');
+assert.equal(guidedIntro.scoring.holdSeconds, 1.5);
+assert.equal(lab.buildRepeatTimeline({ midi: 64 }, 1, () => .5).scoring.holdSeconds, 3);
+for (const midi of [40, 48, 55, 64, 72, 77]) {
+  const timeline = lab.buildRepeatTimeline({ midi }, 0, () => .5);
+  assert.equal(timeline.events.at(-1).midi, midi, 'SATB targets retain their MIDI octave');
+  assert.ok(timeline.events.slice(0, 3).every(event => event.midi !== midi));
+  assert.ok(timeline.harmony.notes.every(note => note >= 36 && note <= 60));
+  assert.equal(new Set(timeline.harmony.notes).size, 3);
+}
+assert.equal(lab.buildIntervalPreviewTimeline({ first: { midi: 53 }, second: { midi: 55 } }, 'construction').events.length, 1);
+assert.deepEqual(lab.buildIntervalPreviewTimeline({ first: { midi: 53 }, second: { midi: 55 } }, 'imitation').events.map(event => event.midi), [53, 55]);
+assert.ok(lab.buildIntervalPreviewTimeline({ first: { midi: 53 }, second: { midi: 55 } }, 'memory').endBeat >
+  lab.buildIntervalPreviewTimeline({ first: { midi: 53 }, second: { midi: 55 } }, 'imitation').endBeat);
+assert.equal(lab.TARGET_BAND_HALF_WIDTH_CENTS, 50, 'pitch tolerance matches the full amber lane');
+const stableFrames = Array.from({ length: 81 }, (_, index) => ({ time: index * .05, hz: 440 * 2 ** ((index < 12 ? 55 : 5) / 1200), confidence: .9 }));
+let progress = lab.evaluatePitchProgress({ frequencyHz: 440 }, stableFrames.filter(frame => frame.time <= 3.5), 3.5);
+assert.equal(progress.completed, false, 'the exercise waits for three seconds of stable pitch');
+assert.ok(progress.holdSeconds > 2.8 && progress.holdSeconds < 3, 'the progress bar reflects the active stable run');
+progress = lab.evaluatePitchProgress({ frequencyHz: 440 }, stableFrames.filter(frame => frame.time <= 3.65), 3.65);
 assert.equal(progress.completed, true); assert.equal(progress.status, 'reached-with-correction');
+assert.equal(progress.holdSeconds, 3);
+assert.ok(Math.abs(progress.timeToAcquireSeconds - .6) < .001, 'the time to reach the pitch excludes the three-second hold');
+const insideBandFrames = Array.from({ length: 70 }, (_, index) => ({ time: index * .05,
+  hz: 440 * 2 ** (49 / 1200), confidence: .9 }));
+progress = lab.evaluatePitchProgress({ frequencyHz: 440 }, insideBandFrames, 3.45);
+assert.equal(progress.completed, true, 'a stable pitch anywhere inside the amber band counts');
+const outsideBandFrames = insideBandFrames.map((frame) => ({ ...frame, hz: 440 * 2 ** (51 / 1200) }));
+progress = lab.evaluatePitchProgress({ frequencyHz: 440 }, outsideBandFrames, 3.45);
+assert.equal(progress.completed, false, 'a pitch beyond the amber band does not count');
+const interruptedFrames = stableFrames.map(frame => frame.time >= 2 && frame.time < 2.2
+  ? { ...frame, hz: 440 * 2 ** (55 / 1200) } : frame);
+progress = lab.evaluatePitchProgress({ frequencyHz: 440 }, interruptedFrames, 4);
+assert.equal(progress.completed, false, 'singing away from the target restarts the hold');
+assert.ok(progress.holdSeconds < 2, 'progress restarts from the corrected pitch');
+const dropoutFrames = stableFrames.map(frame => Math.abs(frame.time - 1.5) < .001
+  ? { ...frame, hz: null, confidence: 0 } : frame);
+progress = lab.evaluatePitchProgress({ frequencyHz: 440 }, dropoutFrames, 4);
+assert.equal(progress.completed, true, 'one brief detector dropout does not erase a stable hold');
 const crossingFrames = Array.from({ length: 45 }, (_, index) => ({ time: index * .05, hz: 440 * 2 ** (((index - 22) * 8) / 1200), confidence: .9 }));
 progress = lab.evaluatePitchProgress({ frequencyHz: 440 }, crossingFrames, 2.2);
 assert.equal(progress.completed, false, 'crossing the target once is not stable success');
 progress = lab.evaluatePitchProgress({ frequencyHz: 440 }, stableFrames.map((frame) => ({ ...frame, confidence: .1 })), 2.2);
 assert.equal(progress.status, 'waiting');
+progress = lab.evaluatePitchProgress({ frequencyHz: 440 }, stableFrames.map((frame) => ({ ...frame, confidence: .2 })), 4, { minConfidence: .12 });
+assert.equal(progress.completed, true, 'weak-voice mode can complete the same stable three-second hold');
 const earlyOutcome = lab.pitchTrialOutcome('reached', { metrics: { reliable: false }, incrementalProgress: { completed: true, reliable: true, status: 'reached' } });
 assert.equal(earlyOutcome.reliable, true, 'early completion must advance even when 30-second aggregate coverage is low');
 assert.equal(earlyOutcome.acquired, true);
 const uncertainOutcome = lab.pitchTrialOutcome('timeout', { metrics: { reliable: false }, incrementalProgress: { reliable: false, status: 'searching' } });
 assert.equal(uncertainOutcome.reliable, false, 'an uncertain timeout must repeat the current trial');
+const earlyEvidence = lab.deriveCompetencies([{ exerciseType: 'repeat', completed: true, completedAt: new Date().toISOString(),
+  analysis: { completionReason: 'reached', metrics: { reliable: false } } }]);
+assert.equal(earlyEvidence.noteReproduction.reliableObservations, 1, 'a three-second success counts as reliable training evidence');
+assert.equal(earlyEvidence.noteStability.successes, 1, 'the completed stable hold counts toward note stability');
 const directionBlock = lab.buildEarTrainingBlock({ range: { lowMidi: 48, highMidi: 72 }, level: 1, random: () => .4 });
 assert.equal(directionBlock.length, 6); assert.deepEqual(new Set(directionBlock.map((trial) => trial.direction)), new Set(['ascending', 'descending', 'same']));
 const referenceBlock = lab.buildEarTrainingBlock({ range: { lowMidi: 48, highMidi: 72 }, level: 2, random: () => .4 });
@@ -116,4 +163,4 @@ assert.deepEqual(lab.rollPitchBounds([58]), { min: 53, max: 63 }, 'one-note roll
 assert.deepEqual(lab.rollPitchBounds([58, 65]), { min: 56, max: 67 }, 'interval roll includes both targets plus two semitones');
 assert.deepEqual(lab.rollPitchBounds([58, 70]), { min: 56, max: 72 }, 'wide intervals expand only as much as their targets require');
 assert.deepEqual(lab.rollPitchBounds([]), { min: 55, max: 67 }, 'missing targets use a bounded neutral viewport');
-console.log('voice_lab_core: 67 assertions passed');
+console.log('voice_lab_core: assertions passed');
