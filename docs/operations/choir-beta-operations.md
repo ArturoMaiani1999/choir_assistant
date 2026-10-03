@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-03
+**Last reviewed:** 2026-10-04
 
 This document defines how Choir Assistant can be used by real singers while it
 continues to evolve. Hosting and access-control commands live in the
@@ -102,6 +102,10 @@ after one stable rehearsal cycle. Every tester receives:
 - a short privacy statement explaining email/access logs and local microphone
   processing;
 - one feedback channel and the minimum information needed for a useful report.
+
+Provision and revoke singer access through the exact-email OTP procedure in
+[cloudflare-access-email-pin.md](cloudflare-access-email-pin.md); never store
+the cohort's email addresses in this repository.
 
 Do not request recordings by default. If an audio sample is genuinely needed,
 ask explicitly for that incident, explain how it will be used and deleted, and

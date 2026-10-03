@@ -1,8 +1,8 @@
 # Private deployment runbook
 
-**Status:** active — pre-production
+**Status:** active — private production
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-03
+**Last reviewed:** 2026-10-04
 **Target:** static site protected by Cloudflare Access One-time PIN
 
 Aggiornare le caselle man mano: `[ ]` da fare · `[x]` fatto.
@@ -11,11 +11,11 @@ Prezzi, limiti e nomi dei menu di Cloudflare cambiano: dove indicato "verificare
 | Fase | Stato |
 |---|---|
 | 0 · Diritti e repertorio autorizzato | ✅ Prima release limitata ad `ave-verum`: Mozart pubblico dominio, trascrizione SATB CC BY 4.0 attribuita |
-| 1 · Build statica privata | 🔶 Build e smoke Chromium superati; serve il commit pulito del candidato definitivo |
-| 2 · Account/dominio/Workers | 🔶 Worker creato con pagina-segnaposto; dominio personalizzato opzionale |
+| 1 · Build statica privata | ✅ Build pulita `20261003-214100-ef57bbabc0a0` e smoke Chromium superati |
+| 2 · Account/dominio/Workers | ✅ Worker attivo su `choir-assistant.choir-assistant.workers.dev`; dominio personalizzato opzionale |
 | 3 · Header di sicurezza | ✅ Generati automaticamente dalla build |
-| 4 · Cloudflare Access OTP | ⬜ Prossimo passo: proteggere il Worker prima di attivare `workers.dev` |
-| 5–6 · Collaudo e onboarding | ⬜ Da iniziare |
+| 4 · Cloudflare Access OTP | ✅ `All traffic` protetto; procedura allowlist email e PIN configurata e documentata |
+| 5–6 · Collaudo e onboarding | 🔶 Test anonimo root/manifest/bundle superato; completare matrice dispositivi e onboarding |
 
 ---
 
@@ -164,14 +164,17 @@ Note:
 
 Funzionamento: Access può inviare un codice via email agli indirizzi approvati, in alternativa a un identity provider. Il corista inserisce la propria email, riceve il PIN (valido 10 minuti), lo incolla ed entra. Non servono password né account Google.
 
-- [ ] Attivare Zero Trust dal dashboard Cloudflare (potrebbe richiedere un metodo di pagamento anche per il piano gratuito; verificare). Secondo guide recenti il piano gratuito copre fino a 50 utenti: con 20 coristi dovrebbe bastare (verificare).
-- [ ] Zero Trust → Integrations/Settings → Identity providers (o Authentication) → aggiungere **One-time PIN**.
-- [ ] Workers & Pages → `choir-assistant` → **Access** → **Protect this Worker behind Access**:
+La procedura completa e riusabile è in
+[Accesso privato con allowlist email e PIN](cloudflare-access-email-pin.md).
+
+- [x] Attivare Zero Trust dal dashboard Cloudflare.
+- [x] Zero Trust → Integrations → Identity providers → aggiungere **One-time PIN**.
+- [x] Workers & Pages → `choir-assistant` → **Access** → **Protect this Worker behind Access**:
   - ambito: **All traffic**, non soltanto preview;
   - **policy Allow → Include → Emails**: elencare le email **esatte** dei coristi (una per riga).
   - durata sessione: valore ragionevole (es. 7–30 giorni; più lunga = meno attrito, ma la revoca vale alla scadenza).
-- [ ] **Non usare** la regola "Emails ending in" con domini pubblici (`@gmail.com`, `@libero.it`, ecc.): farebbe entrare chiunque abbia quel provider. Va bene solo con un dominio tuo.
-- [ ] Verificare che la policy sia collegata al **Worker**, non al solo hostname: così copre `workers.dev`, futuri domini personalizzati e preview.
+- [x] **Non usare** la regola "Emails ending in" con domini pubblici (`@gmail.com`, `@libero.it`, ecc.): farebbe entrare chiunque abbia quel provider. Va bene solo con un dominio tuo.
+- [x] Verificare che la policy sia collegata al **Worker**, non al solo hostname: così copre `workers.dev`, futuri domini personalizzati e preview.
 
 ---
 

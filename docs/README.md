@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-03
+**Last reviewed:** 2026-10-04
 
 This directory separates current contracts and procedures from historical
 investigation. If two documents disagree, the canonical documents listed here
@@ -42,6 +42,9 @@ take precedence over anything under `archive/`.
   the application.
 - [Private deployment](operations/private-deployment.md) — build, staging,
   Cloudflare Access and production checklist.
+- [Email allowlist and PIN access](operations/cloudflare-access-email-pin.md) —
+  reusable exact-email policy, OTP setup, Worker association, tests and
+  troubleshooting.
 - [Score review policy](operations/score-review-policy.md) — editorial source of
   truth and approval rules.
 - [OMR consensus procedure](operations/omr-consensus.md) — local reconstruction
