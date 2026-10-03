@@ -1,7 +1,8 @@
 # Repertorio della build privata
 
-`repertoire.json` Ã¨ una allowlist intenzionalmente vuota. Un brano entra nella
-build soltanto con una voce esplicita e con `publication_approved: true`:
+`repertoire.json` è l'allowlist esplicita dei brani pubblicabili. Un brano entra
+nella build soltanto con `publication_approved: true` e una nota sui diritti
+realmente verificabile:
 
 ```json
 {
@@ -9,12 +10,13 @@ build soltanto con una voce esplicita e con `publication_approved: true`:
     {
       "id": "identificativo-in-frontend-library-assets",
       "publication_approved": true,
-      "rights_note": "Licenza/autorizzazione o pubblico dominio: riferimento verificabile"
+      "rights_note": "Licenza scritta del titolare, 2026-10-03, riferimento archivio CORO-001"
     }
   ]
 }
 ```
 
-La build fallisce se la lista Ã¨ vuota, se manca l'approvazione o se la nota sui
-diritti Ã¨ assente. Questo evita che materiale presente nel repository venga
-pubblicato per errore.
+Non copiare l'esempio e non lasciare `TODO`, `TBD` o altro testo segnaposto.
+La build fallisce se la lista è vuota, se manca l'approvazione o se la nota sui
+diritti è assente o ancora generica. Questo evita che materiale presente nel
+repository venga pubblicato per errore.

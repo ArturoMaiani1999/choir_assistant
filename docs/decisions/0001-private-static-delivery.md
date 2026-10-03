@@ -1,6 +1,6 @@
 # ADR-0001: Private static delivery
 
-**Status:** accepted
+**Status:** superseded by [ADR-0003](0003-workers-static-delivery.md)
 **Date:** 2026-09-28
 **Owner:** project maintainer
 **Last reviewed:** 2026-09-28

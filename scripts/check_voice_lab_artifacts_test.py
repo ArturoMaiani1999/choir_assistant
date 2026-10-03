@@ -19,9 +19,12 @@ class VoiceLabArtifactGuardTest(unittest.TestCase):
         guard.MANIFEST = guard.PUBLIC / "manifest.json"
         (guard.PUBLIC / "intervals").mkdir(parents=True)
         (guard.PUBLIC / "notes").mkdir()
+        (guard.PUBLIC / "strings").mkdir()
         guard.MANIFEST.write_text(json.dumps({
             "noteScores": {"lowMidi": 60, "highMidi": 61},
             "intervalScores": {"distances": [0, 1]},
+            "stringSamples": {"lowMidi": 60, "highMidi": 60},
+            "choirSamples": {"roles": {}},
         }), encoding="utf-8")
         melodic, harmonic = guard.expected_pairs(60, 61, {0, 1})
         for first, second in melodic:
@@ -30,6 +33,7 @@ class VoiceLabArtifactGuardTest(unittest.TestCase):
             (guard.PUBLIC / "intervals" / f"harmonic-{first}-{second}-1.svg").write_bytes(b"svg")
         for midi in (60, 61):
             (guard.PUBLIC / "notes" / f"note-{midi}-1.svg").write_bytes(b"svg")
+        (guard.PUBLIC / "strings" / "string-60.ogg").write_bytes(b"ogg")
 
     def tearDown(self) -> None:
         for name, value in self.originals.items():

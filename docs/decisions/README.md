@@ -10,5 +10,6 @@ superseding ADR.
 
 | ADR | Decision | Status |
 |---|---|---|
-| [0001](0001-private-static-delivery.md) | Private static delivery through Cloudflare Pages and Access | Accepted |
+| [0001](0001-private-static-delivery.md) | Private static delivery through Cloudflare Pages and Access | Superseded by ADR-0003 |
 | [0002](0002-neural-pitch-diagnostics-only.md) | Neural pitch models remain local diagnostics | Accepted |
+| [0003](0003-workers-static-delivery.md) | Private delivery through Workers Static Assets and Access | Accepted |

@@ -6,6 +6,14 @@
   'use strict';
   const PREFERENCE_KEY = 'choir-detector-settings:v1';
   const DETECTOR_DEFAULTS = Object.freeze({ rmsThreshold: .001, weakVoiceMode: false, fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 });
+  const RECOGNITION_MODES = Object.freeze({
+    normal: Object.freeze({ minClarity: .45, minConfidence: .30, yinThreshold: .42, weakSignalHoldFrames: 0 }),
+    // Weak voice deliberately makes RMS the only amplitude gate. Periodicity
+    // and short-term continuity still protect against room noise.
+    weakVoice: Object.freeze({ minClarity: .32, minConfidence: .10, yinThreshold: .68,
+      levelConfidenceFloor: .68, rmsThresholdCeiling: .00003, weakSignalHoldFrames: 6,
+      candidateConsistencyCents: 220 }),
+  });
   const PLUME_DEFAULTS = Object.freeze({ width: 1, intensity: 1, color: '#72e0d2', timeAdvanceMs: 200 });
   // Visual density, NOT a calibrated F0 posterior or confidence interval.
   const AURORA = Object.freeze({ trailSeconds: 2.8, historyOpacity: .08, sigmaSemitones: .16,
@@ -30,6 +38,13 @@
         timeAdvanceMs: Number.isFinite(Number(saved.v1PlumeAdvanceMs)) ? Number(saved.v1PlumeAdvanceMs) : PLUME_DEFAULTS.timeAdvanceMs,
       },
     };
+  }
+  function recognitionSettings(detectorSettings = DETECTOR_DEFAULTS) {
+    const mode = detectorSettings.weakVoiceMode ? RECOGNITION_MODES.weakVoice : RECOGNITION_MODES.normal;
+    const requestedRms = Number.isFinite(Number(detectorSettings.rmsThreshold))
+      ? Math.max(0, Number(detectorSettings.rmsThreshold)) : DETECTOR_DEFAULTS.rmsThreshold;
+    return { ...mode, rmsThreshold: Number.isFinite(mode.rmsThresholdCeiling)
+      ? Math.min(requestedRms, mode.rmsThresholdCeiling) : requestedRms };
   }
   function plumeSegments(samples, xAt, settings = {}) {
     const timeAt = settings.timeAt || (sample => sample.time ?? sample.audioTimeSec);
@@ -134,6 +149,6 @@
     context.save(); context.globalCompositeOperation = 'source-over';
     context.drawImage(surface.canvas, left, top, width/ratio, height/ratio); context.restore();
   }
-  return { PREFERENCE_KEY, DETECTOR_DEFAULTS, PLUME_DEFAULTS, AURORA, readPreferences,
+  return { PREFERENCE_KEY, DETECTOR_DEFAULTS, RECOGNITION_MODES, PLUME_DEFAULTS, AURORA, readPreferences, recognitionSettings,
     plumeSegments, auroraStyle, visitPlumeColumns, drawConfidencePlume };
 });

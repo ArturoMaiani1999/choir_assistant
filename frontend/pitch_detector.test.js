@@ -35,6 +35,15 @@ const frame = (smoother, hz, index) => smoother.update(estimate(hz), index * 20)
 }
 
 {
+  const smoother = new PitchSmoother();
+  smoother.configure({ minClarity: .32, minConfidence: .10, candidateConsistencyCents: 220 });
+  const wanderingNoise = [220, 330, 440].map((hz, index) => frame(smoother, hz, index));
+  assert.equal(wanderingNoise.at(-1).accepted, false, 'three unrelated YIN minima are not published as a weak voice');
+  const coherentVoice = [440, 440].map((hz, index) => frame(smoother, hz, index + 3));
+  assert.equal(coherentVoice.at(-1).accepted, true, 'a coherent weak voice is published after three matching observations');
+}
+
+{
   const tracker = new OctaveAwarePitchTracker();
   [440, 440, 440].forEach((hz, index) => frame(tracker, hz, index));
   frame(tracker, null, 3);
@@ -67,6 +76,19 @@ const frame = (smoother, hz, index) => smoother.update(estimate(hz), index * 20)
   const smoother = new PitchSmoother();
   const tracked = [0, 1, 2].map(index => smoother.update(whispered, index * 20));
   assert.equal(tracked.at(-1).accepted, true, 'whisper-level pitch survives detector and tracker gates');
+  const weakMode = global.ChoirPitch.detectPitch(whisperedTone, sampleRate,
+    { rmsThreshold: .000001, yinThreshold: .68, levelConfidenceFloor: .68 });
+  assert.ok(weakMode.confidence > whispered.confidence,
+    'weak voice decouples confidence from amplitude after the RMS gate is crossed');
+}
+
+{
+  const sampleRate = 48000;
+  const lowBassHz = 82.41;
+  const lowBass = Float32Array.from({ length: 2048 }, (_, index) => .08 * Math.sin(2 * Math.PI * lowBassHz * index / sampleRate));
+  const results = Array.from({ length: 12 }, () => global.ChoirPitch.detectPitch(lowBass, sampleRate));
+  assert.ok(results.every(result => Math.abs(cents(result.hz, lowBassHz)) < 5),
+    'the pooled detector remains accurate down to E2 even with a compact 2048-sample frame');
 }
 
 {

@@ -7,6 +7,14 @@
   // Laptop microphones and untreated rooms rarely produce the nearly-perfect
   // periodic waveform assumed by the original threshold.
   const YIN_THRESHOLD = 0.42;
+  let differenceWorkspace = new Float64Array(0);
+  let cmndWorkspace = new Float64Array(0);
+
+  function detectorWorkspace(length) {
+    if (differenceWorkspace.length < length) differenceWorkspace = new Float64Array(length);
+    if (cmndWorkspace.length < length) cmndWorkspace = new Float64Array(length);
+    return { difference: differenceWorkspace, cmnd: cmndWorkspace };
+  }
 
   function rmsOf(buffer) {
     let sum = 0;
@@ -27,7 +35,11 @@
   }
 
   // YIN-style difference and cumulative mean normalized difference.
-  function detectPitch(buffer, sampleRate, { rmsThreshold = 0.001, yinThreshold = YIN_THRESHOLD } = {}) {
+  function detectPitch(buffer, sampleRate, {
+    rmsThreshold = 0.001,
+    yinThreshold = YIN_THRESHOLD,
+    levelConfidenceFloor = null,
+  } = {}) {
     const rms = rmsOf(buffer);
     const effectiveRmsThreshold = Number.isFinite(rmsThreshold) ? Math.max(0, rmsThreshold) : 0.001;
     if (rms < effectiveRmsThreshold) return { hz: null, rms, clarity: 0, confidence: 0 };
@@ -43,7 +55,9 @@
     );
     if (tauMin >= tauMax) return { hz: null, rms, clarity: 0, confidence: 0 };
 
-    const difference = new Float64Array(tauMax + 1);
+    // The live detector is called many times per second. Reuse its scratch
+    // arrays so garbage collection cannot periodically stall the UI thread.
+    const { difference, cmnd } = detectorWorkspace(tauMax + 1);
     for (let tau = 1; tau <= tauMax; tau += 1) {
       let sum = 0;
       for (let i = 0; i < buffer.length - tau; i += 1) {
@@ -53,7 +67,6 @@
       difference[tau] = sum;
     }
 
-    const cmnd = new Float64Array(tauMax + 1);
     cmnd[0] = 1;
     let running = 0;
     for (let tau = 1; tau <= tauMax; tau += 1) {
@@ -89,7 +102,9 @@
     // singer deliberately selects a more sensitive gate, allow a strongly
     // periodic whisper-level signal to reach the tracker instead of rejecting
     // it a second time solely because of absolute amplitude.
-    const sensitivityConfidenceFloor = effectiveRmsThreshold < 0.001 ? 0.36 : 0;
+    const automaticFloor = effectiveRmsThreshold < 0.001 ? 0.36 : 0;
+    const sensitivityConfidenceFloor = Number.isFinite(levelConfidenceFloor)
+      ? Math.max(0, Math.min(1, levelConfidenceFloor)) : automaticFloor;
     const levelConfidence = Math.max(sensitivityConfidenceFloor, Math.max(0, Math.min(1, rms / 0.08)));
     return {
       hz,
@@ -299,13 +314,15 @@
 
     configure({ fastAlpha = this.fastAlpha, slowAlpha = this.slowAlpha, minClarity = this.minClarity,
       minConfidence = this.minConfidence, medianWindowFrames = this.medianWindowFrames,
-      weakSignalHoldFrames = this.weakSignalHoldFrames } = {}) {
+      weakSignalHoldFrames = this.weakSignalHoldFrames,
+      candidateConsistencyCents = this.candidateConsistencyCents } = {}) {
       const clamp = (value, minimum, maximum) => Math.max(minimum, Math.min(maximum, value));
       if (Number.isFinite(fastAlpha)) this.fastAlpha = clamp(fastAlpha, .05, .95);
       if (Number.isFinite(slowAlpha)) this.slowAlpha = clamp(slowAlpha, .05, .95);
       if (Number.isFinite(minClarity)) this.minClarity = clamp(minClarity, .05, .95);
       if (Number.isFinite(minConfidence)) this.minConfidence = clamp(minConfidence, .05, .95);
-      if (Number.isFinite(weakSignalHoldFrames)) this.weakSignalHoldFrames = Math.max(0, Math.min(4, Math.round(weakSignalHoldFrames)));
+      if (Number.isFinite(weakSignalHoldFrames)) this.weakSignalHoldFrames = Math.max(0, Math.min(8, Math.round(weakSignalHoldFrames)));
+      if (Number.isFinite(candidateConsistencyCents)) this.candidateConsistencyCents = clamp(candidateConsistencyCents, 50, 400);
       if (Number.isFinite(medianWindowFrames)) {
         this.medianWindowFrames = Math.max(1, Math.min(9, Math.round(medianWindowFrames)));
         this.rawSemitones = this.rawSemitones.slice(-this.medianWindowFrames);
@@ -373,9 +390,16 @@
       let rejectionReason = null;
 
       if (previous == null) {
-        this.hz = hzFromSemitone(filteredSemitone);
-        this.clearCandidate();
-        accepted = this.voicedFrames >= 3;
+        // Do not publish the first isolated YIN minimum. A sung onset remains
+        // responsive (three frames), while random room noise must repeat in
+        // the same pitch neighbourhood before it can become a visible note.
+        this.updateCandidate(rawSemitone);
+        accepted = this.candidateFrames >= 3;
+        if (accepted) {
+          this.hz = hzFromSemitone(this.candidateSemitone);
+          this.rawSemitones = [this.candidateSemitone];
+          this.clearCandidate();
+        }
         if (!accepted) rejectionReason = 'warm-up';
       } else {
         // Continuity decisions deliberately use the raw estimate. A three-frame

@@ -10,15 +10,15 @@
     <link rel="stylesheet" href="studio.css?v=20261002-voice-mixer-layout" />
     <script src="score_appearance.js?v=1"></script>
     <script src="runtime-config.js" defer></script>
-    <script src="practice_math.js?v=20260927-pickup-timing" defer></script>
+    <script src="practice_math.js?v=20261003-interval-arrows" defer></script>
     <script src="score_runtime.js?v=20260927-pickup-timing" defer></script>
-    <script src="pitch_detector.js?v=20260926-v7-tracker-settings" defer></script>
-    <script src="pitch_shared.js?v=20260929-aurora-history" defer></script>
+    <script src="pitch_detector.js?v=20261003-weak-voice" defer></script>
+    <script src="pitch_shared.js?v=20261003-weak-voice" defer></script>
     <script src="fluid_pitch_trail.js?v=20260930-smooth-joins" defer></script>
     <script src="vocal_feedback.js?v=20260928-feedback-v1" defer></script>
     <script src="one_euro_filter.js?v=20260927-phase2" defer></script>
     <script src="pitch_test_harness.js?v=20260927-phase0" defer></script>
-    <script src="app.js?v=20261002-lower-score-divider" defer></script>
+    <script src="app.js?v=20261003-interval-arrows" defer></script>
   </head>
   <body>
     <main class="practice-shell" aria-label="Strumento di prova">
@@ -52,7 +52,7 @@
         </div>
       </header>
 
-      <aside class="asset-status" id="asset-status" role="alert">Gloria · revisione musicale in corso</aside>
+      <aside class="asset-status" id="asset-status" role="alert" hidden></aside>
 
       <aside class="orientation-hint" role="note"><span aria-hidden="true">↻</span><p><strong>Ruota il dispositivo</strong><small>per la modalità di prova completa</small></p></aside>
 
@@ -69,7 +69,7 @@
       <section class="pitch-region" aria-label="Intonazione e tempo">
         <canvas id="pitch-lane" role="img" aria-describedby="pitch-description"></canvas>
         <canvas id="pitch-fluid-layer" aria-hidden="true"></canvas>
-        <p class="sr-only" id="pitch-description">Le note target scorrono verso il cursore fisso. La traiettoria mostra l’intonazione rilevata dal microfono.</p>
+        <p class="sr-only" id="pitch-description">Le note target scorrono verso il cursore fisso. La traiettoria mostra l’intonazione rilevata dal microfono. Se abilitate, le frecce indicano gli intervalli tra note consecutive.</p>
         <div class="intonation-readout" id="intonation-readout" aria-live="polite"><strong id="live-note">—</strong><span id="live-cents">— ¢</span><small id="live-state">in attesa</small></div>
         <div class="lane-legend" aria-label="Tracce visibili nel piano roll">
           <label class="pitch-layer-toggle voice-key"><input id="pitch-layer-v1" type="checkbox" checked /> La tua voce</label>
@@ -112,12 +112,19 @@
     </dialog>
     <dialog id="settings-dialog" class="practice-dialog detector-settings-dialog" aria-labelledby="settings-heading">
       <h2 id="settings-heading">La tua voce, sullo schermo</h2>
-      <p>Regola la sensibilità se il microfono fatica a sentirti. Le impostazioni vengono salvate su questo dispositivo.</p>
+      <p>Personalizza il piano roll e regola la sensibilità se il microfono fatica a sentirti. Le impostazioni vengono salvate su questo dispositivo.</p>
       <section class="detector-setting" aria-labelledby="settings-text-scale-heading">
         <div><h3 id="settings-text-scale-heading">Testo sul piano roll</h3><output id="settings-text-scale-value">150%</output></div>
         <input id="settings-text-scale" type="range" min="100" max="200" step="10" value="150" />
         <div class="detector-setting-scale"><span>100% · normale</span><span>200% · molto grande</span></div>
         <p>Regola solo la dimensione delle sillabe sopra le note. Il valore predefinito è 150%.</p>
+      </section>
+      <section class="detector-setting" aria-labelledby="settings-intervals-heading">
+        <div><h3 id="settings-intervals-heading">Intervalli tra le note</h3></div>
+        <label class="weak-voice-toggle" for="settings-show-intervals">
+          <input id="settings-show-intervals" type="checkbox" />
+          <span><strong>Mostra le frecce degli intervalli</strong><small>Indica 2, 3m, 3M, 4 e 5 tra note consecutive. Il semitono non viene mostrato.</small></span>
+        </label>
       </section>
       <details class="studio-advanced"><summary>Analisi e filtri avanzati</summary>
       <section class="detector-setting" aria-labelledby="settings-display-pitch-heading">
@@ -133,7 +140,7 @@
         <p id="settings-v1-rms-description">Valore predefinito: filtra silenzio e rumore debole.</p>
         <label class="weak-voice-toggle" for="settings-weak-voice-mode">
           <input id="settings-weak-voice-mode" type="checkbox" />
-          <span><strong>Modalità voce debole</strong><small>Aumenta la sensibilità e raccorda le brevissime perdite di segnale, mantenendo il controllo di stabilità.</small></span>
+          <span><strong>Modalità voce debole</strong><small>Rende più permissivi volume, periodicità e confidenza; raccorda inoltre circa un decimo di secondo di segnale incerto.</small></span>
         </label>
       </section>
       <section class="detector-setting" aria-labelledby="settings-v1-tracker-heading">

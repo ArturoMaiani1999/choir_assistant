@@ -36,9 +36,13 @@ node frontend/one_euro_filter.test.js
 node frontend/pitch_test_harness.test.js
 python -m unittest discover -s backend/choir_assistant/tests -t backend
 python -m unittest scripts.check_voice_lab_artifacts_test
+python scripts/build_dist_test.py
 python scripts/check_voice_lab_artifacts.py
 python scripts/check_docs.py
 ```
+
+The static release also has a real-browser check. Serve `dist/` with Wrangler,
+then run `python scripts/browser_dist_smoke.py`.
 
 Browser smoke tests require the local server to be running. See the
 [development workflow](docs/operations/development-workflow.md).
@@ -52,6 +56,7 @@ points are:
 - [Practice experience](docs/product/practice-experience.md)
 - [Pitch-tracking engineering](docs/engineering/pitch-tracking/README.md)
 - [Development workflow](docs/operations/development-workflow.md)
+- [Choir beta operations](docs/operations/choir-beta-operations.md)
 - [Private deployment runbook](docs/operations/private-deployment.md)
 - [Architecture decisions](docs/decisions/README.md)
 

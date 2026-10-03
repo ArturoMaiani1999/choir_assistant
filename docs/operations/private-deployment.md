@@ -2,7 +2,7 @@
 
 **Status:** active — pre-production
 **Owner:** project maintainer
-**Last reviewed:** 2026-09-28
+**Last reviewed:** 2026-10-03
 **Target:** static site protected by Cloudflare Access One-time PIN
 
 Aggiornare le caselle man mano: `[ ]` da fare · `[x]` fatto.
@@ -10,11 +10,11 @@ Prezzi, limiti e nomi dei menu di Cloudflare cambiano: dove indicato "verificare
 
 | Fase | Stato |
 |---|---|
-| 0 · Diritti e repertorio autorizzato | ⬜ Bloccante: serve la scelta/autorizzazione del titolare |
-| 1 · Build statica privata | 🔶 Implementata e collaudata; attende allowlist autorizzata e smoke E2E finale |
-| 2 · Account/dominio/Pages | ⬜ Da configurare |
+| 0 · Diritti e repertorio autorizzato | ✅ Prima release limitata ad `ave-verum`: Mozart pubblico dominio, trascrizione SATB CC BY 4.0 attribuita |
+| 1 · Build statica privata | 🔶 Build e smoke Chromium superati; serve il commit pulito del candidato definitivo |
+| 2 · Account/dominio/Workers | 🔶 Worker creato con pagina-segnaposto; dominio personalizzato opzionale |
 | 3 · Header di sicurezza | ✅ Generati automaticamente dalla build |
-| 4 · Cloudflare Access OTP | ⬜ Da configurare prima di rendere raggiungibile il sito |
+| 4 · Cloudflare Access OTP | ⬜ Prossimo passo: proteggere il Worker prima di attivare `workers.dev` |
 | 5–6 · Collaudo e onboarding | ⬜ Da iniziare |
 
 ---
@@ -29,19 +29,22 @@ sviluppo locale -> dist/ locale -> staging protetto -> produzione protetta
 
 1. Sviluppare e diagnosticare con `python scripts/serve_frontend.py`.
 2. Approvare diritti e contenuto di ogni voce in `deploy/repertoire.json`.
-3. Eseguire una sola volta `python scripts/build_dist.py`.
+3. Da un commit con working tree pulito, eseguire una sola volta
+   `python scripts/build_dist.py`. `--allow-dirty` serve solo a verifiche locali
+   e produce una versione marcata `-dirty`, che non va caricata.
 4. Provare quella build con
-   `npx wrangler pages dev dist --local-protocol=https`.
-5. Caricare la stessa `dist/` in una preview già protetta da Access:
-   `npx wrangler pages deploy dist --project-name choir-assistant --branch=staging`.
+   `npx wrangler dev --assets dist --local-protocol=https`.
+5. Creare una versione Cloudflare della stessa `dist/`, senza attivarla, con
+   `npx wrangler versions upload --message "beta candidate"` e collaudarla
+   soltanto se la preview è coperta dalla policy Access.
 6. Registrare versione, hash del manifest, dispositivi e risultato del collaudo.
-7. Promuovere la stessa directory, senza ricostruirla, con
-   `npx wrangler pages deploy dist --project-name choir-assistant`.
+7. Promuovere la versione già caricata tramite Workers → Deployments; per il
+   primo rilascio, dopo aver verificato Access, usare `npx wrangler deploy`.
 
 Se una correzione modifica un file, il candidato precedente è scartato: si
-genera una nuova build e si ripete l'intero collaudo. Le preview Pages sono
-pubbliche per impostazione predefinita; configurare Access prima di caricarvi
-repertorio reale.
+genera una nuova build e si ripete l'intero collaudo. Le URL di anteprima sono
+disabilitate in `wrangler.jsonc`; Access deve proteggere l'intero Worker prima
+di caricarvi repertorio reale.
 
 ---
 
@@ -51,12 +54,12 @@ Un sito **non pubblico**, raggiungibile solo dai ~20 coristi autorizzati, senza 
 
 ```text
 corista ──HTTPS──> Cloudflare Access (cancello: email in allow-list + codice PIN)
-                        └──> Sito statico (Cloudflare Pages)
+                        └──> Sito statico (Workers Static Assets)
                                  ├─ app (HTML/CSS/JS)
                                  └─ bundle musicali già approvati (JSON/SVG/audio/manifest)
 
 Il tuo PC (MAI esposto): MuseScore, OMR, ingestione, admin, sorgenti .mscz
-   └─ produce la build ──> comando di deploy ──> Pages
+   └─ produce la build ──> comando di deploy ──> Worker
 ```
 
 Cosa resta identico: analisi del microfono, take e preferenze restano **solo nel browser** del corista. Nessun audio lascia il dispositivo.
@@ -87,42 +90,52 @@ Obiettivo: una cartella `dist/` che contiene **solo** ciò che il corista deve s
 - [x] Escludere CREPE, modello ONNX e ONNX Runtime dalla build. Il caricamento CDN rimane disponibile esclusivamente nell'ambiente diagnostico locale.
 - [x] **Escludere** dalla build: `scripts/`, `data/ingestions/`, sorgenti MusicXML/MSCSZ, `.env`, hook di test e qualsiasi endpoint `/api/*`; Benchmark/Revisione/Neurale sono disabilitati nella UI di produzione.
 - [x] Nome degli asset applicativi con hash del contenuto (cache-busting) e `deployment-manifest.json` con versione e hash di ogni file.
+- [x] Verifica dei riferimenti locali tra HTML, applicazione e Web Worker: la
+  build fallisce invece di pubblicare entry point mancanti.
 - [x] Versione di build visibile nel footer (per capire cosa hanno i coristi).
 - [ ] Se servirà la trasposizione online, pre-generare le basi autorizzate nelle tonalità ammesse: la build statica iniziale la limita intenzionalmente a `Originale` perché l'endpoint locale di trasposizione non viene pubblicato.
 
 **Verifiche automatiche sulla `dist/` (fanno parte della build, falliscono se violate):**
 - [x] Nessuna occorrenza di `__pitchTestHooks`, `/api/`, `cdn.jsdelivr`, `unpkg`, `localhost`.
 - [x] Nessun `.mscz`, `.env`, `.py`, `.map`, `.musicxml`, `.xml`, `.onnx` o runtime ONNX.
-- [x] Ogni file ≤ 25 MiB e totale file ≤ 20.000 (limiti di Pages Direct Upload verificati il 2026-09-28).
+- [x] Ogni file ≤ 25 MiB e totale file ≤ 20.000 (limite prudenziale della build; verificare i limiti Workers correnti prima di ogni ampliamento importante).
 - [x] Ogni file incluso è registrato con SHA-256 nel manifest di deploy.
-- [ ] Test Playwright sulla `dist/` servita in locale: pagina di pratica si carica, microfono richiesto, nessuna richiesta a domini esterni (intercettare la rete e fallire se ce ne sono).
+- [x] Smoke test Chromium sulla `dist/` servita in locale: la pagina di pratica
+  carica spartito e audio, il microfono avvia il Web Worker, le funzioni
+  diagnostiche restano nascoste e nessuna richiesta raggiunge domini esterni
+  (`python scripts/browser_dist_smoke.py`).
 
 ---
 
 ## 4. Fase 2 — Account, dominio, hosting
 
-- [ ] Creare un account Cloudflare (email dedicata, **MFA attivo**).
-- [ ] (Consigliato) Comprare un dominio e delegare i nameserver a Cloudflare, poi usare un sottodominio tipo `coro.tuodominio.it`. Per una prova iniziale basta l'indirizzo gratuito `*.pages.dev`.
-- [ ] Creare il progetto Pages con **Direct Upload** (senza collegare Git, si carica la cartella già costruita):
+- [x] Creare un account Cloudflare e autenticare Wrangler. Attivare anche **MFA** dal profilo se non è già presente.
+- [ ] (Consigliato) Comprare un dominio e delegare i nameserver a Cloudflare, poi usare un sottodominio tipo `coro.tuodominio.it`. Per la prova iniziale basta l'indirizzo gratuito `*.workers.dev`.
+- [x] Creare il Worker con una pagina-segnaposto priva di repertorio:
 
 ```bash
 npx wrangler login
-npx wrangler pages project create choir-assistant --production-branch main
-npx wrangler pages deploy dist --project-name choir-assistant
+npx wrangler deploy --name choir-assistant --assets deploy/holding --compatibility-date 2026-10-03
 ```
 
-- [ ] Collegare il dominio personalizzato dal dashboard (Pages → progetto → Custom domains).
+- [ ] **Prima di registrare il sottodominio `workers.dev`**, applicare Access al
+  Worker come descritto nella fase 4. Questo evita anche una breve finestra
+  pubblica del segnaposto.
+- [ ] Registrare il sottodominio gratuito dal dashboard; l'indirizzo assegnato
+  alla prima installazione è `choir-assistant.choir-assistant.workers.dev`.
+
+- [ ] Collegare eventualmente il dominio personalizzato dal dashboard (Workers & Pages → `choir-assistant` → Settings → Domains & Routes).
 - [ ] Verificare HTTPS attivo (il microfono funziona solo in contesto sicuro).
 
-Alternativa: Workers con static assets, che Cloudflare sta promuovendo insieme a Pages; limiti simili. Verificare quale è consigliato al momento.
-
-**Limiti da ricordare (verificare):** 20.000 file per sito sul piano gratuito e 25 MiB per singolo file. Se le basi audio superano il limite, metterle su R2 con dominio dedicato e proteggere anche quel dominio con Access.
+`wrangler.jsonc` è la configurazione di produzione e punta esclusivamente a
+`dist/`. Non eseguire `npx wrangler deploy` finché il test anonimo di Access
+non blocca il segnaposto.
 
 ---
 
 ## 5. Fase 3 — Header di sicurezza
 
-Creare in `dist/_headers` (Pages lo applica automaticamente):
+Creare in `dist/_headers` (Workers Static Assets lo applica automaticamente):
 
 ```text
 /*
@@ -153,13 +166,12 @@ Funzionamento: Access può inviare un codice via email agli indirizzi approvati,
 
 - [ ] Attivare Zero Trust dal dashboard Cloudflare (potrebbe richiedere un metodo di pagamento anche per il piano gratuito; verificare). Secondo guide recenti il piano gratuito copre fino a 50 utenti: con 20 coristi dovrebbe bastare (verificare).
 - [ ] Zero Trust → Integrations/Settings → Identity providers (o Authentication) → aggiungere **One-time PIN**.
-- [ ] Creare un'applicazione **Self-hosted**:
-  - hostname: `coro.tuodominio.it`
-  - (se esiste) anche `static.tuodominio.it` per gli asset su R2
+- [ ] Workers & Pages → `choir-assistant` → **Access** → **Protect this Worker behind Access**:
+  - ambito: **All traffic**, non soltanto preview;
   - **policy Allow → Include → Emails**: elencare le email **esatte** dei coristi (una per riga).
   - durata sessione: valore ragionevole (es. 7–30 giorni; più lunga = meno attrito, ma la revoca vale alla scadenza).
 - [ ] **Non usare** la regola "Emails ending in" con domini pubblici (`@gmail.com`, `@libero.it`, ecc.): farebbe entrare chiunque abbia quel provider. Va bene solo con un dominio tuo.
-- [ ] Proteggere anche `choir-assistant.pages.dev` e le URL di preview `*.choir-assistant.pages.dev`, altrimenti restano pubbliche anche se il dominio personalizzato è chiuso. Verificare nel dashboard se Pages offre un'opzione dedicata per la policy di accesso.
+- [ ] Verificare che la policy sia collegata al **Worker**, non al solo hostname: così copre `workers.dev`, futuri domini personalizzati e preview.
 
 ---
 
@@ -169,7 +181,7 @@ Funzionamento: Access può inviare un codice via email agli indirizzi approvati,
 - [ ] Email **non** in lista → nessun codice / accesso negato.
 - [ ] Email in lista → arriva il PIN (controllare spam) → entra.
 - [ ] `curl -I https://coro.tuodominio.it/assets/<file>` senza sessione → redirect al login o 403, **mai 200**.
-- [ ] Stesso test su `https://choir-assistant.pages.dev` e su una URL di preview.
+- [ ] Stesso test su `https://choir-assistant.choir-assistant.workers.dev`; le version preview devono risultare disabilitate.
 - [ ] Il microfono funziona su HTTPS; nessuna richiesta di rete verso domini esterni (DevTools → Network).
 - [ ] Nessun errore CSP in console.
 - [ ] Prova su: Chrome Android, iPhone Safari, Windows Chrome/Edge, con e senza cuffie Bluetooth (calibrare l'offset, la latenza Bluetooth sfasa base e voce).
@@ -197,8 +209,8 @@ Messaggio tipo:
 |---|---|
 | Aggiungere/togliere un corista | Modificare la lista email nella policy Access |
 | Revocare subito una sessione | Zero Trust → sessioni/utenti → revoca (verificare il menu) |
-| Nuovo brano/versione | Approvare `ScoreVersion` → build → `wrangler pages deploy` |
-| Tornare indietro | Dashboard Pages → Deployments → ripubblica una versione precedente |
+| Nuovo brano/versione | Approvare `ScoreVersion` → build → `wrangler versions upload` → promozione |
+| Tornare indietro | Dashboard Workers & Pages → `choir-assistant` → Deployments → rollback |
 | Aggiornare dipendenze | Audit periodico, riprovare test e build prima del deploy |
 
 Backup (il PC è il punto debole): repository Git remoto privato, copia cifrata fuori dal PC di `sheets/`, `data/` e delle configurazioni; annotare a mano impostazioni di Access e dominio.
@@ -222,7 +234,7 @@ Backup (il PC è il punto debole): repository Git remoto privato, copia cifrata 
 - **Il PIN non arriva:** spam/Promozioni, email diversa da quella in lista, errori di battitura.
 - **Nella build compare “Neurale” o viene scaricato ONNX:** non distribuire; è una regressione della build e va corretta prima del deploy.
 - **Microfono non parte su iPhone:** serve un gesto dell'utente per avviare l'audio; verificare `AudioContext` e permessi Safari.
-- **File troppo grande al deploy:** superato il limite di 25 MiB per file → spostare su R2 protetto da Access.
+- **File troppo grande al deploy:** verificare i limiti Workers correnti; se necessario spostare su R2 e proteggere anche quel dominio con Access.
 - **Vecchia versione dopo il deploy:** cache/PWA; forzare l'aggiornamento e mostrare la versione di build.
 
 ---
@@ -230,7 +242,7 @@ Backup (il PC è il punto debole): repository Git remoto privato, copia cifrata 
 ## 12. Costi previsti
 
 - Dominio: annuale (unica spesa quasi certa).
-- Cloudflare Pages/Access con 20 utenti: verificare che restino nei piani gratuiti al momento dell'attivazione.
+- Cloudflare Workers/Access con 20 utenti: verificare che restino nei piani gratuiti al momento dell'attivazione.
 - Nessun database, server o SSO a pagamento.
 
 ---
@@ -238,6 +250,7 @@ Backup (il PC è il punto debole): repository Git remoto privato, copia cifrata 
 ## 13. Riferimenti da controllare
 
 - Cloudflare Access — One-time PIN: https://developers.cloudflare.com/cloudflare-one/identity/one-time-pin
-- Cloudflare Pages — Direct Upload: https://developers.cloudflare.com/pages/get-started/direct-upload/
-- Cloudflare Pages — limiti: https://developers.cloudflare.com/pages/platform/limits/
-- Cloudflare Workers — limiti e static assets: https://developers.cloudflare.com/workers/writing-workers/resource-limits/
+- Cloudflare Access for Workers: https://developers.cloudflare.com/workers/configuration/cloudflare-access/
+- Cloudflare Workers — static assets: https://developers.cloudflare.com/workers/static-assets/
+- Cloudflare Workers — static asset headers: https://developers.cloudflare.com/workers/static-assets/headers/
+- Cloudflare Workers — limiti: https://developers.cloudflare.com/workers/platform/limits/

@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-09-28
+**Last reviewed:** 2026-10-03
 
 ## Purpose
 
@@ -23,7 +23,7 @@ Maintainer workstation
            |
            | immutable upload
            v
-Cloudflare Access -> Cloudflare Pages -> singer browser
+Cloudflare Access -> Workers Static Assets -> singer browser
                                          |-- Web Audio pitch analysis
                                          |-- localStorage preferences
                                          `-- IndexedDB local takes
@@ -69,7 +69,7 @@ generates security headers and records hashes in `deployment-manifest.json`.
 
 - Cloudflare Access authenticates exact allowlisted email addresses before any
   production asset is served.
-- Pages serves static files only; local admin endpoints are absent.
+- The Worker serves static files only; local admin endpoints are absent.
 - Microphone samples and pitch estimates are processed in the browser.
 - Preferences and recordings remain in browser storage unless a future,
   explicit export feature is introduced.
@@ -93,10 +93,11 @@ generates security headers and records hashes in `deployment-manifest.json`.
   on the local server. Pre-rendered transposed audio may be added later.
 - Pitch scoring is monophonic and expects headphones to avoid backing leakage.
 - The real-vocal corpus is still too small for broad estimator claims.
-- Static preview and production access policies must both be configured; Pages
-  preview URLs are otherwise reachable independently.
+- Access is attached to the Worker and covers production, custom domains and
+  any previews; version preview URLs are disabled by configuration.
 
 ## Related decisions
 
 - [ADR-0001: private static delivery](../decisions/0001-private-static-delivery.md)
 - [ADR-0002: neural pitch models remain diagnostic](../decisions/0002-neural-pitch-diagnostics-only.md)
+- [ADR-0003: Workers static delivery](../decisions/0003-workers-static-delivery.md)

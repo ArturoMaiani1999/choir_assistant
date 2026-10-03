@@ -17,6 +17,20 @@ const nowX = math.timeToX(12, 12, 50, 1250, 4.5, 7.5);
 assert.equal(nowX, 500, 'NOW is 37.5% of plot width');
 assert.equal(math.timeToX(13, 12, 50, 1250, 4.5, 7.5) - nowX, 100, 'one beat has stable width');
 
+assert.deepEqual([1, 2, 3, 4, 5, 6, 7].map(math.melodicIntervalLabel), [null, '2', '3m', '3M', '4', null, '5']);
+assert.equal(math.melodicIntervalLabel(-3), '3m', 'descending intervals use the same label');
+const intervalEvents = [
+  { onsetBeat: 0, durationBeats: 1, midiPitch: 60 },
+  { onsetBeat: 1, durationBeats: 1, midiPitch: 61 },
+  { onsetBeat: 2, durationBeats: 1, midiPitch: 64 },
+  { onsetBeat: 3.5, durationBeats: .5, midiPitch: 59 },
+  { onsetBeat: 4, durationBeats: 1, midiPitch: 64 },
+];
+assert.deepEqual(math.adjacentMelodicIntervals(intervalEvents).map(({ label, direction }) => ({ label, direction })), [
+  { label: '3m', direction: 1 },
+  { label: '4', direction: 1 },
+], 'only supported intervals between notes without a rest are annotated');
+
 const measures = [
   { startBeat: 0, endBeat: 3 },
   { startBeat: 3, endBeat: 6 },

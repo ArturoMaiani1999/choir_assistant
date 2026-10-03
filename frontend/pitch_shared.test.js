@@ -8,6 +8,13 @@ const preferences = shared.readPreferences({ getItem: () => JSON.stringify({
 }) });
 assert.deepEqual(preferences.detector, { rmsThreshold: .002, weakVoiceMode: true, fastAlpha: .7, slowAlpha: .25, medianWindowFrames: 5 });
 assert.deepEqual(preferences.plume, { width: 1.4, intensity: .8, color: '#72e0d2', timeAdvanceMs: 120 });
+const weakRecognition = shared.recognitionSettings(preferences.detector);
+assert.equal(weakRecognition.rmsThreshold, .00003, 'weak voice caps the amplitude gate even when the saved slider is more selective');
+assert.equal(weakRecognition.levelConfidenceFloor, .68, 'weak voice does not charge quiet input a second amplitude penalty');
+assert.equal(weakRecognition.minClarity, .32, 'weak voice admits moderately periodic vocal input');
+assert.equal(weakRecognition.weakSignalHoldFrames, 6, 'weak voice bridges about one tenth of a second at 60 Hz');
+assert.equal(shared.recognitionSettings({ rmsThreshold: .002, weakVoiceMode: false }).rmsThreshold, .002,
+  'normal mode preserves the user-selected RMS gate');
 const frame = (time, pitch = 60, confidence = .9, takeId = 1) => ({ time, displayPitch: pitch, confidence, takeId });
 const signal = (fn, count = 121, dt = .025) => Array.from({length: count}, (_,i) => frame(i*dt, fn(i*dt)));
 function columns(samples, options = {}) {

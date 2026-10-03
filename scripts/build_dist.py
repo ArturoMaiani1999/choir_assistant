@@ -10,25 +10,48 @@ import shutil
 import subprocess
 from datetime import datetime, timezone
 from pathlib import Path
+from urllib.parse import unquote, urlsplit
 
 from check_voice_lab_artifacts import audit_voice_lab_artifacts
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 DEFAULT_CONFIG = ROOT / "deploy" / "repertoire.json"
-CORE_ASSETS = ("styles.css", "studio.css", "score_appearance.js", "practice_math.js", "score_runtime.js", "pitch_detector.js", "pitch_shared.js", "fluid_pitch_trail.js", "vocal_feedback.js",
-               "one_euro_filter.js", "app.js", "voice_lab_core.js", "voice_draw_core.js", "voice_lab.js")
+CORE_ASSETS = (
+    "styles.css", "studio.css", "ui_preferences.js", "score_appearance.js",
+    "practice_math.js", "score_runtime.js", "pitch_detector.js",
+    "pitch_detector_worker.js", "pitch_shared.js", "fluid_pitch_trail.js",
+    "vocal_feedback.js", "one_euro_filter.js", "app.js", "voice_lab_core.js",
+    "voice_draw_core.js", "voice_lab.js",
+)
 FORBIDDEN_TEXT = ("__pitchTestHooks", "/api/", "cdn.jsdelivr", "unpkg", "localhost")
 FORBIDDEN_SUFFIXES = (".mscz", ".env", ".py", ".map", ".musicxml", ".xml", ".onnx")
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_FILES = 20_000
+PLACEHOLDER_RIGHTS_NOTES = {
+    "motivo o riferimento dell'autorizzazione",
+    "motivo o riferimento dell’autorizzazione",
+    "todo",
+    "tbd",
+}
 
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def current_version() -> str:
+def worktree_is_dirty() -> bool:
+    try:
+        status = subprocess.run(
+            ["git", "status", "--porcelain", "--untracked-files=normal"], cwd=ROOT,
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError):
+        return True
+    return bool(status)
+
+
+def current_version(*, dirty: bool = False) -> str:
     try:
         revision = subprocess.run(
             ["git", "rev-parse", "--short=12", "HEAD"], cwd=ROOT,
@@ -36,7 +59,8 @@ def current_version() -> str:
         ).stdout.strip()
     except (OSError, subprocess.CalledProcessError):
         revision = "nogit"
-    return f"{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-{revision}"
+    suffix = "-dirty" if dirty else ""
+    return f"{datetime.now(timezone.utc):%Y%m%d-%H%M%S}-{revision}{suffix}"
 
 
 def read_allowlist(path: Path) -> list[dict]:
@@ -50,8 +74,11 @@ def read_allowlist(path: Path) -> list[dict]:
             raise ValueError(f"ID brano non valido o duplicato: {piece_id!r}")
         if item.get("publication_approved") is not True:
             raise ValueError(f"{piece_id}: publication_approved deve essere true")
-        if not str(item.get("rights_note", "")).strip():
+        rights_note = str(item.get("rights_note", "")).strip()
+        if not rights_note:
             raise ValueError(f"{piece_id}: manca rights_note")
+        if rights_note.casefold() in PLACEHOLDER_RIGHTS_NOTES:
+            raise ValueError(f"{piece_id}: rights_note è ancora un segnaposto")
         seen.add(piece_id)
     return pieces
 
@@ -69,6 +96,66 @@ def fingerprint_copy(source: Path, destination: Path) -> str:
     name = f"{source.stem}.{sha256(source)[:12]}{source.suffix}"
     shutil.copy2(source, destination / name)
     return name
+
+
+def fingerprint_text(source_name: str, contents: str, destination: Path) -> str:
+    temporary = destination / source_name
+    temporary.write_text(contents, encoding="utf-8")
+    name = fingerprint_copy(temporary, destination)
+    temporary.unlink()
+    return name
+
+
+def build_core_assets(destination: Path) -> dict[str, str]:
+    """Copy core assets while preserving dependencies between hashed scripts."""
+    generated = {"app.js", "pitch_detector_worker.js"}
+    names = {
+        name: fingerprint_copy(FRONTEND / name, destination)
+        for name in CORE_ASSETS
+        if name not in generated
+    }
+
+    worker = (FRONTEND / "pitch_detector_worker.js").read_text(encoding="utf-8")
+    worker = re.sub(
+        r"pitch_detector\.js(?:\?v=[^'\"]+)?",
+        names["pitch_detector.js"],
+        worker,
+    )
+    names["pitch_detector_worker.js"] = fingerprint_text(
+        "pitch_detector_worker.js", worker, destination,
+    )
+
+    app = (FRONTEND / "app.js").read_text(encoding="utf-8")
+    app = re.sub(
+        r"pitch_detector_worker\.js(?:\?v=[^'\"]+)?",
+        names["pitch_detector_worker.js"],
+        app,
+    )
+    names["app.js"] = fingerprint_text("app.js", app, destination)
+    return names
+
+
+def audit_local_references(destination: Path) -> None:
+    """Fail the release when generated HTML or worker entry points return 404."""
+    patterns = {
+        ".html": re.compile(r"(?:src|href)=[\"']([^\"']+)[\"']"),
+        ".js": re.compile(r"(?:new\s+Worker|importScripts)\(\s*[\"']([^\"']+)[\"']"),
+    }
+    missing: list[str] = []
+    for path in destination.rglob("*"):
+        pattern = patterns.get(path.suffix.lower())
+        if not path.is_file() or pattern is None:
+            continue
+        for raw_reference in pattern.findall(path.read_text(encoding="utf-8")):
+            parsed = urlsplit(raw_reference)
+            if parsed.scheme or parsed.netloc or not parsed.path:
+                continue
+            relative = unquote(parsed.path).lstrip("/")
+            target = destination / relative if parsed.path.startswith("/") else path.parent / relative
+            if not target.is_file():
+                missing.append(f"{path.relative_to(destination).as_posix()} -> {raw_reference}")
+    if missing:
+        raise ValueError("Riferimenti locali assenti nella build: " + ", ".join(sorted(missing)))
 
 
 def build_piece(piece: dict, destination: Path) -> dict:
@@ -178,12 +265,22 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
+    parser.add_argument(
+        "--allow-dirty", action="store_true",
+        help="consente una build diagnostica locale, marcata -dirty e non pubblicabile",
+    )
     args = parser.parse_args()
     pieces = read_allowlist(args.config.resolve())
+    dirty = worktree_is_dirty()
+    if dirty and not args.allow_dirty:
+        raise ValueError(
+            "working tree non pulito: committare le modifiche prima di creare una release "
+            "oppure usare --allow-dirty solo per una verifica locale"
+        )
     destination = args.output.resolve()
     safe_clean(destination)
-    version = current_version()
-    names = {name: fingerprint_copy(FRONTEND / name, destination) for name in CORE_ASSETS}
+    version = current_version(dirty=dirty)
+    names = build_core_assets(destination)
     index = (FRONTEND / "index.html").read_text(encoding="utf-8")
     index = re.sub(r'\s*<script src="https://cdn\.jsdelivr\.net/[^\n]+\n', "\n", index)
     index = re.sub(r'\s*<script src="pitch_test_harness\.js[^\n]+\n', "\n", index)
@@ -217,6 +314,7 @@ def main() -> int:
     listings = [build_piece(piece, destination) for piece in pieces]
     (destination / "library.json").write_text(json.dumps({"pieces": listings}, ensure_ascii=False), encoding="utf-8")
     write_headers(destination)
+    audit_local_references(destination)
     hashes = audit(destination)
     manifest = {"build_version": version, "created_at": datetime.now(timezone.utc).isoformat(),
                 "pieces": [piece["id"] for piece in pieces], "files": hashes}

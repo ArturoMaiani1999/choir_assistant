@@ -1,5 +1,5 @@
 const { NormalizedScoreRuntime, MediaPlaybackClock } = window.ChoirScore;
-const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, measureSeekState, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
+const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, adjacentMelodicIntervals, measureSeekState, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
 const { detectPitch, PitchSmoother, OctaveAwarePitchTracker, yinCandidates, decodeYinCandidatePath, mpmCandidates, decodeCrepeProbabilities } = window.ChoirPitch;
 const PitchShared = window.ChoirPitchShared;
 const FluidPitchTrail = window.ChoirFluidPitchTrail;
@@ -26,10 +26,13 @@ const UI_CONFIG = Object.freeze({
   acceptableCents: 30,
   targetToleranceCents: 25,
   pitchViewportResponseMs: 180,
+  // Analysis follows a 60 Hz ceiling, but runs off the rendering thread.
+  // On slower devices the one-in-flight rule naturally applies backpressure.
+  pitchAnalysisIntervalMs: 1000 / 60,
 });
 
 const els = Object.fromEntries([
-  'transpose', 'settings-display-pitch-algorithm', 'settings-text-scale', 'settings-text-scale-value',
+  'transpose', 'settings-display-pitch-algorithm', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
   'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
   'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close', 'settings-dialog', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-reset', 'settings-close',
   'result-dialog', 'result-text', 'result-progress', 'retry', 'next-phrase', 'result-close',
@@ -43,6 +46,7 @@ const els = Object.fromEntries([
 
 const state = {
   lyricTextScale: UiPreferences.read(),
+  showIntervals: false,
   transpose: 0,
   phrase: null,
   autoLoop: false,
@@ -82,6 +86,11 @@ const state = {
   microphoneAnalyser: null,
   microphoneSilencer: null,
   microphoneBuffer: null,
+  pitchWorker: null,
+  pitchWorkerInFlight: false,
+  pitchWorkerDisabled: false,
+  pitchAnalysisGeneration: 0,
+  pitchAnalysisTimer: null,
   microphoneRms: 0,
   pitchSmoother: new PitchSmoother(),
   displayPitchFilter: new OneEuroFilter(),
@@ -103,11 +112,6 @@ const state = {
 
 const V1_RMS_THRESHOLD = Object.freeze({ default: .001, min: .000001, max: .01 });
 const V1_TRACKER_DEFAULTS = Object.freeze({ fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 });
-const V1_RECOGNITION = Object.freeze({
-  normal: Object.freeze({ minClarity: .45, minConfidence: .30, yinThreshold: .42, weakSignalHoldFrames: 0 }),
-  weakVoice: Object.freeze({ minClarity: .35, minConfidence: .12, yinThreshold: .55,
-    rmsThresholdCeiling: .00003, weakSignalHoldFrames: 2 }),
-});
 const fluidTrailRenderer = new FluidPitchTrail.Renderer(els.pitchFluidLayer);
 
 function rmsThresholdFromSlider(value) {
@@ -128,15 +132,18 @@ function formatRmsThreshold(value) {
 function updateDetectorSettingsUi() {
   els.settingsTextScale.value = String(Math.round(state.lyricTextScale * 100));
   els.settingsTextScaleValue.textContent = `${Math.round(state.lyricTextScale * 100)}%`;
+  els.settingsShowIntervals.checked = state.showIntervals;
   const threshold = state.detectorSettings.rmsThreshold;
   els.settingsV1Rms.value = String(rmsSliderFromThreshold(threshold));
   els.settingsV1RmsValue.textContent = `${formatRmsThreshold(threshold)} RMS`;
   els.settingsWeakVoiceMode.checked = state.detectorSettings.weakVoiceMode;
-  els.settingsV1RmsDescription.textContent = threshold < V1_RMS_THRESHOLD.default
-    ? 'Più sensibile: ammette segnali deboli; verifica che non compaiano pitch sul rumore.'
-    : threshold > V1_RMS_THRESHOLD.default
-      ? 'Più selettiva: richiede una voce più presente e filtra meglio il rumore debole.'
-      : 'Valore predefinito: filtra silenzio e rumore debole.';
+  els.settingsV1RmsDescription.textContent = state.detectorSettings.weakVoiceMode
+    ? 'Voce debole: questa è l’unica soglia legata al volume; periodicità e confidenza usano limiti più permissivi.'
+    : threshold < V1_RMS_THRESHOLD.default
+      ? 'Più sensibile: ammette segnali deboli; verifica che non compaiano pitch sul rumore.'
+      : threshold > V1_RMS_THRESHOLD.default
+        ? 'Più selettiva: richiede una voce più presente e filtra meglio il rumore debole.'
+        : 'Valore predefinito: filtra silenzio e rumore debole.';
   els.settingsV1FastAlpha.value = String(Math.round(state.detectorSettings.fastAlpha * 100));
   els.settingsV1FastAlphaValue.textContent = `${Math.round(state.detectorSettings.fastAlpha * 100)}%`;
   els.settingsV1SlowAlpha.value = String(Math.round(state.detectorSettings.slowAlpha * 100));
@@ -153,15 +160,12 @@ function updateDetectorSettingsUi() {
 }
 
 function applyLiveTrackerSettings() {
-  const recognition = state.detectorSettings.weakVoiceMode ? V1_RECOGNITION.weakVoice : V1_RECOGNITION.normal;
+  const recognition = PitchShared.recognitionSettings(state.detectorSettings);
   state.pitchSmoother.configure({ ...state.detectorSettings, ...recognition });
 }
 
 function activeRecognitionSettings() {
-  const recognition = state.detectorSettings.weakVoiceMode ? V1_RECOGNITION.weakVoice : V1_RECOGNITION.normal;
-  return { ...recognition, rmsThreshold: recognition.rmsThresholdCeiling
-    ? Math.min(state.detectorSettings.rmsThreshold, recognition.rmsThresholdCeiling)
-    : state.detectorSettings.rmsThreshold };
+  return PitchShared.recognitionSettings(state.detectorSettings);
 }
 
 function openDetectorSettings() {
@@ -508,8 +512,6 @@ function renderScore(beat) {
     els.scoreCursor.style.display = 'none';
     return;
   }
-  els.scoreCursor.style.display = '';
-
   const nextEvent = glyph && state.runtime.targetEvents.find((candidate) => {
     const candidateGlyph = sourceGlyph(candidate);
     return candidate.onsetBeat >= event.onsetBeat + event.durationBeats - 0.001 && candidateGlyph?.systemId === glyph.systemId;
@@ -518,14 +520,16 @@ function renderScore(beat) {
   const nextGlyph = glyph && candidateNextGlyph?.x_percent >= glyph.x_percent ? candidateNextGlyph : null;
   const progress = Math.max(0, Math.min(1, (beat - event.onsetBeat) / Math.max(event.durationBeats, .01)));
   const x = glyph ? (nextGlyph ? glyph.x_percent + (nextGlyph.x_percent - glyph.x_percent) * progress : glyph.x_percent) : fallback.x_percent;
-  els.scoreCursor.style.left = `${x}%`;
-  els.scoreCursor.style.top = `${activeGlyph.y_percent}%`;
-
+  // Read layout before mutating cursor styles. The previous order forced the
+  // browser to synchronously recalculate layout on every animation frame.
   const imageHeight = els.scoreImage.getBoundingClientRect().height;
   const viewportHeight = els.scoreViewport.clientHeight;
   const sheetWidth = els.scoreSheet.getBoundingClientRect().width;
   const viewportWidth = els.scoreViewport.clientWidth;
   if (!imageHeight || !sheetWidth || !viewportWidth) return;
+  els.scoreCursor.style.display = '';
+  els.scoreCursor.style.left = `${x}%`;
+  els.scoreCursor.style.top = `${activeGlyph.y_percent}%`;
   // Keep the current-time bar visible across the whole score window, rather
   // than limiting it to a small marker around the active note.
   els.scoreCursor.style.height = `${Math.max(86, viewportHeight)}px`;
@@ -573,27 +577,15 @@ function pitchBounds(beat) {
   return viewport.bounds;
 }
 
-function sampleMicrophone(beat, running) {
-  const now = performance.now();
-  const elapsed = state.lastSampleMs == null ? 0 : Math.min(64, now - state.lastSampleMs);
-  state.lastSampleMs = now;
-  if (state.microphoneStatus !== 'active') { state.trackedPitch = null; state.displayPitch = null; state.pitchConfirmationState = null; state.displayPitchFilter.reset(); state.microphoneRms = 0; return; }
-  state.microphoneAnalyser.getFloatTimeDomainData(state.microphoneBuffer);
-  const v1StartedMs = performance.now();
-  const rawEstimate = detectPitch(state.microphoneBuffer, state.microphoneContext.sampleRate, activeRecognitionSettings());
-  if (state.neuralLive.enabled || state.neuralLive.loading) {
-    state.neuralLive.v1DurationsMs.push(performance.now() - v1StartedMs);
+function applyPitchEstimate(rawEstimate, beat, sampledAt, analysisMs, running) {
+  if (state.microphoneStatus !== 'active') return;
+  if ((state.neuralLive.enabled || state.neuralLive.loading) && Number.isFinite(analysisMs)) {
+    state.neuralLive.v1DurationsMs.push(analysisMs);
     if (state.neuralLive.v1DurationsMs.length > 80) state.neuralLive.v1DurationsMs.shift();
   }
-  const estimate = state.pitchSmoother.update(rawEstimate, performance.now());
-  queueNeuralLiveInference(state.microphoneBuffer, state.microphoneContext.sampleRate, beat);
+  const estimate = state.pitchSmoother.update(rawEstimate, sampledAt);
   appendBenchmarkFrame(estimate, beat);
   state.microphoneRms = estimate.rms;
-  document.getElementById('microphone-level').value = state.microphoneRms;
-  document.getElementById('test-microphone-level').value = state.microphoneRms;
-  document.getElementById('microphone-help').textContent = state.trackedPitch == null
-    ? state.microphoneRms < activeRecognitionSettings().rmsThreshold ? 'Microfono aperto: segnale troppo debole. Controlla ingresso e volume in Windows.' : 'Il segnale arriva. Tieni una nota per riconoscerla.'
-    : `Nota riconosciuta: ${noteLabel(state.trackedPitch)}. Sei pronto per iniziare.`;
   state.trackedPitch = estimate.stable && estimate.accepted && estimate.hz
     ? 69 + 12 * Math.log2(estimate.hz / 440)
     : null;
@@ -607,14 +599,15 @@ function sampleMicrophone(beat, running) {
     state.displayPitchFilter.reset();
     state.displayPitch = null;
   } else if (state.displayPitchAlgorithm === 'v1') state.displayPitch = displayPitchFromTracked(state.trackedPitch);
-  else state.displayPitch = state.displayPitchFilter.filter(state.trackedPitch, performance.now() / 1000);
-  if (running && state.trackedPitch != null) {
-    const target = state.runtime.targetAt(beat);
-    if (state.attemptActive && target && beat >= state.scoringStartBeat && beat >= target.onsetBeat + target.attackGraceBeats) {
-      state.attempt.voicedMs += elapsed;
-      if (Math.abs((state.trackedPitch - target.midiPitch - state.transpose) * 100) <= UI_CONFIG.acceptableCents) state.attempt.insideMs += elapsed;
-    }
-  }
+  else state.displayPitch = state.displayPitchFilter.filter(state.trackedPitch, sampledAt / 1000);
+  document.getElementById('microphone-level').value = state.microphoneRms;
+  document.getElementById('test-microphone-level').value = state.microphoneRms;
+  const microphoneHelp = state.trackedPitch == null
+    ? state.microphoneRms < activeRecognitionSettings().rmsThreshold ? 'Microfono aperto: segnale troppo debole. Controlla ingresso e volume in Windows.' : 'Il segnale arriva. Tieni una nota per riconoscerla.'
+    : `Nota riconosciuta: ${noteLabel(state.trackedPitch)}. Sei pronto per iniziare.`;
+  const microphoneHelpElement = document.getElementById('microphone-help');
+  if (microphoneHelpElement.textContent !== microphoneHelp) microphoneHelpElement.textContent = microphoneHelp;
+
   // Retain invalid observations too: the renderer must see silence boundaries.
   if (running || state.displayPitch != null || rawPitch != null) {
     const previous = state.pitchSamples.at(-1);
@@ -624,9 +617,100 @@ function sampleMicrophone(beat, running) {
     if (!running && previous?.takeId === state.pitchTakeId && Math.abs(beat - previous.beat) < .025) state.pitchSamples[state.pitchSamples.length - 1] = sample;
     else if (!previous || previous.takeId !== state.pitchTakeId || beat - previous.beat >= .025) state.pitchSamples.push(sample);
   }
-  // Keep a bounded session history: the director can pan back over earlier
-  // takes instead of losing the trace whenever playback is repositioned.
   if (state.pitchSamples.length > 12000) state.pitchSamples.splice(0, state.pitchSamples.length - 12000);
+}
+
+function stopPitchWorker() {
+  state.pitchAnalysisGeneration += 1;
+  state.pitchWorker?.terminate();
+  state.pitchWorker = null;
+  state.pitchWorkerInFlight = false;
+}
+
+function ensurePitchWorker() {
+  if (state.pitchWorker || state.pitchWorkerDisabled || !window.Worker) return state.pitchWorker;
+  try {
+    const worker = new Worker('pitch_detector_worker.js');
+    worker.onmessage = ({ data }) => {
+      state.pitchWorkerInFlight = false;
+      if (data.buffer && state.microphoneStatus === 'active') state.microphoneBuffer = new Float32Array(data.buffer);
+      if (data.error) {
+        state.pitchWorkerDisabled = true;
+        worker.terminate(); state.pitchWorker = null;
+        if (state.microphoneStatus === 'active' && !state.microphoneBuffer)
+          state.microphoneBuffer = new Float32Array(state.microphoneAnalyser.fftSize);
+        return;
+      }
+      if (data.generation !== state.pitchAnalysisGeneration) return;
+      applyPitchEstimate(data.estimate, data.beat, data.sampledAt, data.analysisMs, data.running);
+    };
+    worker.onerror = () => {
+      state.pitchWorkerDisabled = true;
+      stopPitchWorker();
+      if (state.microphoneStatus === 'active') state.microphoneBuffer = new Float32Array(state.microphoneAnalyser.fftSize);
+    };
+    state.pitchWorker = worker;
+  } catch (_) { state.pitchWorkerDisabled = true; }
+  return state.pitchWorker;
+}
+
+function analyseMicrophone(beat, running, now) {
+  if (!state.microphoneBuffer || state.pitchWorkerInFlight) return;
+  state.microphoneAnalyser.getFloatTimeDomainData(state.microphoneBuffer);
+  queueNeuralLiveInference(state.microphoneBuffer, state.microphoneContext.sampleRate, beat);
+  const worker = ensurePitchWorker();
+  if (worker) {
+    const buffer = state.microphoneBuffer.buffer;
+    state.microphoneBuffer = null;
+    state.pitchWorkerInFlight = true;
+    try {
+      worker.postMessage({ buffer, sampleRate: state.microphoneContext.sampleRate,
+        settings: activeRecognitionSettings(), beat, sampledAt: now, running,
+        generation: state.pitchAnalysisGeneration }, [buffer]);
+    } catch (_) {
+      state.pitchWorkerInFlight = false;
+      state.pitchWorkerDisabled = true;
+      stopPitchWorker();
+      state.microphoneBuffer = new Float32Array(state.microphoneAnalyser.fftSize);
+    }
+    return;
+  }
+  const startedAt = performance.now();
+  const estimate = detectPitch(state.microphoneBuffer, state.microphoneContext.sampleRate, activeRecognitionSettings());
+  applyPitchEstimate(estimate, beat, now, performance.now() - startedAt, running);
+}
+
+function stopPitchAnalysisLoop() {
+  clearInterval(state.pitchAnalysisTimer);
+  state.pitchAnalysisTimer = null;
+}
+
+function startPitchAnalysisLoop() {
+  stopPitchAnalysisLoop();
+  const tick = () => {
+    if (state.microphoneStatus !== 'active' || state.pitchWorkerInFlight) return;
+    const snapshot = state.clock?.snapshot() ?? { beat: 0, running: false };
+    analyseMicrophone(snapshot.beat, snapshot.running, performance.now());
+  };
+  tick();
+  state.pitchAnalysisTimer = setInterval(tick, UI_CONFIG.pitchAnalysisIntervalMs);
+}
+
+function sampleMicrophone(beat, running) {
+  const now = performance.now();
+  const elapsed = state.lastSampleMs == null ? 0 : Math.min(64, now - state.lastSampleMs);
+  state.lastSampleMs = now;
+  if (state.microphoneStatus !== 'active') {
+    state.trackedPitch = null; state.displayPitch = null; state.pitchConfirmationState = null;
+    state.displayPitchFilter.reset(); state.microphoneRms = 0; return;
+  }
+  if (running && state.trackedPitch != null) {
+    const target = state.runtime.targetAt(beat);
+    if (state.attemptActive && target && beat >= state.scoringStartBeat && beat >= target.onsetBeat + target.attackGraceBeats) {
+      state.attempt.voicedMs += elapsed;
+      if (Math.abs((state.trackedPitch - target.midiPitch - state.transpose) * 100) <= UI_CONFIG.acceptableCents) state.attempt.insideMs += elapsed;
+    }
+  }
 }
 
 function medianOf(values) {
@@ -781,11 +865,46 @@ function drawStablePitchSegments(context, segments, xAt, yAt) {
   }
 }
 
+function drawMelodicIntervalArrows(context, events, xAtBeat, yAtPitch, rowHeight, clip) {
+  const colour = '#438eaa';
+  context.save();
+  context.beginPath(); context.rect(clip.left, clip.top, clip.right - clip.left, clip.bottom - clip.top); context.clip();
+  context.strokeStyle = colour; context.lineWidth = 2;
+  context.lineCap = 'round'; context.lineJoin = 'round';
+  for (const interval of adjacentMelodicIntervals(events)) {
+    const x = Math.round(xAtBeat(interval.next.onsetBeat)) + .5;
+    if (x < clip.left || x > clip.right) continue;
+    const previousY = yAtPitch(interval.previous.midiPitch + state.transpose);
+    const nextY = yAtPitch(interval.next.midiPitch + state.transpose);
+    const startY = previousY - interval.direction * rowHeight / 2;
+    const endY = nextY + interval.direction * rowHeight / 2;
+    const canvasDirection = Math.sign(endY - startY);
+    context.beginPath(); context.moveTo(x, startY); context.lineTo(x, endY); context.stroke();
+    context.beginPath();
+    context.moveTo(x - 4, endY - canvasDirection * 6);
+    context.lineTo(x, endY);
+    context.lineTo(x + 4, endY - canvasDirection * 6);
+    context.stroke();
+
+    context.font = '700 10px Inter, sans-serif';
+    context.textAlign = 'left'; context.textBaseline = 'middle';
+    const labelWidth = context.measureText(interval.label).width;
+    // Syllables begin immediately to the right of a note onset, so prefer the
+    // preceding side of the join and avoid merging labels such as “2” with text.
+    const labelX = x - labelWidth - 12 >= clip.left ? x - labelWidth - 10 : x + 7;
+    const labelY = (startY + endY) / 2;
+    context.fillStyle = colour;
+    roundedRect(context, labelX - 3, labelY - 7, labelWidth + 6, 14, 4); context.fill();
+    context.fillStyle = '#071419'; context.fillText(interval.label, labelX, labelY + .5);
+  }
+  context.restore();
+}
+
 function livePlumeSettings(displayBeat, inspecting, nowX, trailStartX) {
   const speed = Math.max(.1, Number(els.playbackSpeed.value) || 1);
   return { ...state.plumeSettings, nowX, trailStartX,
     mode: inspecting ? 'review' : 'live', sortedTimeline: !inspecting,
-    minConfidence: state.detectorSettings.weakVoiceMode ? V1_RECOGNITION.weakVoice.minConfidence : V1_RECOGNITION.normal.minConfidence,
+    minConfidence: activeRecognitionSettings().minConfidence,
     currentTime: state.runtime.secondsAtBeat(displayBeat) / speed,
     timeAt: sample => state.runtime.secondsAtBeat(sample.beat) / speed };
 }
@@ -809,8 +928,7 @@ function drawPitchLane(beat) {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, rect.width, rect.height);
-  fluidTrailRenderer.resize(rect.width, rect.height, dpr);
-  fluidTrailRenderer.clear();
+  let fluidLayerDrawn = false;
 
   const plot = { left: rect.width < 700 ? 48 : 58, right: rect.width - 8, top: rect.width < 700 ? 28 : 32, bottom: rect.height - 24 };
   const inspect = state.gridInspect;
@@ -898,6 +1016,11 @@ function drawPitchLane(beat) {
       ctx.fillText(lyric, x + 2, y - blockHeight / 2 - 2);
     }
   });
+  if (state.showIntervals) {
+    drawMelodicIntervalArrows(ctx, state.runtime.targetEvents,
+      (eventBeat) => timeToX(eventBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats),
+      (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), rowHeight, plot);
+  }
 
   ctx.save();
   ctx.beginPath(); ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top); ctx.clip();
@@ -910,7 +1033,8 @@ function drawPitchLane(beat) {
       ribbonScale: state.plumeSettings.width, intensity: state.plumeSettings.intensity, dpr, width: rect.width, height: rect.height,
       clip: { left: plot.left, top: plot.top, right: inspecting ? plot.right : nowX, bottom: plot.bottom },
       animationTime: state.clock.running ? performance.now() / 1000 : state.runtime.secondsAtBeat(displayBeat) };
-    if (!fluidTrailRenderer.render(v1PlumeSamples, xAtVoice, yAtVoice, trailSettings))
+    fluidLayerDrawn = fluidTrailRenderer.render(v1PlumeSamples, xAtVoice, yAtVoice, trailSettings);
+    if (!fluidLayerDrawn)
       FluidPitchTrail.drawFallback(ctx, v1PlumeSamples, xAtVoice, yAtVoice, trailSettings);
   }
   if (state.pitchLayers.crepe && (state.neuralLive.enabled || state.neuralLive.samples.length)) {
@@ -923,6 +1047,12 @@ function drawPitchLane(beat) {
       (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), bounds.min, bounds.max,
       { ...livePlumeSettings(displayBeat, inspecting, inspecting ? plot.right : nowX, plot.left), intensity: state.plumeSettings.intensity * .55,
         palette: [[147,207,211], [113,153,183], [83,104,137]] });
+  }
+  if (!fluidLayerDrawn) {
+    // Clear a previously rendered WebGL ribbon when its layer is disabled.
+    // Renderer.render already resizes and clears when the layer is active.
+    fluidTrailRenderer.resize(rect.width, rect.height, dpr);
+    fluidTrailRenderer.clear();
   }
   ctx.restore(); ctx.shadowBlur = 0;
 
@@ -946,29 +1076,30 @@ function drawPitchLane(beat) {
 }
 
 function renderReadout(beat, running) {
+  const update = (element, value) => { if (element.textContent !== value) element.textContent = value; };
+  const updateState = (value) => { if (els.intonationReadout.dataset.state !== value) els.intonationReadout.dataset.state = value; };
   const target = state.runtime.targetAt(beat);
   const singerPitch = state.displayPitch;
   if (!target && singerPitch != null) {
-    els.liveNote.textContent = noteLabel(singerPitch); els.liveCents.textContent = '— ¢';
-    els.liveState.textContent = 'voce rilevata · nessun target'; els.intonationReadout.dataset.state = ''; return;
+    update(els.liveNote, noteLabel(singerPitch)); update(els.liveCents, '— ¢');
+    update(els.liveState, 'voce rilevata · nessun target'); updateState(''); return;
   }
   if (!target || singerPitch == null) {
-    els.liveNote.textContent = target?.noteName ?? '—';
-    els.liveCents.textContent = '— ¢';
-    els.liveNote.textContent = '—';
-    els.liveState.textContent = state.microphoneStatus === 'active'
+    update(els.liveCents, '— ¢');
+    update(els.liveNote, '—');
+    update(els.liveState, state.microphoneStatus === 'active'
       ? state.microphoneRms < .001
         ? 'nessun segnale dal microfono'
         : 'segnale ricevuto: nota non riconosciuta'
-      : state.microphoneStatus === 'denied' ? 'permesso negato' : 'attiva il microfono';
-    els.intonationReadout.dataset.state = '';
+      : state.microphoneStatus === 'denied' ? 'permesso negato' : 'attiva il microfono');
+    updateState('');
     return;
   }
   if (state.pitchConfirmationState === 'provisional') {
-    els.liveNote.textContent = noteLabel(singerPitch);
-    els.liveCents.textContent = '— ¢';
-    els.liveState.textContent = 'transizione in verifica';
-    els.intonationReadout.dataset.state = 'provisional';
+    update(els.liveNote, noteLabel(singerPitch));
+    update(els.liveCents, '— ¢');
+    update(els.liveState, 'transizione in verifica');
+    updateState('provisional');
     return;
   }
   const cents = centsBetween(pitchToHz(singerPitch), pitchToHz(target.midiPitch + state.transpose));
@@ -979,10 +1110,10 @@ function renderReadout(beat, running) {
     : octaves && Math.abs(rounded - octaves * 1200) < 150
       ? `${Math.abs(octaves)} ottav${Math.abs(octaves) === 1 ? 'a' : 'e'} ${octaves > 0 ? 'sopra' : 'sotto'}`
       : `${abs <= UI_CONFIG.acceptableCents ? 'leggermente ' : ''}${rounded > 0 ? 'crescente' : 'calante'}`;
-  els.liveNote.textContent = noteLabel(singerPitch);
-  els.liveCents.textContent = `${rounded > 0 ? '+' : rounded < 0 ? '−' : ''}${Math.abs(rounded)} ¢`;
-  els.liveState.textContent = label;
-  els.intonationReadout.dataset.state = abs > UI_CONFIG.acceptableCents ? 'outside' : 'inside';
+  update(els.liveNote, noteLabel(singerPitch));
+  update(els.liveCents, `${rounded > 0 ? '+' : rounded < 0 ? '−' : ''}${Math.abs(rounded)} ¢`);
+  update(els.liveState, label);
+  updateState(abs > UI_CONFIG.acceptableCents ? 'outside' : 'inside');
   if (label !== state.lastAnnouncedState) state.lastAnnouncedState = label;
 }
 
@@ -1008,8 +1139,10 @@ function render() {
   sampleMicrophone(snapshot.beat, snapshot.running);
   const index = measureIndexAt(snapshot.beat);
   const measure = state.occurrenceMeasures[index];
-  els.scoreMeasureLabel.textContent = `Battuta ${measure?.number ?? '—'}`;
-  els.measureCounter.textContent = `Battuta ${measure?.number ?? '—'} / ${state.occurrenceMeasures.length}`;
+  const scoreMeasureLabel = `Battuta ${measure?.number ?? '—'}`;
+  const measureCounter = `${scoreMeasureLabel} / ${state.occurrenceMeasures.length}`;
+  if (els.scoreMeasureLabel.textContent !== scoreMeasureLabel) els.scoreMeasureLabel.textContent = scoreMeasureLabel;
+  if (els.measureCounter.textContent !== measureCounter) els.measureCounter.textContent = measureCounter;
   renderScore(snapshot.beat);
   drawPitchLane(snapshot.beat);
   renderReadout(snapshot.beat, snapshot.running);
@@ -1192,6 +1325,8 @@ async function stopMicrophone() {
   state.microphoneSource?.disconnect();
   state.microphoneAnalyser?.disconnect();
   state.microphoneSilencer?.disconnect();
+  stopPitchAnalysisLoop();
+  stopPitchWorker();
   if (state.microphoneContext && state.microphoneContext.state !== 'closed') await state.microphoneContext.close();
   state.microphoneStream = null; state.microphoneContext = null; state.microphoneSource = null; state.microphoneAnalyser = null; state.microphoneSilencer = null; state.microphoneBuffer = null;
   state.microphoneStatus = 'idle'; state.trackedPitch = null; state.displayPitch = null; state.pitchConfirmationState = null; state.microphoneRms = 0; state.pitchSmoother.reset(); state.displayPitchFilter.reset();
@@ -1210,15 +1345,21 @@ async function toggleMicrophone() {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 }, video: false });
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     const context = new AudioContextClass({ latencyHint: 'interactive' }); await context.resume();
-    const analyser = context.createAnalyser(); analyser.fftSize = 4096; analyser.smoothingTimeConstant = 0;
+    // A 2048-sample window covers the practical choir range down to D2/E2
+    // while containing only ~43 ms of audio at 48 kHz. Combined with the
+    // 60 Hz worker cadence this reacts faster than the former 4096-sample
+    // main-thread detector and leaves ample CPU headroom for compositing.
+    const analyser = context.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0;
     const source = context.createMediaStreamSource(stream);
     // Audio nodes are pull-driven. Route the analyser to a muted sink so the
     // browser processes the microphone graph without feeding it back to the room.
     const silencer = context.createGain(); silencer.gain.value = 0;
     source.connect(analyser); analyser.connect(silencer); silencer.connect(context.destination);
     state.microphoneStream = stream; state.microphoneContext = context; state.microphoneSource = source; state.microphoneAnalyser = analyser; state.microphoneSilencer = silencer;
+    state.pitchWorkerDisabled = false; state.pitchWorkerInFlight = false;
     state.microphoneBuffer = new Float32Array(analyser.fftSize); state.pitchSmoother.reset(); beginPitchTake();
     state.microphoneStatus = 'active'; updateMicrophoneButton();
+    startPitchAnalysisLoop();
     showToast('Microfono attivo. Per risultati migliori usa le cuffie.');
     if (!state.rafId) state.rafId = requestAnimationFrame(render);
   } catch (error) {
@@ -1233,6 +1374,7 @@ function preferenceKey() {
 
 const LAST_PRACTICE_PIECE_KEY = 'choir-last-practice-piece';
 const GLOBAL_DETECTOR_PREFERENCES_KEY = PitchShared.PREFERENCE_KEY;
+const INTERVAL_ARROWS_PREFERENCE_KEY = 'choir-interval-arrows:v1';
 
 function pitchHistoryKey() { return `${preferenceKey()}:pitch-history`; }
 
@@ -1265,6 +1407,7 @@ function restorePitchHistory() {
 function beginPitchTake() {
   savePitchHistory();
   state.pitchTakeId += 1;
+  state.pitchAnalysisGeneration += 1;
   state.lastSampleMs = null;
 }
 
@@ -2689,7 +2832,7 @@ function savePreferences() {
   try {
     localStorage.setItem(preferenceKey(), JSON.stringify({ transpose: state.transpose,
       speed: els.playbackSpeed.value, volume: els.volume.value, metronome: els.metronomeVolume.value,
-      noteNames: state.noteNames, noteNamesPreferenceVersion: 2,
+      noteNames: state.noteNames, noteNamesPreferenceVersion: 2, showIntervals: state.showIntervals,
       scoreHeight: Math.round(els.scoreViewport.clientHeight), scoreHeightPreferenceVersion: 2,
       v1RmsThreshold: state.detectorSettings.rmsThreshold,
       v1WeakVoiceMode: state.detectorSettings.weakVoiceMode,
@@ -2699,6 +2842,7 @@ function savePreferences() {
       v1PlumeColor: state.plumeSettings.color, v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
       displayPitchAlgorithm: state.displayPitchAlgorithm, pitchLayerV1: state.pitchLayers.v1,
       pitchLayerCrepe: state.pitchLayers.crepe }));
+    localStorage.setItem(INTERVAL_ARROWS_PREFERENCE_KEY, String(state.showIntervals));
     saveGlobalDetectorPreferences();
     localStorage.setItem(`choir-part:${state.bundleManifest.piece_id ?? state.runtime.title}`, state.runtime.selectedPartId);
   } catch (_) { /* Practice remains usable when storage is unavailable. */ }
@@ -2724,6 +2868,10 @@ function restorePreferences() {
   // users to Italian while preserving any deliberate choice made from now on.
   state.noteNames = saved.noteNamesPreferenceVersion === 2 && saved.noteNames === 'international' ? 'international' : 'italian';
   els.noteNames.value = state.noteNames;
+  try {
+    const intervalArrows = localStorage.getItem(INTERVAL_ARROWS_PREFERENCE_KEY);
+    state.showIntervals = intervalArrows == null ? saved.showIntervals === true : intervalArrows === 'true';
+  } catch (_) { state.showIntervals = saved.showIntervals === true; }
   // Playback position is session-only. Opening a piece must always begin at
   // the first measure instead of restoring a stale position from localStorage.
   state.selectedMeasureIndex = 0;
@@ -3054,6 +3202,11 @@ function bindControls() {
     state.lyricTextScale = UiPreferences.write(Number(els.settingsTextScale.value) / 100);
     showToast(`Testo del piano roll: ${Math.round(state.lyricTextScale * 100)}%.`);
   });
+  els.settingsShowIntervals.addEventListener('change', () => {
+    state.showIntervals = els.settingsShowIntervals.checked;
+    savePreferences(); render();
+    showToast(state.showIntervals ? 'Frecce degli intervalli attive.' : 'Frecce degli intervalli nascoste.');
+  });
   els.settingsDisplayPitchAlgorithm.addEventListener('change', () => {
     state.displayPitchAlgorithm = els.settingsDisplayPitchAlgorithm.value === 'v1' ? 'v1' : 'v1+display-filter';
     state.displayPitchFilter.reset(); savePreferences(); render();
@@ -3069,9 +3222,9 @@ function bindControls() {
   });
   els.settingsWeakVoiceMode.addEventListener('change', () => {
     state.detectorSettings.weakVoiceMode = els.settingsWeakVoiceMode.checked;
-    applyLiveTrackerSettings(); savePreferences();
+    applyLiveTrackerSettings(); updateDetectorSettingsUi(); savePreferences();
     showToast(state.detectorSettings.weakVoiceMode
-      ? 'Modalità voce debole attiva: maggiore sensibilità e micro-interruzioni compensate.'
+      ? 'Voce debole attiva: volume, periodicità e confidenza sono più permissivi.'
       : 'Modalità voce debole disattivata: confidence minima 30%.');
   });
   const updateTrackerSettings = () => {
@@ -3103,6 +3256,7 @@ function bindControls() {
   }
   els.settingsReset.addEventListener('click', () => {
     state.lyricTextScale = UiPreferences.write(UiPreferences.DEFAULT_LYRIC_SCALE);
+    state.showIntervals = false;
     state.detectorSettings.rmsThreshold = V1_RMS_THRESHOLD.default;
     state.detectorSettings.weakVoiceMode = false;
     Object.assign(state.detectorSettings, V1_TRACKER_DEFAULTS);

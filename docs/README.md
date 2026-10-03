@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-09-28
+**Last reviewed:** 2026-10-03
 
 This directory separates current contracts and procedures from historical
 investigation. If two documents disagree, the canonical documents listed here
@@ -37,6 +37,9 @@ take precedence over anything under `archive/`.
 
 - [Development workflow](operations/development-workflow.md) — local setup,
   checks, change flow and release-candidate discipline.
+- [Choir beta operations](operations/choir-beta-operations.md) — environments,
+  branch policy, releases, feedback, incidents and rollback while singers use
+  the application.
 - [Private deployment](operations/private-deployment.md) — build, staging,
   Cloudflare Access and production checklist.
 - [Score review policy](operations/score-review-policy.md) — editorial source of

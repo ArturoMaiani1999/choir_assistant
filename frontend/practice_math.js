@@ -17,6 +17,25 @@
     const width = right - left;
     return left + width * (historyBeats / (historyBeats + futureBeats)) + (eventBeat - currentBeat) * width / (historyBeats + futureBeats);
   }
+  function melodicIntervalLabel(semitones) {
+    if (!Number.isFinite(semitones)) return null;
+    const distance = Math.abs(semitones);
+    const rounded = Math.round(distance);
+    if (Math.abs(distance - rounded) > 1e-6) return null;
+    return ({ 2: '2', 3: '3m', 4: '3M', 5: '4', 7: '5' })[rounded] ?? null;
+  }
+  function adjacentMelodicIntervals(events, epsilon = .001) {
+    const intervals = [];
+    for (let index = 1; index < events.length; index += 1) {
+      const previous = events[index - 1], next = events[index];
+      const previousEnd = previous.onsetBeat + previous.durationBeats;
+      if (Math.abs(previousEnd - next.onsetBeat) > epsilon) continue;
+      const difference = next.midiPitch - previous.midiPitch;
+      const label = melodicIntervalLabel(difference);
+      if (label) intervals.push({ previous, next, label, direction: Math.sign(difference) });
+    }
+    return intervals;
+  }
   function measureSeekState(measures, selectedIndex) {
     const safeIndex = Math.max(0, Math.min(measures.length - 1, selectedIndex));
     return { selectedIndex: safeIndex, playbackStart: measures[Math.max(0, safeIndex - 1)]?.startBeat ?? 0, scoringStart: measures[safeIndex]?.startBeat ?? 0 };
@@ -48,5 +67,5 @@
     const animating = Math.abs(target.min - bounds.min) > .01 || Math.abs(target.max - bounds.max) > .01;
     return { bounds: animating ? bounds : { ...target }, animating };
   }
-  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, measureSeekState, rhythmGridLines, smoothPitchBounds };
+  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, rhythmGridLines, smoothPitchBounds };
 });

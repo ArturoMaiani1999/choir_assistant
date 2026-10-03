@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-09-28
+**Last reviewed:** 2026-10-03
 
 ## Principles
 
@@ -34,6 +34,7 @@ node frontend/one_euro_filter.test.js
 node frontend/pitch_test_harness.test.js
 python -m unittest discover -s backend/choir_assistant/tests -t backend
 python -m unittest scripts.check_voice_lab_artifacts_test
+python scripts/build_dist_test.py
 python scripts/check_voice_lab_artifacts.py
 python scripts/check_docs.py
 ```
@@ -44,6 +45,12 @@ With `scripts/serve_frontend.py` running:
 python scripts/browser_practice_features_smoke.py
 python scripts/browser_sync_smoke.py
 python scripts/browser_backing_smoke.py
+```
+
+With the production `dist/` served by Wrangler on its default local URL:
+
+```powershell
+python scripts/browser_dist_smoke.py
 ```
 
 Any obsolete assertion in a smoke test must be repaired or explicitly recorded;
@@ -63,17 +70,23 @@ a partially executed script is not a passing test.
 
 ## Release-candidate loop
 
-1. Confirm rights and editorial approval for every allowlisted piece.
-2. Regenerate each changed browser bundle with
+1. Confirm rights and editorial approval for every allowlisted piece. A generic
+   or placeholder `rights_note` is a release blocker.
+2. Confirm `git status --porcelain` is empty. Production builds refuse a dirty
+   worktree; `--allow-dirty` exists only for local diagnostics and marks the
+   resulting build as non-publishable.
+3. Regenerate each changed browser bundle with
    `python scripts/build_library_bundle.py <piece-id>`.
-3. Generate `dist/` once with `python scripts/build_dist.py`.
-4. Preview it locally with `npx wrangler pages dev dist --local-protocol=https`.
-5. Deploy that exact directory to a protected staging preview.
-6. Record build version, manifest hash, devices and acceptance results.
-7. Promote the same directory to production; do not rebuild between approval
+4. Generate `dist/` once with `python scripts/build_dist.py`.
+5. Preview it locally with `npx wrangler dev --assets dist --local-protocol=https`.
+6. Deploy that exact directory to a protected staging preview.
+7. Record build version, manifest hash, devices and acceptance results.
+8. Promote the same directory to production; do not rebuild between approval
    and promotion.
 
 The detailed checklist is in [private-deployment.md](private-deployment.md).
+The operating model for branches, beta users, feedback and incidents is in
+[choir-beta-operations.md](choir-beta-operations.md).
 
 ## Definition of done
 

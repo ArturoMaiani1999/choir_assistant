@@ -52,7 +52,7 @@
   function evaluateCurrentPitchProgress() {
     return Core.evaluatePitchProgress(state.exercise.music.note, state.frames, state.elapsedSeconds,
       { ...state.repeatTimeline?.scoring,
-        minConfidence: state.detectorSettings.weakVoiceMode ? .12 : Core.EARLY_COMPLETION_DEFAULTS.minConfidence });
+        minConfidence: activeRecognitionSettings().minConfidence });
   }
   document.querySelectorAll('[data-activity="sustain"]').forEach(button => button.remove());
   els.lab_record.hidden = true;
@@ -71,6 +71,7 @@
   const sharedPitch = PitchShared.readPreferences();
   const fluidTrailRenderer = new FluidPitchTrail.Renderer(els.lab_fluid_layer);
   const state = { activity: 'repeat', role: 'tenor', range: { ...ROLE_RANGES.tenor }, exercise: null, harmony: null, pitchSession: null, earSession: null, singSession: null, drawSession: null, drawFrame: null, drawGuideEnabled: false, guidedSession: null, autoCompleting: false, advanceTimer: null, countInTimers: [], countInFrame: null, countInStartedAt: 0, metronomeSources: [], accompanimentSources: [], countingIn: false, audio: null, voiceBuffers: new Map(), stringBuffers: new Map(), reference: null, referenceTimer: null, stream: null, analyser: null, input: null, recording: false, calibrationActive: false, calibrationGeneration: 0, mediaRecorder: null, chunks: [], generation: 0, frames: [], visualFrames: [], startedAt: 0, elapsedSeconds: 0, audioUrl: null, rollBounds: null, detectorSettings: sharedPitch.detector, plumeSettings: sharedPitch.plume };
+  function activeRecognitionSettings() { return PitchShared.recognitionSettings(state.detectorSettings); }
   state.repeatTimeline = null; state.takeAudioStart = 0; state.conductorStage = null; state.conductorBeat = -1; state.assisted = false; state.answerRevealed = false;
   let needsRoleSetup = true;
   try { const savedRole = localStorage.getItem(`${STORE}:role`); needsRoleSetup = !savedRole; state.role = savedRole || state.role; state.range = { ...ROLE_RANGES[state.role] }; } catch (_) {}
@@ -182,14 +183,15 @@
       ctx.restore();
     }
     const ribbonFrames = state.visualFrames;
-    const voiced = ribbonFrames.filter((frame) => Number.isFinite(frame.displayPitch) && frame.confidence >= .3);
+    const recognition = activeRecognitionSettings();
+    const voiced = ribbonFrames.filter((frame) => Number.isFinite(frame.displayPitch) && frame.confidence >= recognition.minConfidence);
     const inspecting = !state.recording && !state.countingIn && state.frames.length > 0;
     const advanceSeconds = Math.max(0, Math.min(.2, Number(state.plumeSettings.timeAdvanceMs) / 1000 || 0));
     const xAtFrame = (frame) => inspecting ? xAtTime(frame.time)
       : Math.min(nowX, xAtTime(Math.max(0, frame.time - advanceSeconds)));
     const plumeSettings = { ...state.plumeSettings, nowX: inspecting ? right : nowX,
       trailStartX: keyboardRight, currentTime: elapsed, timeAt: frame => frame.time,
-      minConfidence: state.detectorSettings.weakVoiceMode ? .12 : .30,
+      minConfidence: recognition.minConfidence,
       viewportLeft: keyboardRight, viewportRight: inspecting ? right : nowX,
       sortedTimeline: true, mode: inspecting ? 'review' : 'live' };
     if (state.activity === 'repeat' || state.activity === 'sing-interval') {
@@ -296,9 +298,10 @@
   }
   function beginDrawing() {
     const generation = ++state.generation, buffer = new Float32Array(state.analyser.fftSize), smoother = new PitchSmoother();
+    const recognition = activeRecognitionSettings();
     const [lowMidi, highMidi] = state.exercise.music.notes;
     const accompaniment = playHarmony(state.harmony, audioContext().currentTime + .02, .6, Draw.MAX_SECONDS, { loop: true });
-    smoother.configure(state.detectorSettings); state.recording = true; state.frames = [];
+    smoother.configure({ ...state.detectorSettings, ...recognition }); state.recording = true; state.frames = [];
     state.drawSession = Draw.create($('lab-draw-shape')?.value || 'square', state.exercise.music.centerMidi, { lowMidi, highMidi });
     state.accompanimentSources = accompaniment;
     els.lab_new.disabled = true; els.lab_feedback.hidden = true; state.startedAt = performance.now(); syncStart();
@@ -307,7 +310,7 @@
       if (!state.recording || generation !== state.generation || state.activity !== 'draw') return;
       const dt = Math.min(.1, Math.max(0, (now - last) / 1000)); last = now;
       state.analyser.getFloatTimeDomainData(buffer);
-      const raw = detectPitch(buffer, audioContext().sampleRate, state.detectorSettings), estimate = smoother.update(raw, now);
+      const raw = detectPitch(buffer, audioContext().sampleRate, recognition), estimate = smoother.update(raw, now);
       const midi = Number.isFinite(estimate.displayHz) ? 69 + 12 * Math.log2(estimate.displayHz / 440) : null;
       const direction = (drawKeys.has('ArrowRight') ? 1 : 0) - (drawKeys.has('ArrowLeft') ? 1 : 0);
       const result = Draw.update(state.drawSession, { direction, midi, confidence: estimate.confidence ?? 0, seconds: dt });
@@ -819,12 +822,13 @@
     if (state.calibrationActive) { stopMicrophoneCheck(); return; }
     try { await ensureMicrophone(); } catch (error) { els.lab_mic_check_status.textContent = error.message; return; }
     const generation = ++state.calibrationGeneration, buffer = new Float32Array(state.analyser.fftSize), smoother = new PitchSmoother();
-    smoother.configure(state.detectorSettings); state.calibrationActive = true; els.lab_mic_check.textContent = 'Ferma controllo';
+    const recognition = activeRecognitionSettings();
+    smoother.configure({ ...state.detectorSettings, ...recognition }); state.calibrationActive = true; els.lab_mic_check.textContent = 'Ferma controllo';
     const tick = () => {
       if (!state.calibrationActive || generation !== state.calibrationGeneration || !els.lab_settings_dialog.open) { stopMicrophoneCheck(); return; }
-      state.analyser.getFloatTimeDomainData(buffer); const raw = detectPitch(buffer, audioContext().sampleRate, state.detectorSettings);
+      state.analyser.getFloatTimeDomainData(buffer); const raw = detectPitch(buffer, audioContext().sampleRate, recognition);
       const estimate = smoother.update(raw, performance.now()); els.lab_mic_check_level.value = raw.rms || 0;
-      els.lab_mic_check_status.textContent = Number.isFinite(estimate.displayHz) && (estimate.confidence ?? 0) >= .3
+      els.lab_mic_check_status.textContent = Number.isFinite(estimate.displayHz) && (estimate.confidence ?? 0) >= recognition.minConfidence
         ? `${Core.midiToName(Math.round(69 + 12 * Math.log2(estimate.displayHz / 440)))} rilevata · il controllo non viene salvato`
         : (raw.rms || 0) > .004 ? 'Segnale presente · canta una nota comoda' : 'Parla o canta liberamente';
       requestAnimationFrame(tick);
@@ -907,11 +911,12 @@
         recorder.onstop = () => { if (!state.chunks.length) return; state.audioUrl = URL.createObjectURL(new Blob(state.chunks, { type: recorder.mimeType || 'audio/webm' })); els.lab_play_take.disabled = false; };
         recorder.start(250);
       }
-      const buffer = new Float32Array(state.analyser.fftSize), smoother = new PitchSmoother(), displayPitchFilter = new OneEuroFilter(); smoother.configure(state.detectorSettings);
+      const buffer = new Float32Array(state.analyser.fftSize), smoother = new PitchSmoother(), displayPitchFilter = new OneEuroFilter();
+      const recognition = activeRecognitionSettings(); smoother.configure({ ...state.detectorSettings, ...recognition });
       const tick = () => {
         if (!state.recording || state.countingIn || generation !== state.generation) return;
         state.analyser.getFloatTimeDomainData(buffer); const nowMs = performance.now();
-        const raw = detectPitch(buffer, audioContext().sampleRate, state.detectorSettings), estimate = smoother.update(raw, nowMs); const elapsed = Math.max(0, audioContext().currentTime - state.takeAudioStart); state.elapsedSeconds = elapsed;
+        const raw = detectPitch(buffer, audioContext().sampleRate, recognition), estimate = smoother.update(raw, nowMs); const elapsed = Math.max(0, audioContext().currentTime - state.takeAudioStart); state.elapsedSeconds = elapsed;
         const trackedPitch = estimate.stable && estimate.accepted && Number.isFinite(estimate.hz)
           ? 69 + 12 * Math.log2(estimate.hz / 440) : null;
         const rawPitch = Number.isFinite(estimate.rawHz) ? 69 + 12 * Math.log2(estimate.rawHz / 440) : null;
