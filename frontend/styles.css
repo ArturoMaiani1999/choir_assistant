@@ -117,7 +117,9 @@ select option { background: #102229; color: var(--text); }
 .score-region.full-score .score-cursor { display: none; }
 
 .score-pitch-divider { position: relative; z-index: 6; background: #102128; cursor: row-resize; touch-action: none; outline: none; }
+.score-pitch-divider::before { content: ""; position: absolute; z-index: 1; top: 1px; right: 14px; width: 10px; height: 10px; border: 2px solid var(--amber); border-radius: 50%; background: #102128; box-shadow: 0 0 0 2px rgba(16,33,40,.82); transition: background-color 120ms ease, box-shadow 120ms ease, transform 120ms ease; }
 .score-pitch-divider::after { content: ""; position: absolute; top: 5px; right: 0; left: 0; height: 2px; background: #587177; transition: background-color 120ms ease; }
+.score-pitch-divider:hover::before, .score-pitch-divider:focus-visible::before, .score-pitch-divider.is-resizing::before { background: var(--amber); box-shadow: 0 0 0 3px rgba(217,168,91,.22); transform: scale(1.12); }
 .score-pitch-divider:hover::after, .score-pitch-divider:focus-visible::after, .score-pitch-divider.is-resizing::after { background: var(--amber); }
 
 .pitch-region { min-height: 0; position: relative; overflow: hidden; background: #0a181e; }
