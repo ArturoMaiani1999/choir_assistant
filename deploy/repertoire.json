@@ -4,6 +4,16 @@
       "id": "ave-verum",
       "publication_approved": true,
       "rights_note": "W. A. Mozart, Ave verum corpus K. 618: composizione in pubblico dominio. Trascrizione SATB © Robert Garrigós, CC BY 4.0, https://github.com/robertgarrigos/lilypond-scores/blob/main/Mozart/Ave-verum-k618.ly. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "dove-la-carita",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "o-sacrum",
+      "publication_approved": true,
+      "rights_note": "Approvato da Molfino. Accompagnamento adattato nel progetto per lo studio personale."
     }
   ]
 }
