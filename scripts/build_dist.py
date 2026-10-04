@@ -18,11 +18,11 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 DEFAULT_CONFIG = ROOT / "deploy" / "repertoire.json"
 CORE_ASSETS = (
-    "styles.css", "studio.css", "ui_preferences.js", "score_appearance.js",
+    "styles.css", "studio.css", "score_viewer.css", "ui_preferences.js", "score_appearance.js",
     "practice_math.js", "score_runtime.js", "pitch_detector.js",
     "pitch_detector_worker.js", "pitch_shared.js", "fluid_pitch_trail.js",
     "vocal_feedback.js", "one_euro_filter.js", "media_mixer.js", "app.js", "voice_lab_core.js",
-    "voice_draw_core.js", "voice_lab.js",
+    "voice_draw_core.js", "voice_lab.js", "score_viewer.js",
 )
 FORBIDDEN_TEXT = ("__pitchTestHooks", "/api/", "cdn.jsdelivr", "unpkg", "localhost")
 FORBIDDEN_SUFFIXES = (".mscz", ".env", ".py", ".map", ".musicxml", ".xml", ".onnx")
@@ -303,6 +303,11 @@ def main() -> int:
         lab_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, lab_index)
     lab_index = lab_index.replace("runtime-config.js", runtime_name)
     (destination / "voice-lab.html").write_text(lab_index, encoding="utf-8")
+    viewer_index = (FRONTEND / "score-viewer.html").read_text(encoding="utf-8")
+    for original, fingerprinted in names.items():
+        viewer_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, viewer_index)
+    viewer_index = viewer_index.replace("runtime-config.js", runtime_name)
+    (destination / "score-viewer.html").write_text(viewer_index, encoding="utf-8")
     lab_assets = destination / "voice-lab-assets"
     lab_assets.mkdir()
     for source in (FRONTEND / "voice-lab-assets").iterdir():

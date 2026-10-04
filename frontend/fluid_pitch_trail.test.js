@@ -23,6 +23,14 @@ assert.ok(firstTop[5] >= firstTop[4], 'centerline survives at least as long as t
 assert.equal(firstTop[7], 0, 'the ribbon starts transparent instead of with a cut edge');
 assert.ok(geometry.vertices[16 * 40 + 7] > .9, 'the middle of a long ribbon is fully visible');
 assert.equal(geometry.vertices.at(-1), 1, 'the live head stays visible');
+const head = fluid.liveHeadPoint(samples, sample => sample.time * 200, pitch => 100 - (pitch - 60) * 20,
+  { currentTime: 3, nowX: 600, trailStartX: 0, sortedTimeline: true, ribbonScale: 2.5 });
+assert.ok(head, 'a current voiced trajectory exposes a live head');
+assert.ok(Math.abs(head.radius * 2 - fluid.CONFIG.coreWidth * 2.5 * 2) < 1e-9,
+  'the luminous marker diameter is twice the scaled melody thickness');
+assert.equal(fluid.liveHeadPoint(samples, sample => sample.time * 200, pitch => pitch,
+  { currentTime: 20, nowX: 600, trailStartX: 0, sortedTimeline: true }), null,
+  'stale pitch history has no live marker');
 const corner = fluid.smoothPoints([{x:0,y:0,time:0,confidence:1},{x:10,y:10,time:1,confidence:1},{x:20,y:0,time:2,confidence:1}], 1);
 assert.ok(corner.every(point => point.y >= 0 && point.y <= 10), 'smoothing cannot overshoot detected pitch geometry');
 const rightAngle = [{x:0,y:20},{x:20,y:20},{x:20,y:0}];

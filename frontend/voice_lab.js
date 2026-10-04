@@ -186,7 +186,8 @@
     const recognition = activeRecognitionSettings();
     const voiced = ribbonFrames.filter((frame) => Number.isFinite(frame.displayPitch) && frame.confidence >= recognition.minConfidence);
     const inspecting = !state.recording && !state.countingIn && state.frames.length > 0;
-    const advanceSeconds = Math.max(0, Math.min(.2, Number(state.plumeSettings.timeAdvanceMs) / 1000 || 0));
+    const advanceSeconds = Math.max(0, Math.min(PitchShared.PLUME_ADVANCE_MAX_MS / 1000,
+      Number(state.plumeSettings.timeAdvanceMs) / 1000 || 0));
     const xAtFrame = (frame) => inspecting ? xAtTime(frame.time)
       : Math.min(nowX, xAtTime(Math.max(0, frame.time - advanceSeconds)));
     const plumeSettings = { ...state.plumeSettings, nowX: inspecting ? right : nowX,

@@ -190,6 +190,55 @@
     context.lineTo(last.x, yAt(last.pitch));
   }
 
+  function liveHeadPoint(samples, xAt, yAt, options = {}) {
+    if (options.mode === 'review') return null;
+    const config = { ...CONFIG, ...(options.config || {}) };
+    const timeAt = options.timeAt || (sample => sample.time ?? sample.audioTimeSec);
+    const currentTime = Number.isFinite(options.currentTime) ? options.currentTime : timeAt(samples.at(-1) || {});
+    const model = PitchShared.plumeSegments(samples, xAt, { ...options, currentTime, timeAt });
+    const segments = reconcileSegments(model, config);
+    let segment = null;
+    for (let index = segments.length - 1; index >= 0; index -= 1) {
+      if (segments[index].length >= 2) { segment = segments[index]; break; }
+    }
+    const last = segment?.at(-1);
+    if (!last || currentTime - last.time > config.headSeconds * 1.5) return null;
+    const scale = Math.max(.4, Math.min(3, options.ribbonScale ?? 1));
+    // Radius equals the rendered core thickness, so the marker diameter is
+    // exactly twice the thickness of the melodic centerline.
+    return { x: last.x, y: yAt(last.pitch), radius: config.coreWidth * scale };
+  }
+
+  function paintHeadMarker(context, head) {
+    const haloRadius = head.radius * 1.8;
+    const halo = context.createRadialGradient(head.x, head.y, 0, head.x, head.y, haloRadius);
+    halo.addColorStop(0, 'rgba(190,255,248,.48)');
+    halo.addColorStop(.5, 'rgba(114,224,210,.22)');
+    halo.addColorStop(1, 'rgba(114,224,210,0)');
+    context.fillStyle = halo;
+    context.beginPath(); context.arc(head.x, head.y, haloRadius, 0, Math.PI * 2); context.fill();
+
+    const light = context.createRadialGradient(head.x, head.y, 0, head.x, head.y, head.radius);
+    light.addColorStop(0, 'rgba(226,255,252,1)');
+    light.addColorStop(.48, 'rgba(169,255,244,.96)');
+    light.addColorStop(1, 'rgba(114,224,210,.28)');
+    context.fillStyle = light;
+    context.beginPath(); context.arc(head.x, head.y, head.radius, 0, Math.PI * 2); context.fill();
+  }
+
+  function drawLiveHead(context, samples, xAt, yAt, options = {}) {
+    const head = liveHeadPoint(samples, xAt, yAt, options);
+    if (!head) return null;
+    context.save();
+    const clip = options.headClip || options.clip;
+    if (clip) {
+      context.beginPath(); context.rect(clip.left, clip.top, clip.right - clip.left, clip.bottom - clip.top); context.clip();
+    }
+    paintHeadMarker(context, head);
+    context.restore();
+    return head;
+  }
+
   function drawFallback(context, samples, xAt, yAt, options = {}) {
     const config = { ...CONFIG, ...(options.config || {}) };
     const timeAt = options.timeAt || (sample => sample.time ?? sample.audioTimeSec);
@@ -222,13 +271,12 @@
       if (!liveHead) coreGradient.addColorStop(1 - fadeFraction, 'rgba(169,255,244,.96)');
       coreGradient.addColorStop(1, liveHead ? 'rgba(169,255,244,.96)' : 'rgba(169,255,244,0)');
       smoothCanvasPath(context, points, yAt);
-      context.strokeStyle = coreGradient; context.lineWidth = config.coreWidth;
+      const scale = Math.max(.4, Math.min(3, options.ribbonScale ?? 1));
+      context.strokeStyle = coreGradient; context.lineWidth = config.coreWidth * scale;
       context.stroke();
       if (!review && currentTime - points.at(-1).time < config.headSeconds * 1.5) {
-        const last = points.at(-1), x = last.x, y = yAt(last.pitch);
-        const halo = context.createRadialGradient(x, y, 0, x, y, config.ribbonWidth);
-        halo.addColorStop(0, 'rgba(177,255,246,.2)'); halo.addColorStop(1, 'rgba(114,224,210,0)');
-        context.fillStyle = halo; context.beginPath(); context.arc(x, y, config.ribbonWidth, 0, Math.PI * 2); context.fill();
+        const last = points.at(-1);
+        paintHeadMarker(context, { x: last.x, y: yAt(last.pitch), radius: config.coreWidth * scale });
       }
     }
     context.restore();
@@ -388,5 +436,5 @@
     }
   }
 
-  return { CONFIG, smoothPoints, joinOffset, trailGeometry, drawFallback, Renderer };
+  return { CONFIG, smoothPoints, joinOffset, trailGeometry, liveHeadPoint, drawLiveHead, drawFallback, Renderer };
 });

@@ -41,6 +41,38 @@ def _write_mscz(path: Path, *, pitch: int = 60, editor_variant: int = 1) -> None
 
 
 class SourceFingerprintTests(unittest.TestCase):
+    def test_audio_subset_preserves_settings_and_mutes_other_tracks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            source = Path(directory) / "source.mscz"
+            destination = Path(directory) / "subset.mscz"
+            _write_mscz(source)
+            settings = {"tracks": [
+                {"partId": "999", "instrumentId": "metronome", "soloMuteState": {"mute": False, "solo": False}},
+                {"partId": "1", "instrumentId": "soprano", "in": {"resourceMeta": {"id": "MS Basic\\0\\52"}},
+                 "soloMuteState": {"mute": False, "solo": False}},
+                {"partId": "2", "instrumentId": "organ", "in": {"resourceMeta": {"id": "94"}},
+                 "soloMuteState": {"mute": False, "solo": False}},
+            ]}
+            # Rebuild the small fixture so the archive contains one canonical
+            # audiosettings entry (duplicate ZIP members are ambiguous).
+            with zipfile.ZipFile(source) as archive:
+                members = {item.filename: archive.read(item.filename) for item in archive.infolist()}
+            members["audiosettings.json"] = json.dumps(settings).encode("utf-8")
+            with zipfile.ZipFile(source, "w") as archive:
+                for name, payload in members.items():
+                    archive.writestr(name, payload)
+
+            self.assertTrue(serve_frontend._write_audio_subset_source(source, destination, {"1"}))
+
+            with zipfile.ZipFile(destination) as archive:
+                filtered = json.loads(archive.read("audiosettings.json"))
+            tracks = {track["partId"]: track for track in filtered["tracks"]}
+            self.assertFalse(tracks["1"]["soloMuteState"]["mute"])
+            self.assertTrue(tracks["2"]["soloMuteState"]["mute"])
+            self.assertTrue(tracks["999"]["soloMuteState"]["mute"])
+            self.assertEqual(tracks["1"]["in"]["resourceMeta"]["id"], "MS Basic\\0\\52")
+            self.assertEqual(tracks["2"]["in"]["resourceMeta"]["id"], "94")
+
     def test_editor_only_resave_keeps_semantic_fingerprint(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             first = Path(directory) / "first.mscz"

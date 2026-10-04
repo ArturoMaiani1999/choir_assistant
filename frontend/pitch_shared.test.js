@@ -2,12 +2,21 @@ const assert = require('node:assert/strict');
 const shared = require('./pitch_shared.js');
 
 assert.equal(shared.PREFERENCE_KEY, 'choir-detector-settings:v1');
+assert.equal(shared.PLUME_DEFAULTS.width, 2.5, 'the default plume width is 250%');
+assert.equal(shared.PLUME_WIDTH_PREFERENCE_VERSION, 2, 'plume width preferences carry an explicit default version');
+assert.equal(shared.PLUME_ADVANCE_MAX_MS, 400, 'visual advance supports high-latency headphones');
 const preferences = shared.readPreferences({ getItem: () => JSON.stringify({
   v1RmsThreshold: .002, v1WeakVoiceMode: true, v1FastAlpha: .7, v1SlowAlpha: .25, v1MedianWindowFrames: 5,
   v1PlumeWidth: 1.4, v1PlumeIntensity: .8, v1PlumeColor: '#abcdef', v1PlumeAdvanceMs: 120,
 }) });
 assert.deepEqual(preferences.detector, { rmsThreshold: .002, weakVoiceMode: true, fastAlpha: .7, slowAlpha: .25, medianWindowFrames: 5 });
 assert.deepEqual(preferences.plume, { width: 1.4, intensity: .8, color: '#72e0d2', timeAdvanceMs: 120 });
+assert.equal(shared.readPreferences({ getItem: () => JSON.stringify({ v1PlumeWidth: 1 }) }).plume.width, 2.5,
+  'the legacy 100% default migrates to the new 250% default');
+assert.equal(shared.readPreferences({ getItem: () => JSON.stringify({ v1PlumeWidth: 1, plumeWidthPreferenceVersion: 2 }) }).plume.width, 1,
+  'an explicit 100% choice made after the migration is preserved');
+assert.equal(shared.readPreferences({ getItem: () => JSON.stringify({ v1PlumeAdvanceMs: 900 }) }).plume.timeAdvanceMs, 400,
+  'saved visual advance is capped at the supported maximum');
 const weakRecognition = shared.recognitionSettings(preferences.detector);
 assert.equal(weakRecognition.rmsThreshold, .00003, 'weak voice caps the amplitude gate even when the saved slider is more selective');
 assert.equal(weakRecognition.levelConfidenceFloor, .68, 'weak voice does not charge quiet input a second amplitude penalty');

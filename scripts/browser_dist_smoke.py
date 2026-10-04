@@ -10,7 +10,7 @@ import tempfile
 import time
 import urllib.request
 from pathlib import Path
-from urllib.parse import urlsplit
+from urllib.parse import parse_qs, quote, urlsplit
 
 import websocket
 
@@ -44,7 +44,11 @@ def main() -> int:
         default="https://127.0.0.1:8788/?piece=ave-verum&part=P3",
     )
     args = parser.parse_args()
-    expected_origin = f"{urlsplit(args.url).scheme}://{urlsplit(args.url).netloc}"
+    parsed_url = urlsplit(args.url)
+    expected_origin = f"{parsed_url.scheme}://{parsed_url.netloc}"
+    query = parse_qs(parsed_url.query)
+    expected_piece = query.get("piece", ["ave-verum"])[0]
+    expected_part = query.get("part", ["P3"])[0]
     sys.stdout.reconfigure(encoding="utf-8")
 
     with tempfile.TemporaryDirectory(prefix="choir-dist-smoke-") as profile:
@@ -70,8 +74,22 @@ def main() -> int:
             socket = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=20)
             command(socket, 1, "Page.enable")
             command(socket, 2, "Runtime.enable")
+            command(socket, 5, "Emulation.setDeviceMetricsOverride", {
+                "width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False,
+            })
             command(socket, 3, "Page.addScriptToEvaluateOnNewDocument", {"source": r"""
               window.__releaseSmokeErrors = [];
+              try {
+                localStorage.setItem('choir-detector-settings:v1', JSON.stringify({v1PlumeWidth: 1}));
+              } catch (_) {}
+              window.__getUserMediaCalls = 0;
+              if (navigator.mediaDevices?.getUserMedia) {
+                const nativeGetUserMedia = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+                navigator.mediaDevices.getUserMedia = (...args) => {
+                  window.__getUserMediaCalls += 1;
+                  return nativeGetUserMedia(...args);
+                };
+              }
               addEventListener('error', event => window.__releaseSmokeErrors.push({
                 kind: 'error', message: event.message || 'resource error',
                 resource: event.target?.src || event.target?.href || null
@@ -131,6 +149,19 @@ def main() -> int:
               return result;
             })()""")
             call_id += 1
+            resize = evaluate(socket, call_id, """(async () => {
+              const before = {score:els.scoreViewport.clientHeight, bitmap:els.pitchLane.height};
+              const limits = scoreHeightLimits();
+              const target = before.score - 36 >= limits.minimum
+                ? before.score - 36 : Math.min(limits.maximum, before.score + 36);
+              setScoreHeight(target);
+              await new Promise(resolve => requestAnimationFrame(resolve));
+              const rect = els.pitchLane.getBoundingClientRect();
+              const dpr = Math.min(window.devicePixelRatio || 1, 2.5);
+              return {before, score:els.scoreViewport.clientHeight, bitmap:els.pitchLane.height,
+                css:rect.height, expected:Math.round(rect.height * dpr)};
+            })()""")
+            call_id += 1
             result = evaluate(socket, call_id, """(() => ({
               mode: window.ChoirRuntimeConfig?.mode,
               buildVersion: window.ChoirRuntimeConfig?.buildVersion,
@@ -138,6 +169,9 @@ def main() -> int:
               bundlePiece: state.bundleManifest?.piece_id,
               published: state.bundleManifest?.published,
               selectedPart: state.runtime?.selectedPartId,
+              plumeWidth: state.plumeSettings.width,
+              plumeWidthSlider: document.querySelector('#settings-v1-plume-width')?.value,
+              plumeWidthLabel: document.querySelector('#settings-v1-plume-width-value')?.textContent,
               transposeChoices: document.querySelector('#transpose')?.options.length,
               diagnosticsHidden: document.querySelector('#benchmark')?.hidden
                 && document.querySelector('#admin-review')?.hidden,
@@ -146,6 +180,7 @@ def main() -> int:
               errors: window.__releaseSmokeErrors,
               resources: performance.getEntriesByType('resource').map(entry => entry.name)
             }))()""")
+            call_id += 1
 
             external = []
             for resource in result["resources"]:
@@ -157,22 +192,110 @@ def main() -> int:
                     external.append(resource)
 
             assert result["mode"] == "production", result
-            assert result["pieces"] == ["ave-verum"], result
-            assert result["bundlePiece"] == "ave-verum" and result["published"] is True, result
-            assert result["selectedPart"] == "P3", result
+            assert expected_piece in result["pieces"], result
+            assert result["bundlePiece"] == expected_piece and result["published"] is True, result
+            assert result["selectedPart"] == expected_part, result
+            assert result["plumeWidth"] == 2.5 and result["plumeWidthSlider"] == "250" and result["plumeWidthLabel"] == "250%", result
             assert result["transposeChoices"] == 1 and result["diagnosticsHidden"], result
-            assert result["scoreReady"] and "/library-assets/ave-verum/" in result["audioSource"], result
+            assert result["scoreReady"] and f"/library-assets/{expected_piece}/" in result["audioSource"], result
             assert microphone == {"status": "active", "worker": True, "workerDisabled": False}, microphone
+            assert resize["score"] != resize["before"]["score"], resize
+            assert resize["bitmap"] != resize["before"]["bitmap"] and resize["bitmap"] == resize["expected"], resize
             assert not result["errors"], result["errors"]
             assert not external, external
+
+            viewer_url = f"{expected_origin}/score-viewer.html?piece={quote(expected_piece)}"
+            command(socket, call_id, "Page.navigate", {"url": viewer_url})
+            call_id += 1
+            for _ in range(160):
+                viewer_ready = evaluate(socket, call_id, """Boolean(
+                  document.querySelectorAll('.viewer-page').length
+                  && [...document.querySelectorAll('.viewer-page img')]
+                    .every(image => image.complete && image.naturalWidth)
+                )""")
+                call_id += 1
+                if viewer_ready:
+                    break
+                time.sleep(.1)
+            else:
+                diagnostics = evaluate(socket, call_id, """({
+                  title: document.querySelector('#viewer-title')?.textContent,
+                  status: document.querySelector('#viewer-status')?.textContent,
+                  pages: document.querySelectorAll('.viewer-page').length,
+                  errors: window.__releaseSmokeErrors
+                })""")
+                raise AssertionError(
+                    "La modalità Partitura non è pronta: "
+                    + json.dumps(diagnostics, ensure_ascii=False)
+                )
+
+            command(socket, call_id, "Emulation.setDeviceMetricsOverride", {
+                "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
+            })
+            call_id += 1
+            viewer = evaluate(socket, call_id, r"""(async () => {
+              const grayPaper = document.querySelector('[data-paper="#e3e8e6"]');
+              grayPaper.click();
+              window.scrollTo(0, 500);
+              await new Promise(resolve => setTimeout(resolve, 150));
+              const resources = performance.getEntriesByType('resource').map(entry => entry.name);
+              return {
+                pageCount: document.querySelectorAll('.viewer-page').length,
+                getUserMediaCalls: window.__getUserMediaCalls,
+                hasPitchUi: Boolean(document.querySelector(
+                  'canvas, audio, #pitch-lane, .pitch-region, #microphone, #microphone-level'
+                )),
+                forbiddenResources: resources.filter(resource =>
+                  /pitch_detector|pitch_shared|fluid_pitch_trail|vocal_feedback|\/app\.[a-f0-9]+\.js/.test(resource)
+                ),
+                bodyWidth: document.body.scrollWidth,
+                viewportWidth: innerWidth,
+                toolbarTop: document.querySelector('.viewer-toolbar').getBoundingClientRect().top,
+                paperColor: getComputedStyle(document.documentElement).getPropertyValue('--score-paper').trim(),
+                savedPaperColor: localStorage.getItem('choir-score-paper:v1'),
+                grayPaperPressed: grayPaper.getAttribute('aria-pressed'),
+                errors: window.__releaseSmokeErrors,
+                resources
+              };
+            })()""")
+
+            viewer_external = []
+            for resource in viewer["resources"]:
+                resource_url = urlsplit(resource)
+                if resource_url.scheme in {"data", "blob", ""}:
+                    continue
+                origin = f"{resource_url.scheme}://{resource_url.netloc}"
+                if origin != expected_origin:
+                    viewer_external.append(resource)
+
+            assert viewer["pageCount"] > 0, viewer
+            assert viewer["getUserMediaCalls"] == 0, viewer
+            assert not viewer["hasPitchUi"], viewer
+            assert not viewer["forbiddenResources"], viewer
+            assert viewer["bodyWidth"] <= viewer["viewportWidth"], viewer
+            assert abs(viewer["toolbarTop"]) < 1, viewer
+            assert viewer["paperColor"] == "#e3e8e6", viewer
+            assert viewer["savedPaperColor"] == "#e3e8e6", viewer
+            assert viewer["grayPaperPressed"] == "true", viewer
+            assert not viewer["errors"], viewer["errors"]
+            assert not viewer_external, viewer_external
             print(json.dumps({
                 "buildVersion": result["buildVersion"],
                 "piece": result["bundlePiece"],
                 "part": result["selectedPart"],
+                "defaultPlumeWidth": result["plumeWidthLabel"],
                 "resourceCount": len(result["resources"]),
                 "microphone": microphone,
+                "dividerResize": resize,
                 "externalRequests": external,
                 "errors": result["errors"],
+                "scoreViewer": {
+                    "pages": viewer["pageCount"],
+                    "getUserMediaCalls": viewer["getUserMediaCalls"],
+                    "hasPitchUi": viewer["hasPitchUi"],
+                    "forbiddenResources": viewer["forbiddenResources"],
+                    "externalRequests": viewer_external,
+                },
             }, ensure_ascii=False, indent=2))
         finally:
             if socket is not None:

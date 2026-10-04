@@ -15,7 +15,7 @@ Practice is one non-scrolling rehearsal instrument inside `100dvh`, ordered as:
 3. live pitch lane with a fixed `NOW` line and more future than history;
 4. compact transport: previous measure, play/pause, next measure, measure, volume.
 
-The active default is one selected vocal part. Full score is a paused consultation mode and must never permanently reduce the active rehearsal view.
+Practice always shows one selected vocal part. The full score belongs to the separate, vertically scrolling `score-viewer.html` reading mode and never replaces or reduces the active rehearsal view.
 
 ## Temporal model
 

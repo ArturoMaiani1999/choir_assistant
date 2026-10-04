@@ -47,6 +47,7 @@ def main():
               const assert = (value, message) => { if (!value) throw Error(message); };
               assert(state.runtime, 'runtime initialized');
               assert(state.plumeSettings.timeAdvanceMs === 200, 'global default visual advance');
+              assert(state.plumeSettings.width === 2.5, 'global default plume width is 250%');
               assert(els.transpose.options.length === 25, 'semitone and octave options');
               // Approval is stubbed in this isolated test profile, never persisted.
               state.bundleApproved = true;
@@ -85,8 +86,21 @@ def main():
               state.attempt = {voicedMs:0, insideMs:0}; finishAttempt();
               assert(els.resultText.textContent.includes('insufficienti'), 'silence not scored');
               els.resultClose.click();
+              els.settings.click();
+              assert(els.settingsDialog.open, 'settings dialog opens');
+              assert(!document.querySelector('#settings-close'), 'settings dialog has no close button');
+                assert(els.settingsV1PlumeAdvance.max === '400', 'visual pitch advance supports high-latency headphones');
+                els.settingsV1PlumeAdvance.value = '400';
+                els.settingsV1PlumeAdvance.dispatchEvent(new Event('input'));
+                assert(state.plumeSettings.timeAdvanceMs === 400, 'visual pitch advance accepts 400 ms');
               els.settingsV1PlumeAdvance.value = '120';
               els.settingsV1PlumeAdvance.dispatchEvent(new Event('input'));
+              els.settingsV1PlumeAdvance.dispatchEvent(new Event('change'));
+              const settingsRect = els.settingsDialog.getBoundingClientRect();
+              els.settingsDialog.dispatchEvent(new MouseEvent('click', {
+                bubbles: true, clientX: settingsRect.left - 1, clientY: settingsRect.top - 1,
+              }));
+              assert(!els.settingsDialog.open, 'backdrop click closes settings dialog');
               assert(state.plumeSettings.timeAdvanceMs === 120, 'visual pitch advance setting');
               const sourceBeat = Math.min(10, totalBeats() - 1);
               const shiftedBeat = visuallyAdvancedPitchBeat(sourceBeat);
@@ -102,12 +116,12 @@ def main():
               els.settingsWeakVoiceMode.dispatchEvent(new Event('change'));
               const weakRecognition = activeRecognitionSettings();
               assert(state.detectorSettings.weakVoiceMode
-                && Math.abs(state.pitchSmoother.minConfidence - .12) < 1e-10
-                && Math.abs(state.pitchSmoother.minClarity - .35) < 1e-10
-                && state.pitchSmoother.weakSignalHoldFrames === 2
+                && Math.abs(state.pitchSmoother.minConfidence - .10) < 1e-10
+                && Math.abs(state.pitchSmoother.minClarity - .32) < 1e-10
+                && state.pitchSmoother.weakSignalHoldFrames === 6
                 && weakRecognition.rmsThreshold <= .00003
-                && Math.abs(weakRecognition.yinThreshold - .55) < 1e-10
-                && Math.abs(livePlumeSettings(0,false,100,0).minConfidence - .12) < 1e-10,
+                && Math.abs(weakRecognition.yinThreshold - .68) < 1e-10
+                && Math.abs(livePlumeSettings(0,false,100,0).minConfidence - .10) < 1e-10,
                 'weak-voice mode lowers the complete recognition and rendering gates');
               savePreferences();
               const piecePreferences = JSON.parse(localStorage.getItem(preferenceKey()));

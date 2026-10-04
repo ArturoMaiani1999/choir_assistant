@@ -44,6 +44,28 @@ class BuildDistTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "Riferimenti locali assenti"):
                 build_dist.audit_local_references(destination)
 
+    def test_score_viewer_assets_are_part_of_the_production_core(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            names = build_dist.build_core_assets(Path(directory))
+
+            self.assertIn("score_viewer.js", names)
+            self.assertIn("score_viewer.css", names)
+
+    def test_score_viewer_is_isolated_from_pitch_and_microphone_runtime(self) -> None:
+        html = (build_dist.FRONTEND / "score-viewer.html").read_text(encoding="utf-8")
+        javascript = (build_dist.FRONTEND / "score_viewer.js").read_text(encoding="utf-8")
+
+        self.assertIn("score_viewer.js", html)
+        for label in ("Carta", "Grigio chiaro", "Bianco"):
+            self.assertIn(label, html)
+        for forbidden_markup in ("<canvas", "<audio", "pitch-lane", "microphone"):
+            self.assertNotIn(forbidden_markup, html.lower())
+        for forbidden_runtime in (
+            "getUserMedia", "mediaDevices", "AudioContext", "pitch_detector",
+            "pitch_shared", "fluid_pitch_trail", "vocal_feedback", "app.js",
+        ):
+            self.assertNotIn(forbidden_runtime, html + javascript)
+
 
 if __name__ == "__main__":
     unittest.main()

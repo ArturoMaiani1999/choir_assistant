@@ -26,6 +26,8 @@ const UI_CONFIG = Object.freeze({
   centeredCents: 12,
   acceptableCents: 30,
   targetToleranceCents: 25,
+  pitchNoteLabelOffsetPx: 44,
+  pitchHeadGapPx: 12,
   pitchViewportResponseMs: 180,
   // Analysis follows a 60 Hz ceiling, but runs off the rendering thread.
   // On slower devices the one-in-flight rule naturally applies backpressure.
@@ -35,10 +37,10 @@ const UI_CONFIG = Object.freeze({
 const els = Object.fromEntries([
   'transpose', 'settings-display-pitch-algorithm', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
   'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
-  'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close', 'settings-dialog', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-reset', 'settings-close',
+  'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close', 'settings-dialog', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-reset',
   'result-dialog', 'result-text', 'result-progress', 'retry', 'next-phrase', 'result-close',
   'phrase-loop', 'note-names',
-  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-title', 'library-title-save', 'library-part', 'library-note', 'library-open', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-mode', 'settings',
+  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-title', 'library-title-save', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-viewer-link', 'settings',
   'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
   'score-loading', 'score-pitch-divider', 'pitch-lane', 'pitch-fluid-layer', 'intonation-readout', 'live-note', 'live-cents', 'live-state', 'pitch-layer-v1', 'pitch-layer-crepe',
   'feedback-analyse', 'feedback-status', 'feedback-priorities', 'feedback-priority-list', 'feedback-score-image', 'feedback-note-card', 'feedback-note-name', 'feedback-note-meta', 'feedback-cent-chart', 'feedback-note-metrics', 'feedback-message', 'feedback-previous', 'feedback-next', 'feedback-original', 'feedback-corrected', 'feedback-strength', 'feedback-strength-value', 'feedback-playback-kind',
@@ -63,7 +65,6 @@ const state = {
   selectedMeasureIndex: 0,
   scoringStartBeat: 0,
   scorePage: 1,
-  fullScore: false,
   rafId: null,
   lastAnnouncedState: '',
   backingManifest: null,
@@ -175,6 +176,13 @@ function openDetectorSettings() {
   if (!els.settingsDialog.open) els.settingsDialog.showModal();
 }
 
+function closeSettingsFromBackdrop(event) {
+  const rect = els.settingsDialog.getBoundingClientRect();
+  const outsideDialog = event.clientX < rect.left || event.clientX > rect.right
+    || event.clientY < rect.top || event.clientY > rect.bottom;
+  if (outsideDialog) els.settingsDialog.close();
+}
+
 function normalizeSlug(value) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
@@ -273,8 +281,7 @@ function fallbackScorePosition(beat) {
   const index = measureIndexAt(beat);
   const measure = state.occurrenceMeasures[index];
   const defaultMeasureWidths = [[13, 32], [32, 55], [55, 73], [73, 93]];
-  const pages = state.bundleManifest?.assets?.score_pages?.[state.runtime.selectedPartId]
-    ?? state.bundleManifest?.assets?.full_score_pages ?? [];
+  const pages = state.bundleManifest?.assets?.score_pages?.[state.runtime.selectedPartId] ?? [];
   const slot = state.fallbackScoreSlots[index] ?? (pages.length ? (() => {
     const [startX, endX] = defaultMeasureWidths[index % defaultMeasureWidths.length];
     return { page: Math.min(pages.length, Math.floor(index / defaultMeasureWidths.length) + 1),
@@ -295,16 +302,14 @@ function closestScoreEvent(beat) {
 
 function loadScoreImage(page = 1) {
   const part = state.runtime.parts.find((item) => item.id === state.runtime.selectedPartId);
-  const pages = state.fullScore
-    ? state.bundleManifest.assets.full_score_pages
-    : (state.bundleManifest.assets.score_pages[state.runtime.selectedPartId] ?? state.bundleManifest.assets.full_score_pages);
+  const pages = state.bundleManifest.assets.score_pages?.[state.runtime.selectedPartId] ?? [];
   const source = pages?.[Math.max(0, Math.min(pages.length - 1, page - 1))];
   if (!source) { els.scoreLoading.hidden = false; els.scoreLoading.textContent = 'Pagina spartito non disponibile'; return; }
   if (els.scoreImage.getAttribute('src') === source) return;
   els.scoreLoading.hidden = false;
   state.activeScoreSegment = null;
   els.scoreImage.src = source;
-  els.scoreImage.alt = state.fullScore ? 'Partitura completa' : `Spartito: ${part?.name ?? 'parte selezionata'}`;
+  els.scoreImage.alt = `Spartito: ${part?.name ?? 'parte selezionata'}`;
 }
 
 function voiceStemUrl(filename) {
@@ -482,7 +487,7 @@ function scorePageFallbackSlots(svg, page) {
 }
 
 async function buildFallbackScoreGeometry(partId) {
-  const pages = state.bundleManifest.assets.score_pages[partId] ?? state.bundleManifest.assets.full_score_pages;
+  const pages = state.bundleManifest.assets.score_pages?.[partId] ?? [];
   if (!pages?.length) { state.fallbackScoreSlots = []; return; }
   try {
     const contents = await Promise.all(pages.map(async (page) => {
@@ -511,11 +516,9 @@ function renderScore(beat) {
   const page = activeGlyph?.page ?? Math.min(3, Math.floor(measureIndexAt(beat) / 7) + 1);
   if (page !== state.scorePage) state.scorePage = page;
   loadScoreImage(page);
-  if (state.fullScore) { els.scoreSheet.style.transform = 'translate(0, 0)'; return; }
   if (!activeGlyph) {
-    // Library MSCZ exports currently use complete-score SVG pages.  There is
-    // no per-note SVG map yet, so expose the first staff system rather than
-    // the large blank top margin of an A4 MuseScore page.
+    // Without a per-note SVG map, expose the first staff system of the
+    // selected vocal part rather than the large blank top margin of the page.
     els.scoreSheet.style.transform = 'translate(0, -13%)';
     els.scoreCursor.style.display = 'none';
     return;
@@ -918,7 +921,7 @@ function livePlumeSettings(displayBeat, inspecting, nowX, trailStartX) {
 }
 
 function visuallyAdvancedPitchBeat(beat) {
-  const advanceMs = Math.max(0, Math.min(200, Number(state.plumeSettings.timeAdvanceMs) || 0));
+  const advanceMs = Math.max(0, Math.min(PitchShared.PLUME_ADVANCE_MAX_MS, Number(state.plumeSettings.timeAdvanceMs) || 0));
   if (!advanceMs || !state.runtime) return beat;
   const playbackSpeed = Math.max(.1, Number(els.playbackSpeed.value) || 1);
   const scoreSeconds = state.runtime.secondsAtBeat(beat) - advanceMs / 1000 * playbackSpeed;
@@ -951,6 +954,8 @@ function drawPitchLane(beat) {
   const futureBeats = UI_CONFIG.futureBeats / (inspecting ? inspect.timeZoom : 1);
   const rowHeight = (plot.bottom - plot.top) / (bounds.max - bounds.min);
   const nowX = timeToX(displayBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
+  const noteLabelX = nowX - UI_CONFIG.pitchNoteLabelOffsetPx;
+  const melodyHeadX = noteLabelX - UI_CONFIG.pitchHeadGapPx;
   els.intonationReadout.style.left = `${nowX + 12}px`;
   els.intonationReadout.style.right = 'auto';
 
@@ -1035,15 +1040,17 @@ function drawPitchLane(beat) {
   if (state.pitchLayers.v1) {
     const v1PlumeSamples = state.pitchSamples.filter((sample) => (inspecting || sample.takeId === state.pitchTakeId) && sample.beat >= visibleStart && sample.beat <= visibleEnd);
     const xAtVoice = (sample) => inspecting ? timeToX(sample.beat, displayBeat, plot.left, plot.right, historyBeats, futureBeats)
-      : Math.min(nowX, timeToX(visuallyAdvancedPitchBeat(sample.beat), displayBeat, plot.left, plot.right, historyBeats, futureBeats));
+      : Math.min(melodyHeadX, timeToX(visuallyAdvancedPitchBeat(sample.beat), displayBeat, plot.left, plot.right, historyBeats, futureBeats));
     const yAtVoice = (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
-    const trailSettings = { ...livePlumeSettings(displayBeat, inspecting, inspecting ? plot.right : nowX, plot.left),
+    const trailSettings = { ...livePlumeSettings(displayBeat, inspecting, inspecting ? plot.right : melodyHeadX, plot.left),
       ribbonScale: state.plumeSettings.width, intensity: state.plumeSettings.intensity, dpr, width: rect.width, height: rect.height,
-      clip: { left: plot.left, top: plot.top, right: inspecting ? plot.right : nowX, bottom: plot.bottom },
+      clip: { left: plot.left, top: plot.top, right: inspecting ? plot.right : noteLabelX - 2, bottom: plot.bottom },
       animationTime: state.clock.running ? performance.now() / 1000 : state.runtime.secondsAtBeat(displayBeat) };
     fluidLayerDrawn = fluidTrailRenderer.render(v1PlumeSamples, xAtVoice, yAtVoice, trailSettings);
     if (!fluidLayerDrawn)
       FluidPitchTrail.drawFallback(ctx, v1PlumeSamples, xAtVoice, yAtVoice, trailSettings);
+    else if (!inspecting)
+      FluidPitchTrail.drawLiveHead(ctx, v1PlumeSamples, xAtVoice, yAtVoice, trailSettings);
   }
   if (state.pitchLayers.crepe && (state.neuralLive.enabled || state.neuralLive.samples.length)) {
     // CREPE salience is not a calibrated posterior. Keep its F0 trace separate
@@ -1065,14 +1072,14 @@ function drawPitchLane(beat) {
   ctx.restore(); ctx.shadowBlur = 0;
 
   const currentTarget = state.runtime.targetAt(beat);
-  ctx.fillStyle = '#0a181e'; ctx.fillRect(nowX - 48, plot.top - 8, 43, plot.bottom - plot.top + 16);
+  ctx.fillStyle = '#0a181e'; ctx.fillRect(noteLabelX - 4, plot.top - 8, nowX - noteLabelX - 1, plot.bottom - plot.top + 16);
   for (let pitch = Math.ceil(bounds.min); pitch <= Math.floor(bounds.max); pitch += 1) {
     const y = pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
     const active = currentTarget && pitch === currentTarget.midiPitch + state.transpose;
     ctx.fillStyle = active ? '#f0cf8f' : '#93a9a8';
     ctx.font = `${active ? '700 ' : ''}${Math.max(8, Math.min(12, rowHeight * .8))}px Inter, sans-serif`;
-    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    ctx.fillText(noteLabel(pitch, beat), nowX - 8, y);
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(noteLabel(pitch, beat), noteLabelX, y);
   }
   if (Number.isFinite(state.displayPitch) && (state.displayPitch < bounds.min || state.displayPitch > bounds.max)) {
     ctx.fillStyle = '#68d1cb'; ctx.textAlign = 'left';
@@ -1245,7 +1252,6 @@ function seekToMeasure(index, autoPlay = false) {
 }
 
 async function togglePlayback() {
-  if (state.fullScore) { showToast('Torna a “Mia parte” per avviare la prova.'); return; }
   if (!state.bundleApproved) { showToast('Serve l’approvazione admin di questo bundle.'); return; }
   if (state.clock.snapshot().beat >= totalBeats()) state.clock.seekBeat(0);
   if (state.clock.running) {
@@ -2607,12 +2613,6 @@ async function openBenchmarkDialog() {
   }
   state.benchmark.sessionId ??= crypto.randomUUID();
   if (state.clock.running) state.clock.pause();
-  if (state.fullScore) {
-    state.fullScore = false;
-    els.scoreMode.setAttribute('aria-pressed', 'false');
-    els.scoreMode.textContent = 'Partitura';
-    document.querySelector('.score-region').classList.remove('full-score');
-  }
   // A benchmark take must start from an empty pitch lane. This only clears
   // transient Practice history for the selected part; accepted recordings in
   // IndexedDB are not touched.
@@ -2830,6 +2830,7 @@ function globalDetectorPreferences() {
     v1SlowAlpha: state.detectorSettings.slowAlpha,
     v1MedianWindowFrames: state.detectorSettings.medianWindowFrames,
     v1PlumeWidth: state.plumeSettings.width,
+    plumeWidthPreferenceVersion: PitchShared.PLUME_WIDTH_PREFERENCE_VERSION,
     v1PlumeIntensity: state.plumeSettings.intensity,
     v1PlumeColor: state.plumeSettings.color,
     v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
@@ -2853,7 +2854,8 @@ function savePreferences() {
       v1WeakVoiceMode: state.detectorSettings.weakVoiceMode,
       v1FastAlpha: state.detectorSettings.fastAlpha, v1SlowAlpha: state.detectorSettings.slowAlpha,
       v1MedianWindowFrames: state.detectorSettings.medianWindowFrames,
-      v1PlumeWidth: state.plumeSettings.width, v1PlumeIntensity: state.plumeSettings.intensity,
+      v1PlumeWidth: state.plumeSettings.width, plumeWidthPreferenceVersion: PitchShared.PLUME_WIDTH_PREFERENCE_VERSION,
+      v1PlumeIntensity: state.plumeSettings.intensity,
       v1PlumeColor: state.plumeSettings.color, v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
       displayPitchAlgorithm: state.displayPitchAlgorithm, pitchLayerV1: state.pitchLayers.v1,
       pitchLayerCrepe: state.pitchLayers.crepe }));
@@ -2905,13 +2907,17 @@ function restorePreferences() {
   const savedMedian = Number(detectorSaved.v1MedianWindowFrames);
   state.detectorSettings.medianWindowFrames = Number.isFinite(savedMedian)
     ? Math.max(1, Math.min(7, Math.round(savedMedian / 2) * 2 - 1)) : V1_TRACKER_DEFAULTS.medianWindowFrames;
-  state.plumeSettings.width = Number.isFinite(Number(detectorSaved.v1PlumeWidth))
-    ? Math.max(.35, Math.min(2.2, Number(detectorSaved.v1PlumeWidth))) : 1;
+  const savedPlumeWidth = Number(detectorSaved.v1PlumeWidth);
+  const legacyDefaultPlumeWidth = detectorSaved.plumeWidthPreferenceVersion !== PitchShared.PLUME_WIDTH_PREFERENCE_VERSION
+    && Math.abs(savedPlumeWidth - 1) < 1e-9;
+  state.plumeSettings.width = Number.isFinite(savedPlumeWidth) && !legacyDefaultPlumeWidth
+    ? Math.max(.35, Math.min(2.5, savedPlumeWidth)) : PitchShared.PLUME_DEFAULTS.width;
   state.plumeSettings.intensity = Number.isFinite(Number(detectorSaved.v1PlumeIntensity))
     ? Math.max(.15, Math.min(2, Number(detectorSaved.v1PlumeIntensity))) : 1;
   state.plumeSettings.color = '#72e0d2';
   state.plumeSettings.timeAdvanceMs = Number.isFinite(Number(detectorSaved.v1PlumeAdvanceMs))
-    ? Math.round(Math.max(0, Math.min(200, Number(detectorSaved.v1PlumeAdvanceMs))) / 10) * 10 : 200;
+    ? Math.round(Math.max(0, Math.min(PitchShared.PLUME_ADVANCE_MAX_MS, Number(detectorSaved.v1PlumeAdvanceMs))) / 10) * 10
+    : PitchShared.PLUME_DEFAULTS.timeAdvanceMs;
   state.displayPitchAlgorithm = detectorSaved.displayPitchAlgorithm === 'v1' ? 'v1' : 'v1+display-filter';
   state.displayPitchFilter.reset();
   state.pitchLayers.v1 = detectorSaved.pitchLayerV1 !== false;
@@ -2939,6 +2945,10 @@ function setScoreHeight(height) {
   document.documentElement.style.setProperty('--score-h', `${value}px`);
   els.scorePitchDivider.setAttribute('aria-valuemax', String(Math.round(maximum)));
   els.scorePitchDivider.setAttribute('aria-valuenow', String(value));
+  // The piano roll is a bitmap canvas. When its CSS height changes, redraw it
+  // before the next paint so the browser never stretches the old frame and
+  // deforms lyrics or note labels vertically while the divider is dragged.
+  if (state.runtime && !state.rafId) state.rafId = requestAnimationFrame(render);
 }
 
 function bindScorePitchDivider() {
@@ -3179,14 +3189,6 @@ function bindControls() {
     updatePlaybackButton();
     render();
   });
-  els.scoreMode.addEventListener('click', () => {
-    if (state.clock.running) { showToast('Metti in pausa per consultare la partitura completa.'); return; }
-    state.fullScore = !state.fullScore;
-    els.scoreMode.setAttribute('aria-pressed', String(state.fullScore));
-    els.scoreMode.textContent = state.fullScore ? 'Mia parte' : 'Partitura';
-    document.querySelector('.score-region').classList.toggle('full-score', state.fullScore);
-    state.scorePage = 0; render();
-  });
   els.accompanimentMode.addEventListener('change', () => {
     if (state.clock.running) { state.clock.pause(); updatePlaybackButton(); }
     showToast('Guida melodica derivata dallo score selezionato.');
@@ -3280,7 +3282,7 @@ function bindControls() {
     applyLiveTrackerSettings(); updateDetectorSettingsUi(); savePreferences();
     render(); showToast('Impostazioni v1 ripristinate ai valori predefiniti.');
   });
-  els.settingsClose.addEventListener('click', () => els.settingsDialog.close());
+  els.settingsDialog.addEventListener('click', closeSettingsFromBackdrop);
   document.getElementById('admin-review').addEventListener('click', () => window.open('admin-review.html', 'choir-admin-review'));
   document.getElementById('exit-practice').addEventListener('click', openLibraryPicker);
   window.addEventListener('resize', () => { state.activeScoreSegment = null; render(); });
@@ -3386,6 +3388,9 @@ function bindLibraryPicker() {
     if (els.libraryPart.value) query.set('part', els.libraryPart.value);
     window.location.search = query.toString();
   });
+  els.libraryScore.addEventListener('click', () => {
+    window.location.href = `score-viewer.html?piece=${encodeURIComponent(els.libraryPiece.value)}`;
+  });
 }
 
 function restartPractice() {
@@ -3480,6 +3485,7 @@ async function loadPracticePiece(pieceId) {
   }
   const libraryPiece = state.library.find((piece) => piece.piece_id === bundleManifest.piece_id);
   els.pieceTitle.textContent = libraryPiece ? pieceDisplayTitle(libraryPiece) : state.runtime.title.split('·')[0].trim();
+  els.scoreViewerLink.href = `score-viewer.html?piece=${encodeURIComponent(bundleManifest.piece_id)}`;
   els.scorePartLabel.textContent = parts.find((part) => part.id === state.runtime.selectedPartId)?.name ?? 'Parte';
   const initialMeasure = state.phrase?.start ?? 0;
   bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(initialMeasure); updatePlaybackButton();

@@ -13,13 +13,13 @@
     <script src="practice_math.js?v=20261003-interval-arrows" defer></script>
     <script src="score_runtime.js?v=20260927-pickup-timing" defer></script>
     <script src="pitch_detector.js?v=20261003-weak-voice" defer></script>
-    <script src="pitch_shared.js?v=20261003-weak-voice" defer></script>
-    <script src="fluid_pitch_trail.js?v=20260930-smooth-joins" defer></script>
+    <script src="pitch_shared.js?v=20261004-plume-advance-400" defer></script>
+    <script src="fluid_pitch_trail.js?v=20261004-plume-head" defer></script>
     <script src="vocal_feedback.js?v=20260928-feedback-v1" defer></script>
     <script src="one_euro_filter.js?v=20260927-phase2" defer></script>
     <script src="media_mixer.js?v=20261004-ipados" defer></script>
     <script src="pitch_test_harness.js?v=20260927-phase0" defer></script>
-    <script src="app.js?v=20261003-interval-arrows" defer></script>
+    <script src="app.js?v=20261004-plume-advance-400" defer></script>
   </head>
   <body>
     <main class="practice-shell" aria-label="Strumento di prova">
@@ -33,6 +33,7 @@
           <label class="compact-select"><span class="sr-only">Trasposizione</span><select id="transpose" aria-label="Trasposizione"></select></label>
           <label class="compact-select"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
           <button class="mode-button accompaniment-select" id="accompaniment-mode" type="button">Voci</button>
+          <a class="mode-button score-viewer-link" id="score-viewer-link" href="score-viewer.html">Partitura</a>
           <a class="mode-button voice-lab-link" href="voice-lab.html">Allena la voce</a>
           <button class="mode-button" id="exercise" type="button">Studia una frase</button>
           <details class="toolbar-more">
@@ -40,7 +41,6 @@
             <div class="toolbar-more-menu">
               <button class="mode-button library-button" id="library" type="button">Scegli un brano</button>
               <button class="mode-button" id="restart-practice" type="button">Ricomincia</button>
-              <button class="mode-button" id="score-mode" type="button" aria-pressed="false">Partitura completa</button>
               <button class="mode-button" id="benchmark" type="button">Le mie registrazioni</button>
               <button class="mode-button" id="settings" type="button">Impostazioni</button>
               <details class="studio-advanced"><summary>Strumenti avanzati</summary>
@@ -113,7 +113,7 @@
     </dialog>
     <dialog id="settings-dialog" class="practice-dialog detector-settings-dialog" aria-labelledby="settings-heading">
       <h2 id="settings-heading">La tua voce, sullo schermo</h2>
-      <p>Personalizza il piano roll e regola la sensibilità se il microfono fatica a sentirti. Le impostazioni vengono salvate su questo dispositivo.</p>
+      <p>Personalizza il piano roll e regola la sensibilità se il microfono fatica a sentirti. Le modifiche vengono applicate e salvate subito; clicca o tocca fuori dalla finestra per tornare al brano.</p>
       <section class="detector-setting" aria-labelledby="settings-text-scale-heading">
         <div><h3 id="settings-text-scale-heading">Testo sul piano roll</h3><output id="settings-text-scale-value">150%</output></div>
         <input id="settings-text-scale" type="range" min="100" max="200" step="10" value="150" />
@@ -158,20 +158,20 @@
         <p>Reattività alta e una mediana corta riducono il ritardo, ma lasciano passare più instabilità e salti brevi.</p>
       </section>
       <section class="detector-setting" aria-labelledby="settings-v1-plume-heading">
-        <div><h3 id="settings-v1-plume-heading">Aspetto plume v1</h3><output id="settings-v1-plume-width-value">100%</output></div>
+        <div><h3 id="settings-v1-plume-heading">Aspetto plume v1</h3><output id="settings-v1-plume-width-value">250%</output></div>
         <label class="detector-setting-label" for="settings-v1-plume-width">Larghezza</label>
-        <input id="settings-v1-plume-width" type="range" min="35" max="220" step="5" value="100" />
+        <input id="settings-v1-plume-width" type="range" min="35" max="250" step="5" value="250" />
         <div class="detector-setting-scale"><span>Più stretta</span><span>Più ampia</span></div>
         <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-intensity">Intensità <output id="settings-v1-plume-intensity-value">100%</output></label>
         <input id="settings-v1-plume-intensity" type="range" min="15" max="200" step="5" value="100" />
         <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-advance">Anticipo temporale <output id="settings-v1-plume-advance-value">200 ms</output></label>
-        <input id="settings-v1-plume-advance" type="range" min="0" max="200" step="10" value="200" />
-        <div class="detector-setting-scale"><span>0 ms · timestamp reale</span><span>200 ms · più anticipata</span></div>
-        <p>La linea cyan mostra il pitch; il flusso interno dà vita alla ribbon senza deformare il dato. Larghezza e intensità sono visive: non rappresentano un intervallo di incertezza e non cambiano il punteggio.</p>
+        <input id="settings-v1-plume-advance" type="range" min="0" max="400" step="10" value="200" />
+        <div class="detector-setting-scale"><span>0 ms · timestamp reale</span><span>400 ms · più anticipata</span></div>
+        <p>La linea cyan mostra il pitch; il flusso interno dà vita alla ribbon senza deformare il dato. L’anticipo temporale aiuta a compensare visivamente la latenza, anche con cuffie Bluetooth. Queste regolazioni non cambiano il punteggio.</p>
       </section>
       </details>
       <p class="library-note">Usa le cuffie per distinguere meglio la tua voce dall’accompagnamento.</p>
-      <div class="dialog-actions"><button id="settings-reset" type="button">Ripristina predefinito</button><button id="settings-close" type="button">Chiudi</button></div>
+      <div class="dialog-actions"><button id="settings-reset" type="button">Ripristina predefinito</button></div>
     </dialog>
     <dialog id="result-dialog" class="practice-dialog">
       <h2>Prova completata</h2><p id="result-text"></p><p id="result-progress"></p>
@@ -186,9 +186,15 @@
       <small id="library-title-help">Puoi usare un nome più riconoscibile. Lascia vuoto e salva per ripristinare il nome proposto.</small>
       <button id="library-title-save" type="button">Salva nome</button></details>
       <label>Parte da cantare <select id="library-part" aria-label="Parte da cantare"></select></label>
+      <small class="studio-part-note">La parte selezionata viene usata solo in “Canta brano”.</small>
       <p id="library-note" class="library-note" hidden></p>
-      <div class="dialog-actions"><button id="library-open" type="button">Entra nello studio →</button><button type="button" onclick="this.closest('dialog').close()">Torna alla prova</button></div>
-      <a class="studio-lab-entry" href="voice-lab.html"><span class="studio-lab-icon" aria-hidden="true">♪</span><span class="studio-lab-copy"><strong>Prima, un po’ di allenamento?</strong><small>Note e intervalli, al tuo ritmo.</small></span><span class="studio-lab-action">Inizia</span></a></div>
+      <p class="studio-mode-heading">SCEGLI LA MODALITÀ</p>
+      <div class="studio-mode-picker" aria-label="Modalità">
+        <button class="studio-mode-entry is-primary" id="library-open" type="button"><span class="studio-mode-icon" aria-hidden="true">●</span><span class="studio-mode-copy"><strong>Canta brano</strong><small>La tua parte, piano roll e ascolto della voce.</small></span><span class="studio-mode-action">Apri</span></button>
+        <button class="studio-mode-entry" id="library-score" type="button"><span class="studio-mode-icon" aria-hidden="true">▤</span><span class="studio-mode-copy"><strong>Partitura</strong><small>Partitura completa da scorrere. Senza piano roll né microfono.</small></span><span class="studio-mode-action">Apri</span></button>
+        <a class="studio-mode-entry" href="voice-lab.html"><span class="studio-mode-icon" aria-hidden="true">♪</span><span class="studio-mode-copy"><strong>Allena la voce</strong><small>Note, intervalli e controllo vocale.</small></span><span class="studio-mode-action">Apri</span></a>
+      </div>
+      <button class="studio-return" type="button" onclick="this.closest('dialog').close()">Torna alla prova</button></div>
     </dialog>
     <dialog id="ground-truth-dialog" class="practice-dialog" aria-labelledby="ground-truth-heading">
       <h2 id="ground-truth-heading">Campione di riferimento</h2>

@@ -38,7 +38,7 @@ MUSESCORE_CANDIDATES = (
     Path(r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe"),
 )
 _library_lock = threading.Lock()
-LIBRARY_ASSET_LAYOUT_VERSION = 9
+LIBRARY_ASSET_LAYOUT_VERSION = 10
 DEFAULT_SCORE_TEMPO_BPM = 80.0
 SOURCE_FINGERPRINT_VERSION = 1
 _IGNORED_MSCZ_MEMBERS = frozenset({"META-INF/container.xml", "viewsettings.json"})
@@ -266,6 +266,64 @@ def _export_audio_stem(source: Path, output: Path, executable: str) -> None:
     _wait_for_file(output)
 
 
+def _source_part_ids(source: Path) -> list[str]:
+    """Return MuseScore's part ids in score order from an MSCZ archive."""
+    try:
+        with zipfile.ZipFile(source) as archive:
+            score_name = next(name for name in archive.namelist() if name.lower().endswith(".mscx"))
+            root = ET.fromstring(archive.read(score_name))
+    except (OSError, ValueError, StopIteration, zipfile.BadZipFile, ET.ParseError):
+        return []
+    return [part_id for part in root.findall("./Score/Part")
+            if (part_id := part.get("id")) is not None]
+
+
+def _write_audio_subset_source(source: Path, destination: Path,
+                               included_part_ids: set[str]) -> bool:
+    """Copy an MSCZ while muting every playback track outside the requested parts.
+
+    Exporting stems from this archive, rather than round-tripped MusicXML, keeps
+    the user's MS Basic/Muse Sounds assignments and mixer settings intact.
+    """
+    try:
+        with zipfile.ZipFile(source) as archive:
+            settings = json.loads(archive.read("audiosettings.json").decode("utf-8"))
+            tracks = settings.get("tracks")
+            if not isinstance(tracks, list):
+                return False
+            matched = False
+            for track in tracks:
+                part_id = str(track.get("partId", ""))
+                enabled = part_id in included_part_ids
+                matched = matched or enabled
+                track["soloMuteState"] = {"mute": not enabled, "solo": False}
+            if not matched:
+                return False
+            with zipfile.ZipFile(destination, "w") as output:
+                for item in archive.infolist():
+                    payload = (json.dumps(settings, ensure_ascii=False, indent=4).encode("utf-8")
+                               if item.filename == "audiosettings.json" else archive.read(item.filename))
+                    output.writestr(item, payload)
+    except (OSError, KeyError, UnicodeDecodeError, ValueError, zipfile.BadZipFile):
+        return False
+    return True
+
+
+def _export_source_audio_subset(source: Path, output: Path, executable: str,
+                                included_part_ids: set[str]) -> bool:
+    handle, temporary_name = tempfile.mkstemp(prefix=f".{source.stem}-", suffix=".mscz",
+                                               dir=output.parent)
+    os.close(handle)
+    temporary = Path(temporary_name)
+    try:
+        if not _write_audio_subset_source(source, temporary, included_part_ids):
+            return False
+        _export_audio_stem(temporary, output, executable)
+        return True
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
 def _build_library_piece(source: Path) -> dict:
     """Build browser-only derivatives of a user-owned MSCZ source on demand."""
     piece_id = _piece_id(source.parent.name)
@@ -303,6 +361,7 @@ def _build_library_piece(source: Path) -> dict:
             raise RuntimeError((result.stderr or result.stdout or "MuseScore export failed").strip()[-600:])
         _wait_for_file(musicxml)
         musicxml_tree = ET.parse(musicxml)
+        source_has_explicit_tempo = bool(_tempo_directions(musicxml_tree.getroot()))
         if _ensure_explicit_tempo(musicxml_tree.getroot()):
             musicxml_tree.write(musicxml, encoding="utf-8", xml_declaration=True)
 
@@ -324,6 +383,16 @@ def _build_library_piece(source: Path) -> dict:
         vocal_parts = [part for part in payload["parts"] if not _is_accompaniment(part["name"])]
         complete_root = ET.parse(musicxml).getroot()
         tempo_directions = _tempo_directions(complete_root)
+        source_part_ids = _source_part_ids(source)
+        source_part_by_exported_id = {
+            part["id"]: source_part_id
+            for part, source_part_id in zip(payload["parts"], source_part_ids)
+        }
+        preserve_source_sounds = source_has_explicit_tempo and len(source_part_ids) == len(payload["parts"])
+        if preserve_source_sounds:
+            preserve_source_sounds = _export_source_audio_subset(
+                source, score_audio, executable, set(source_part_ids),
+            )
         part_pages = {
             part["id"]: _export_part_svg(musicxml, destination, part["id"], executable, tempo_directions)
             for part in vocal_parts
@@ -331,7 +400,13 @@ def _build_library_piece(source: Path) -> dict:
         voice_stems = {}
         for part in vocal_parts:
             filename = f"voice-{part['id']}.mp3"
-            _export_audio_stem(destination / f"part-{part['id']}.musicxml", destination / filename, executable)
+            preserved = preserve_source_sounds and _export_source_audio_subset(
+                source, destination / filename, executable,
+                {source_part_by_exported_id[part["id"]]},
+            )
+            if not preserved:
+                _export_audio_stem(destination / f"part-{part['id']}.musicxml", destination / filename, executable)
+                preserve_source_sounds = False
             voice_stems[part["id"]] = filename
         vocal_ids = {part["id"] for part in vocal_parts}
         tree = ET.parse(musicxml)
@@ -350,7 +425,16 @@ def _build_library_piece(source: Path) -> dict:
             accompaniment_source = destination / "accompaniment.musicxml"
             tree.write(accompaniment_source, encoding="utf-8", xml_declaration=True)
             accompaniment_file = "accompaniment.mp3"
-            _export_audio_stem(accompaniment_source, destination / accompaniment_file, executable)
+            accompaniment_ids = ({
+                source_part_by_exported_id[part["id"]]
+                for part in payload["parts"] if part["id"] not in vocal_ids
+            } if preserve_source_sounds else set())
+            preserved = preserve_source_sounds and _export_source_audio_subset(
+                source, destination / accompaniment_file, executable, accompaniment_ids,
+            )
+            if not preserved:
+                _export_audio_stem(accompaniment_source, destination / accompaniment_file, executable)
+                preserve_source_sounds = False
         metadata = {
             "layout_version": LIBRARY_ASSET_LAYOUT_VERSION,
             "piece_id": piece_id,
@@ -365,6 +449,7 @@ def _build_library_piece(source: Path) -> dict:
             "part_pages": part_pages,
             "voice_stems": voice_stems,
             "accompaniment_file": accompaniment_file,
+            "source_playback_sounds_preserved": preserve_source_sounds,
         }
         _write_json_atomic(metadata_path, metadata)
         return metadata

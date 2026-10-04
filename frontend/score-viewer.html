@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#10191c" />
+    <title>Partitura completa · Choir Assistant</title>
+    <link rel="stylesheet" href="score_viewer.css?v=1" />
+    <script src="runtime-config.js" defer></script>
+    <script src="score_viewer.js?v=1" defer></script>
+  </head>
+  <body data-zoom="fit">
+    <header class="viewer-toolbar">
+      <a class="viewer-back" id="viewer-back" href="index.html">← Canta brano</a>
+      <div class="viewer-identity">
+        <span>Partitura completa</span>
+        <h1 id="viewer-title">Caricamento…</h1>
+      </div>
+      <label class="viewer-piece-control"><span>Brano</span><select id="viewer-piece" aria-label="Scegli il brano"></select></label>
+      <fieldset class="viewer-paper" aria-label="Colore della carta">
+        <legend>Carta</legend>
+        <button type="button" data-paper="#c3c0b6" aria-pressed="false">Carta</button>
+        <button type="button" data-paper="#e3e8e6" aria-pressed="false">Grigio chiaro</button>
+        <button type="button" data-paper="#ffffff" aria-pressed="false">Bianco</button>
+      </fieldset>
+      <div class="viewer-zoom" role="group" aria-label="Dimensione partitura">
+        <button id="viewer-zoom-out" type="button" aria-label="Riduci partitura">−</button>
+        <button id="viewer-zoom-fit" type="button">Adatta</button>
+        <button id="viewer-zoom-in" type="button" aria-label="Ingrandisci partitura">+</button>
+      </div>
+    </header>
+    <main class="viewer-scroll" id="viewer-scroll" tabindex="-1">
+      <section class="viewer-pages" id="viewer-pages" aria-live="polite" aria-busy="true">
+        <p class="viewer-status" id="viewer-status" role="status">Preparazione della partitura…</p>
+      </section>
+    </main>
+    <output class="viewer-page-position" id="viewer-page-position" aria-live="polite" hidden></output>
+  </body>
+</html>
