@@ -21,7 +21,7 @@ CORE_ASSETS = (
     "styles.css", "studio.css", "ui_preferences.js", "score_appearance.js",
     "practice_math.js", "score_runtime.js", "pitch_detector.js",
     "pitch_detector_worker.js", "pitch_shared.js", "fluid_pitch_trail.js",
-    "vocal_feedback.js", "one_euro_filter.js", "app.js", "voice_lab_core.js",
+    "vocal_feedback.js", "one_euro_filter.js", "media_mixer.js", "app.js", "voice_lab_core.js",
     "voice_draw_core.js", "voice_lab.js",
 )
 FORBIDDEN_TEXT = ("__pitchTestHooks", "/api/", "cdn.jsdelivr", "unpkg", "localhost")

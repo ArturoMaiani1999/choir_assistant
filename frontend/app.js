@@ -6,6 +6,7 @@ const FluidPitchTrail = window.ChoirFluidPitchTrail;
 const { OneEuroFilter } = window.ChoirOneEuro;
 const UiPreferences = window.ChoirUiPreferences;
 const VocalFeedback = window.VocalFeedback;
+const { MediaElementMixer } = window.ChoirMedia;
 const RUNTIME_CONFIG = window.ChoirRuntimeConfig ?? Object.freeze({});
 
 function libraryBundleUrl(pieceId) {
@@ -66,6 +67,7 @@ const state = {
   rafId: null,
   lastAnnouncedState: '',
   backingManifest: null,
+  playbackMixer: new MediaElementMixer(),
   voiceStemAudio: new Map(),
   selectedVoiceIds: new Set(),
   bundleManifest: null,
@@ -313,25 +315,30 @@ function pauseVoiceStems() {
   for (const audio of state.voiceStemAudio.values()) audio.pause();
 }
 
+function discardVoiceStems() {
+  for (const audio of state.voiceStemAudio.values()) state.playbackMixer.release(audio);
+  state.voiceStemAudio.clear();
+}
+
 function syncVoiceStemLevels() {
   const count = Math.max(1, state.voiceStemAudio.size);
   const level = Math.min(1, Number(els.volume.value) / 100 * .9 / Math.sqrt(count));
   for (const audio of state.voiceStemAudio.values()) {
-    audio.volume = level;
+    state.playbackMixer.setLevel(audio, level);
     audio.playbackRate = Number(els.playbackSpeed.value);
     audio.preservesPitch = true;
+    audio.webkitPreservesPitch = true;
   }
 }
 
 function syncBackingLevel() {
   const silentClock = Object.keys(state.backingManifest?.voice_stems ?? {}).length > 0
     && !state.backingManifest?.accompaniment_file;
-  els.backingAudio.volume = silentClock ? 0 : Number(els.volume.value) / 100;
+  state.playbackMixer.setLevel(els.backingAudio, Number(els.volume.value) / 100, { forceMuted: silentClock });
 }
 
 function configureVoiceStems() {
-  pauseVoiceStems();
-  state.voiceStemAudio.clear();
+  discardVoiceStems();
   const stems = state.backingManifest?.voice_stems ?? {};
   const mixerAvailable = Object.keys(stems).length > 0;
   els.accompanimentMode.disabled = !mixerAvailable;
@@ -339,6 +346,7 @@ function configureVoiceStems() {
     if (!stems[partId]) continue;
     const audio = new Audio(voiceStemUrl(stems[partId]));
     audio.preload = 'auto';
+    audio.playsInline = true;
     state.voiceStemAudio.set(partId, audio);
   }
   syncVoiceStemLevels();
@@ -1245,6 +1253,13 @@ async function togglePlayback() {
     savePitchHistory();
   } else {
     state.gridInspect.active = false;
+    try {
+      await state.playbackMixer.resume([els.backingAudio, ...state.voiceStemAudio.values()]);
+      syncBackingLevel();
+      syncVoiceStemLevels();
+    } catch (error) {
+      console.warn('Unable to start Web Audio mixer; using media fallback', error);
+    }
     if (state.microphoneStatus !== 'active') await toggleMicrophone();
     if (!state.attemptActive) {
       state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;

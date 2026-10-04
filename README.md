@@ -33,6 +33,7 @@ node frontend/practice_math.test.js
 node frontend/score_runtime.test.js
 node frontend/pitch_detector.test.js
 node frontend/one_euro_filter.test.js
+node frontend/media_mixer.test.js
 node frontend/pitch_test_harness.test.js
 python -m unittest discover -s backend/choir_assistant/tests -t backend
 python -m unittest scripts.check_voice_lab_artifacts_test
