@@ -38,9 +38,8 @@ processed in memory and is not uploaded or recorded.
 
 The toolbar transposition selector shifts the guide audio and practice targets
 by -12 to +12 semitones, including octave presets. The displayed score remains
-the original notation and is labelled accordingly. Audio transposition requires
-FFmpeg on PATH or the local FFmpeg installation used by the guide builder.
-Restart the local server after updating it to enable `/api/transpose`.
+the original notation and is labelled accordingly. Audio transposition runs in
+the browser through an AudioWorklet and keeps the playback duration unchanged.
 
 Note names and live feedback sit beside NOW. **Esercizio** selects a phrase,
 enables automatic repetition with a preceding measure, offers Italian note names,

@@ -23,6 +23,7 @@ Bundles using the voice mixer additionally expose one instrumental
 `accompaniment_file` and a `voice_stems` map. The instrumental file remains the
 authoritative media clock; selected vocal stems follow its play, pause, seek
 and playback-rate state. Drift beyond 80 ms is corrected against the master.
+Each SATB stem and the accompaniment have independent mute and gain controls.
 The user's currently selected vocal part is enabled by default, and several
 vocal stems may be enabled together.
 
@@ -31,10 +32,12 @@ only allowlisted, pre-generated assets and has no audio-processing endpoint.
 
 ## Speed and transposition
 
-Playback speed uses `HTMLMediaElement.playbackRate`; the clock continues to read
-media time. The first static release supports original key only. Supporting
-production transposition requires authorized pre-rendered files recorded in the
-manifest; the local `/api/transpose` capability is never deployed.
+Playback speed uses `HTMLMediaElement.playbackRate` with `preservesPitch` (and
+the WebKit equivalent); the clock continues to read media time. Production
+transposition runs locally in an AudioWorklet, changes pitch without changing
+duration, and is applied to the master and every selected stem. Browsers that
+cannot load the worklet fail closed instead of playing audio in a key that does
+not match the transposed targets.
 
 ## Microphone interaction
 

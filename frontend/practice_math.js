@@ -36,9 +36,18 @@
     }
     return intervals;
   }
-  function measureSeekState(measures, selectedIndex) {
+  function measureSeekState(measures, selectedIndex, { preRoll = true } = {}) {
     const safeIndex = Math.max(0, Math.min(measures.length - 1, selectedIndex));
-    return { selectedIndex: safeIndex, playbackStart: measures[Math.max(0, safeIndex - 1)]?.startBeat ?? 0, scoringStart: measures[safeIndex]?.startBeat ?? 0 };
+    const scoringStart = measures[safeIndex]?.startBeat ?? 0;
+    return { selectedIndex: safeIndex,
+      playbackStart: preRoll ? measures[Math.max(0, safeIndex - 1)]?.startBeat ?? 0 : scoringStart,
+      scoringStart };
+  }
+  function metronomePerformanceTime(performanceTime, speed, offsetMs) {
+    const safeTime = Math.max(0, Number(performanceTime) || 0);
+    const safeSpeed = Math.max(.1, Number(speed) || 1);
+    const safeOffset = Number(offsetMs) || 0;
+    return Math.max(0, safeTime - safeOffset / 1000 * safeSpeed);
   }
   function rhythmGridLines(measures, visibleStart, visibleEnd) {
     const lines = [];
@@ -67,5 +76,5 @@
     const animating = Math.abs(target.min - bounds.min) > .01 || Math.abs(target.max - bounds.max) > .01;
     return { bounds: animating ? bounds : { ...target }, animating };
   }
-  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, rhythmGridLines, smoothPitchBounds };
+  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, metronomePerformanceTime, rhythmGridLines, smoothPitchBounds };
 });

@@ -6,9 +6,9 @@
     <meta name="theme-color" content="#081419" />
     <title>Choir Assistant · Il tuo studio</title>
     <script src="ui_preferences.js?v=2-lyrics-only"></script>
-    <link rel="stylesheet" href="styles.css?v=20261002-lower-score-divider" />
-    <link rel="stylesheet" href="studio.css?v=20261002-voice-mixer-layout" />
-    <script src="score_appearance.js?v=1"></script>
+    <link rel="stylesheet" href="styles.css?v=20261008-settings-refresh" />
+    <link rel="stylesheet" href="studio.css?v=20261008-vertical-mixer" />
+    <script src="score_appearance.js?v=2"></script>
     <script src="runtime-config.js" defer></script>
     <script src="practice_math.js?v=20261003-interval-arrows" defer></script>
     <script src="score_runtime.js?v=20260927-pickup-timing" defer></script>
@@ -17,9 +17,9 @@
     <script src="fluid_pitch_trail.js?v=20261004-plume-head" defer></script>
     <script src="vocal_feedback.js?v=20260928-feedback-v1" defer></script>
     <script src="one_euro_filter.js?v=20260927-phase2" defer></script>
-    <script src="media_mixer.js?v=20261004-full-mix" defer></script>
+    <script src="media_mixer.js?v=20261008-mixer-transpose" defer></script>
     <script src="pitch_test_harness.js?v=20260927-phase0" defer></script>
-    <script src="app.js?v=20261004-full-mix" defer></script>
+    <script src="app.js?v=20261008-vertical-mixer" defer></script>
   </head>
   <body>
     <main class="practice-shell" aria-label="Strumento di prova">
@@ -30,12 +30,11 @@
           <label class="part-control"><span class="sr-only">Parte vocale</span><select id="part-selector" aria-label="Parte vocale"></select></label>
         </div>
         <div class="toolbar-actions">
-          <label class="compact-select"><span class="sr-only">Trasposizione</span><select id="transpose" aria-label="Trasposizione"></select></label>
+          <label class="compact-select transpose-control"><span>Transpose</span><select id="transpose" aria-label="Trasposizione"></select><output id="transpose-value" aria-live="polite">±0</output></label>
           <label class="compact-select"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
           <button class="mode-button accompaniment-select" id="accompaniment-mode" type="button">Voci</button>
           <a class="mode-button score-viewer-link" id="score-viewer-link" href="score-viewer.html">Partitura</a>
           <a class="mode-button voice-lab-link" href="voice-lab.html">Allena la voce</a>
-          <button class="mode-button" id="exercise" type="button">Studia una frase</button>
           <details class="toolbar-more">
             <summary aria-label="Altri strumenti">Altro</summary>
             <div class="toolbar-more-menu">
@@ -43,13 +42,9 @@
               <button class="mode-button" id="restart-practice" type="button">Ricomincia</button>
               <button class="mode-button" id="benchmark" type="button">Le mie registrazioni</button>
               <button class="mode-button" id="settings" type="button">Impostazioni</button>
-              <details class="studio-advanced"><summary>Strumenti avanzati</summary>
-              <button class="mode-button" id="ground-truth" type="button">Registra un riferimento</button>
-              <button class="mode-button diagnostic-button" id="neural-live" type="button" aria-pressed="false" title="Confronto CREPE v5 sperimentale: non altera il punteggio">Neurale live</button>
-              <button class="mode-button" id="admin-review" type="button" aria-label="Apri revisione admin">Revisione</button>
-              </details>
             </div>
           </details>
+          <div hidden aria-hidden="true"><button id="ground-truth" type="button"></button><button id="neural-live" type="button"></button><button id="admin-review" type="button"></button></div>
         </div>
       </header>
 
@@ -70,7 +65,7 @@
       <section class="pitch-region" aria-label="Intonazione e tempo">
         <canvas id="pitch-lane" role="img" aria-describedby="pitch-description"></canvas>
         <canvas id="pitch-fluid-layer" aria-hidden="true"></canvas>
-        <p class="sr-only" id="pitch-description">Le note target scorrono verso il cursore fisso. La traiettoria mostra l’intonazione rilevata dal microfono. Se abilitate, le frecce indicano gli intervalli tra note consecutive.</p>
+        <p class="sr-only" id="pitch-description">In pausa, tocca o trascina orizzontalmente il piano roll per scegliere una battuta. Premendo play, la traccia parte dalla battuta precedente. La traiettoria mostra l’intonazione rilevata dal microfono.</p>
         <div class="intonation-readout" id="intonation-readout" aria-live="polite"><strong id="live-note">—</strong><span id="live-cents">— ¢</span><small id="live-state">in attesa</small></div>
         <div class="lane-legend" aria-label="Tracce visibili nel piano roll">
           <label class="pitch-layer-toggle voice-key"><input id="pitch-layer-v1" type="checkbox" checked /> La tua voce</label>
@@ -95,21 +90,17 @@
     </main>
     <dialog id="voice-mixer-dialog" class="practice-dialog" aria-labelledby="voice-mixer-heading">
       <h2 id="voice-mixer-heading">Voci da ascoltare</h2>
-      <p>Seleziona una o più parti vocali. La base strumentale rimane attiva quando disponibile.</p>
-      <div id="voice-mixer-options" class="voice-mixer-options"></div>
+      <p>Regola separatamente ogni traccia con i fader verticali. Usa Mute per silenziarla senza perdere il livello impostato.</p>
+      <div class="mixer-console">
+        <section class="mixer-channel mixer-accompaniment" id="voice-mixer-accompaniment" aria-label="Canale organo">
+          <div class="mixer-channel-heading"><strong>Organo</strong><span>accompagnamento</span></div>
+          <output id="voice-mixer-accompaniment-value">100%</output>
+          <div class="mixer-fader"><input id="voice-mixer-accompaniment-level" type="range" min="0" max="100" value="100" aria-label="Volume accompagnamento di organo" /></div>
+          <button id="voice-mixer-accompaniment-enabled" class="mixer-mute" type="button" aria-pressed="false">Mute</button>
+        </section>
+        <div id="voice-mixer-options" class="voice-mixer-options"></div>
+      </div>
       <div class="dialog-actions"><button id="voice-mixer-own" type="button">Solo la mia parte</button><button id="voice-mixer-all" type="button">Tutte le voci</button><button id="voice-mixer-close" type="button">Chiudi</button></div>
-    </dialog>
-    <dialog id="exercise-dialog" class="practice-dialog">
-      <h2>Una frase alla volta</h2>
-      <p>Scegli le battute da studiare. La prova termina alla fine della frase.</p>
-      <label>Da <select id="phrase-start" aria-label="Battuta iniziale"></select></label>
-      <label>A <select id="phrase-end" aria-label="Battuta finale"></select></label>
-      <label><input id="phrase-loop" type="checkbox" /> Ripeti automaticamente con preascolto</label>
-      <label>Nomi delle note <select id="note-names"><option value="italian">Do, Re, Mi…</option><option value="international">C, D, E…</option></select></label>
-      <p id="microphone-help">Prima di iniziare, attiva il microfono e canta una nota: l’indicatore di livello deve muoversi.</p>
-      <button id="test-microphone" class="mode-button" type="button">Attiva / disattiva microfono</button>
-      <meter id="test-microphone-level" min="0" max="0.08" value="0" aria-label="Livello del microfono nella preparazione"></meter>
-      <div class="dialog-actions"><button id="phrase-apply" type="button">Studia questa frase</button><button id="phrase-clear" type="button">Brano intero</button><button id="exercise-close" type="button">Chiudi</button></div>
     </dialog>
     <dialog id="settings-dialog" class="practice-dialog detector-settings-dialog" aria-labelledby="settings-heading">
       <h2 id="settings-heading">La tua voce, sullo schermo</h2>
@@ -120,6 +111,7 @@
         <div class="detector-setting-scale"><span>100% · normale</span><span>200% · molto grande</span></div>
         <p>Regola solo la dimensione delle sillabe sopra le note. Il valore predefinito è 150%.</p>
       </section>
+      <label>Nomi delle note <select id="note-names"><option value="italian">Do, Re, Mi…</option><option value="international">C, D, E…</option></select></label>
       <section class="detector-setting" aria-labelledby="settings-intervals-heading">
         <div><h3 id="settings-intervals-heading">Intervalli tra le note</h3></div>
         <label class="weak-voice-toggle" for="settings-show-intervals">
@@ -127,9 +119,16 @@
           <span><strong>Mostra le frecce degli intervalli</strong><small>Indica 2, 3m, 3M, 4 e 5 tra note consecutive. Il semitono non viene mostrato.</small></span>
         </label>
       </section>
-      <details class="studio-advanced"><summary>Analisi e filtri avanzati</summary>
+      <section class="settings-advanced" aria-labelledby="settings-advanced-heading">
+        <div class="settings-advanced-heading"><span>Per chi vuole personalizzare di più</span><h3 id="settings-advanced-heading">Regolazioni avanzate</h3><p>Non servono nella maggior parte dei casi: usale solo se vuoi affinare il comportamento dell'ascolto.</p></div>
+      <section class="detector-setting" aria-labelledby="settings-metronome-offset-heading">
+        <div><h3 id="settings-metronome-offset-heading">Sincronizzazione del metronomo <button class="setting-info" type="button" aria-label="Informazioni sulla sincronizzazione" data-tooltip="Sposta leggermente il click per compensare il naturale ritardo nell'attacco di voce e strumenti.">i</button></h3><output id="settings-metronome-offset-value">+30 ms</output></div>
+        <input id="settings-metronome-offset" type="range" min="-100" max="200" step="5" value="30" />
+        <div class="detector-setting-scale"><span>−100 ms · prima</span><span>+200 ms · dopo</span></div>
+        <p>Compensa l'attacco più lento di voci e archi. Il valore predefinito fa suonare il click 30 ms dopo il tempo matematico.</p>
+      </section>
       <section class="detector-setting" aria-labelledby="settings-display-pitch-heading">
-        <div><h3 id="settings-display-pitch-heading">Traccia visualizzata</h3></div>
+        <div><h3 id="settings-display-pitch-heading">Come mostrare la tua intonazione <button class="setting-info" type="button" aria-label="Informazioni sulla traccia visualizzata" data-tooltip="Il filtro rende più morbida la linea che vedi. La valutazione della tua esecuzione non cambia.">i</button></h3></div>
         <label for="settings-display-pitch-algorithm">Algoritmo display</label>
         <select id="settings-display-pitch-algorithm"><option value="v1+display-filter" selected>v1 + filtro adattivo</option><option value="v1">v1 puro (baseline)</option></select>
         <p>Il filtro agisce solo sulla plume. Pitch di scoring e valutazione restano quelli di v1 puro.</p>
@@ -145,7 +144,7 @@
         </label>
       </section>
       <section class="detector-setting" aria-labelledby="settings-v1-tracker-heading">
-        <div><h3 id="settings-v1-tracker-heading">Memoria del tracker v1</h3><output id="settings-v1-median-frames-value">3 frame</output></div>
+        <div><h3 id="settings-v1-tracker-heading">Fluidità della linea <button class="setting-info" type="button" aria-label="Informazioni sulla fluidità della linea" data-tooltip="Valori più reattivi seguono subito la voce; valori più filtrati rendono la linea più stabile.">i</button></h3><output id="settings-v1-median-frames-value">3 frame</output></div>
         <label class="detector-setting-label tracker-setting-label" for="settings-v1-fast-alpha">Reattività in attacco <output id="settings-v1-fast-alpha-value">65%</output></label>
         <input id="settings-v1-fast-alpha" type="range" min="5" max="95" step="5" value="65" />
         <div class="detector-setting-scale"><span>Più filtrata</span><span>Più reattiva</span></div>
@@ -169,13 +168,13 @@
         <div class="detector-setting-scale"><span>0 ms · timestamp reale</span><span>400 ms · più anticipata</span></div>
         <p>La linea cyan mostra il pitch; il flusso interno dà vita alla ribbon senza deformare il dato. L’anticipo temporale aiuta a compensare visivamente la latenza, anche con cuffie Bluetooth. Queste regolazioni non cambiano il punteggio.</p>
       </section>
-      </details>
+      </section>
       <p class="library-note">Usa le cuffie per distinguere meglio la tua voce dall’accompagnamento.</p>
       <div class="dialog-actions"><button id="settings-reset" type="button">Ripristina predefinito</button></div>
     </dialog>
-    <dialog id="result-dialog" class="practice-dialog">
-      <h2>Prova completata</h2><p id="result-text"></p><p id="result-progress"></p>
-      <div class="dialog-actions"><button id="retry" type="button">Riprova</button><button id="next-phrase" type="button">Prossima frase</button><button id="result-close" type="button">Chiudi</button></div>
+    <dialog id="result-dialog" class="practice-dialog" aria-labelledby="result-heading">
+      <h2 id="result-heading">Prova completata</h2><p id="result-text"></p><p id="result-progress"></p>
+      <div class="dialog-actions"><button id="retry" type="button">Riprova</button><button id="result-resume" type="button" hidden>Riprendi</button><button id="result-close" type="button">Chiudi</button></div>
     </dialog>
     <dialog id="piece-picker-dialog" class="practice-dialog piece-picker-dialog" aria-labelledby="piece-picker-heading">
       <div class="studio-welcome"><span class="studio-wordmark">CHOIR ASSISTANT</span><h2 id="piece-picker-heading">La tua voce.<br>Il tuo prossimo passo.</h2><p>Ritrova la tua parte, <span class="studio-phrase">una frase alla volta.</span></p><div class="studio-staff" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div></div>

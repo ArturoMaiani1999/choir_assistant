@@ -11,5 +11,5 @@
 
    & "C:\Program Files\MuseScore 4\bin\MuseScore4.exe" `
   -f `
-  -o "sheets\alto-e-glorioso-dio\alto-e-glorioso-dio.mscz" `
-  "sheets\alto-e-glorioso-dio\alto-e-glorioso-dio.xml"
+  -o "sheets\celebra-il-signore-terra-tutta\celebra-il-signore-terra-tutta.mscz" `
+  "sheets\celebra-il-signore-terra-tutta\celebra-il-signore-terra-tutta.xml"

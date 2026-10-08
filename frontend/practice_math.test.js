@@ -38,6 +38,10 @@ const measures = [
 ];
 assert.deepEqual(math.measureSeekState(measures, 2), { selectedIndex: 2, playbackStart: 3, scoringStart: 6 });
 assert.deepEqual(math.measureSeekState(measures, 0), { selectedIndex: 0, playbackStart: 0, scoringStart: 0 });
+assert.deepEqual(math.measureSeekState(measures, 2, { preRoll: false }), { selectedIndex: 2, playbackStart: 6, scoringStart: 6 });
+assert.equal(math.metronomePerformanceTime(2, 1, 30), 1.97, 'positive offset delays the metronome by 30 wall-clock ms');
+assert.equal(math.metronomePerformanceTime(2, .5, 30), 1.985, 'offset remains 30 wall-clock ms at half speed');
+assert.equal(math.metronomePerformanceTime(2, 1, -50), 2.05, 'negative offset advances the metronome');
 
 const twoTwoGrid = math.rhythmGridLines([
   { number: 1, startBeat: 0, endBeat: 4, timeSignatureDenominator: 2 },

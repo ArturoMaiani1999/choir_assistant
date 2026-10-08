@@ -21,7 +21,7 @@ CORE_ASSETS = (
     "styles.css", "studio.css", "score_viewer.css", "ui_preferences.js", "score_appearance.js",
     "practice_math.js", "score_runtime.js", "pitch_detector.js",
     "pitch_detector_worker.js", "pitch_shared.js", "fluid_pitch_trail.js",
-    "vocal_feedback.js", "one_euro_filter.js", "media_mixer.js", "app.js", "voice_lab_core.js",
+    "vocal_feedback.js", "one_euro_filter.js", "pitch_shifter_worklet.js", "media_mixer.js", "app.js", "voice_lab_core.js",
     "voice_draw_core.js", "voice_lab.js", "score_viewer.js",
 )
 FORBIDDEN_TEXT = ("__pitchTestHooks", "/api/", "cdn.jsdelivr", "unpkg", "localhost")
@@ -131,6 +131,11 @@ def build_core_assets(destination: Path) -> dict[str, str]:
         names["pitch_detector_worker.js"],
         app,
     )
+    app = re.sub(
+        r"pitch_shifter_worklet\.js(?:\?v=[^'\"]+)?",
+        names["pitch_shifter_worklet.js"],
+        app,
+    )
     names["app.js"] = fingerprint_text("app.js", app, destination)
     return names
 
@@ -236,7 +241,7 @@ def write_headers(destination: Path) -> None:
   Cache-Control: public, max-age=31536000, immutable
 
 /library-assets/*
-  Cache-Control: public, max-age=31536000, immutable
+  Cache-Control: no-cache, max-age=0, must-revalidate
 """, encoding="utf-8")
 
 
@@ -292,7 +297,7 @@ def main() -> int:
         "mode": "production", "buildVersion": version, "libraryUrl": "library.json",
         "bundleUrlTemplate": "library-assets/{pieceId}/bundle.json", "benchmarkEventUrl": None,
         "crepeModelUrl": None, "crepeRuntimeScriptUrl": None, "crepeRuntimeBaseUrl": None,
-        "features": {"diagnostics": False, "crepe": False, "transpose": False},
+        "features": {"diagnostics": False, "crepe": False, "transpose": True},
     }, ensure_ascii=False, separators=(",", ":")) + ");\n"
     temporary_runtime = destination / "runtime-config.js"
     temporary_runtime.write_text(runtime, encoding="utf-8")

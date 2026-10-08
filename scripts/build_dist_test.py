@@ -24,19 +24,21 @@ class BuildDistTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "segnaposto"):
                 build_dist.read_allowlist(config)
 
-    def test_worker_and_ui_preferences_are_fingerprinted_and_reachable(self) -> None:
+    def test_workers_and_ui_preferences_are_fingerprinted_and_reachable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory)
             names = build_dist.build_core_assets(destination)
 
             self.assertIn("ui_preferences.js", names)
             self.assertIn("pitch_detector_worker.js", names)
+            self.assertIn("pitch_shifter_worklet.js", names)
             for generated_name in names.values():
                 self.assertTrue((destination / generated_name).is_file(), generated_name)
 
             app = (destination / names["app.js"]).read_text(encoding="utf-8")
             worker = (destination / names["pitch_detector_worker.js"]).read_text(encoding="utf-8")
             self.assertIn(names["pitch_detector_worker.js"], app)
+            self.assertIn(names["pitch_shifter_worklet.js"], app)
             self.assertIn(names["pitch_detector.js"], worker)
             build_dist.audit_local_references(destination)
 

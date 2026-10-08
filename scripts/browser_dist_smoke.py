@@ -159,13 +159,81 @@ def main() -> int:
               const own = {
                 kind: state.playbackPlan?.kind,
                 stems: state.voiceStemAudio.size,
+                stemUrls: [...state.voiceStemAudio.values()].map(audio => audio.currentSrc || audio.src),
                 source: document.querySelector('#backing-audio')?.currentSrc,
                 running: state.clock.running,
                 canSeek: canSeekToBefore(),
                 performanceTime: state.clock.snapshot().performanceTime
               };
+              state.voiceLevels.set(state.runtime.selectedPartId, .35);
+              state.accompanimentEnabled = false;
+              state.accompanimentLevel = 0;
+              state.transpose = 3;
+              state.playbackMixer.setTranspose(3);
+              els.playbackSpeed.value = '0.75';
+              await applyVoiceSelection([state.runtime.selectedPartId]);
+              await new Promise(resolve => setTimeout(resolve, 80));
+              const pitchRatios = [...state.playbackMixer.channels.entries()]
+                .filter(([media]) => state.playbackMixer.levels.get(media) > 0)
+                .map(([, channel]) => channel.pitch?.parameters?.get('ratio')?.value).filter(Number.isFinite);
+              const custom = {
+                kind: state.playbackPlan?.kind,
+                stems: state.voiceStemAudio.size,
+                masterPartId: state.playbackPlan?.masterPartId,
+                source: els.backingAudio.currentSrc,
+                accompanimentEnabled: state.accompanimentEnabled,
+                backingMuted: els.backingAudio.muted || state.playbackMixer.levels.get(els.backingAudio) === 0,
+                masterLevel: state.playbackMixer.levels.get(els.backingAudio),
+                speed: state.clock.snapshot().speed,
+                preservesPitch: els.backingAudio.preservesPitch
+                  && [...state.voiceStemAudio.values()].every(audio => audio.preservesPitch),
+                workletReady: state.playbackMixer.workletReady,
+                pitchRatios
+              };
+              await applyVoiceSelection(['P1']);
+              custom.sopranoOnly = {
+                source: els.backingAudio.currentSrc,
+                masterPartId: state.playbackPlan?.masterPartId,
+                otherStems: state.voiceStemAudio.size,
+                muted: els.backingAudio.muted,
+                level: state.playbackMixer.levels.get(els.backingAudio)
+              };
+              els.playbackSpeed.value = '0.5';
+              await applyVoiceSelection([state.runtime.selectedPartId]);
+              custom.halfSpeed = state.clock.snapshot().speed;
+              custom.halfSpeedPreservesPitch = els.backingAudio.preservesPitch
+                && [...state.voiceStemAudio.values()].every(audio => audio.preservesPitch);
               state.clock.pause();
-              return {available: allIds.length, beforeSwitch, full, own};
+              const navigationIndex = Math.min(2, state.occurrenceMeasures.length - 1);
+              const navigationSeconds = state.runtime.secondsAtBeat(state.occurrenceMeasures[navigationIndex].startBeat);
+              const navigationSeekable = [...Array(els.backingAudio.seekable.length).keys()]
+                .some(index => els.backingAudio.seekable.start(index) <= navigationSeconds
+                  && els.backingAudio.seekable.end(index) + .01 >= navigationSeconds);
+              seekToMeasure(navigationIndex, false, false);
+              const navigation = {canSeek:navigationSeekable, index:navigationIndex,
+                expectedBeat:state.occurrenceMeasures[navigationIndex].startBeat,
+                actualBeat:state.clock.snapshot().beat};
+              return {available: allIds.length, beforeSwitch, full, own, custom, navigation};
+            })()""")
+            call_id += 1
+            audio_assets = evaluate(socket, call_id, """(async () => {
+              const root = state.bundleManifest.assets.audio_root;
+              const files = [state.backingManifest.full_mix_file,
+                state.backingManifest.accompaniment_file,
+                ...Object.values(state.backingManifest.voice_stems ?? {})].filter(Boolean);
+              const context = new AudioContext();
+              try {
+                const output = {};
+                for (const file of files) {
+                  const response = await fetch(`${root}/${file}`);
+                  const buffer = await context.decodeAudioData(await response.arrayBuffer());
+                  const samples = buffer.getChannelData(0);
+                  let energy = 0;
+                  for (let index = 0; index < samples.length; index += 400) energy += samples[index] ** 2;
+                  output[file] = Math.sqrt(energy / Math.ceil(samples.length / 400));
+                }
+                return output;
+              } finally { await context.close(); }
             })()""")
             call_id += 1
             microphone = evaluate(socket, call_id, """(async () => {
@@ -178,6 +246,124 @@ def main() -> int:
               };
               await stopMicrophone();
               return result;
+            })()""")
+            call_id += 1
+            preliminary_result = evaluate(socket, call_id, """(async () => {
+              state.attempt = {voicedMs: 2400, insideMs: 1800};
+              state.attemptActive = true;
+              await state.clock.play();
+              await new Promise(resolve => setTimeout(resolve, 40));
+              await togglePlayback();
+              const dialog = document.querySelector('#result-dialog');
+              const result = {
+                open: dialog.open,
+                preliminary: dialog.dataset.preliminary,
+                heading: document.querySelector('#result-heading').textContent,
+                text: document.querySelector('#result-text').textContent,
+                progress: document.querySelector('#result-progress').textContent,
+                resumeVisible: !document.querySelector('#result-resume').hidden,
+                attemptActive: state.attemptActive,
+                running: state.clock.running
+              };
+              dialog.close();
+              return result;
+            })()""")
+            call_id += 1
+            mixer_layout = evaluate(socket, call_id, """(async () => {
+              renderVoiceMixer();
+              const dialog = document.querySelector('#voice-mixer-dialog');
+              if (!dialog.open) dialog.showModal();
+              await new Promise(resolve => requestAnimationFrame(resolve));
+              const channels = [...dialog.querySelectorAll('.mixer-channel')];
+              const faders = channels.map(channel => channel.querySelector('input[type=range]').getBoundingClientRect());
+              const ownChannel = channels.find(channel => channel.querySelector('.mixer-channel-heading strong')?.textContent
+                === state.runtime.parts.find(part => part.id === state.runtime.selectedPartId)?.name);
+              ownChannel.querySelector('.mixer-mute').click();
+              const mutedOwnChannel = [...dialog.querySelectorAll('.mixer-channel')].find(channel =>
+                channel.querySelector('.mixer-channel-heading strong')?.textContent
+                  === state.runtime.parts.find(part => part.id === state.runtime.selectedPartId)?.name);
+              const muted = {
+                selected: state.selectedVoiceIds.has(state.runtime.selectedPartId),
+                label: mutedOwnChannel.querySelector('.mixer-mute').textContent,
+                pressed: mutedOwnChannel.querySelector('.mixer-mute').getAttribute('aria-pressed'),
+                disabled: mutedOwnChannel.querySelector('input[type=range]').disabled
+              };
+              await applyVoiceSelection([]);
+              const allMuted = {
+                label: els.accompanimentMode.textContent,
+                plan: state.playbackPlan?.kind,
+                source: els.backingAudio.getAttribute('src'),
+                disabled: els.togglePlayback.disabled,
+                stems: state.voiceStemAudio.size
+              };
+              await applyVoiceSelection([state.runtime.selectedPartId]);
+              state.accompanimentEnabled = true;
+              await applyVoiceSelection([state.runtime.selectedPartId]);
+              els.voiceMixerOwn.click();
+              const ownPreset = {
+                organ: state.accompanimentEnabled,
+                source: state.playbackPlan?.masterFile,
+                voice: state.playbackPlan?.masterPartId,
+                otherStems: state.voiceStemAudio.size
+              };
+              els.voiceMixerAll.click();
+              const allVoicesPreset = {
+                organ: state.accompanimentEnabled,
+                source: state.playbackPlan?.masterFile,
+                otherStems: state.voiceStemAudio.size
+              };
+              const rect = dialog.getBoundingClientRect();
+              return {
+                width: rect.width,
+                channels: channels.length,
+                columns: getComputedStyle(dialog.querySelector('.mixer-console')).gridTemplateColumns.split(' ').length,
+                verticalFaders: faders.every(rectangle => rectangle.height > rectangle.width * 3),
+                labels: channels.map(channel => channel.querySelector('.mixer-mute').textContent),
+                overflow: dialog.scrollWidth > dialog.clientWidth,
+                muted, allMuted, ownPreset, allVoicesPreset
+              };
+            })()""")
+            call_id += 1
+            command(socket, call_id, "Emulation.setDeviceMetricsOverride", {
+                "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
+            })
+            call_id += 1
+            mixer_mobile = evaluate(socket, call_id, """(async () => {
+              await new Promise(resolve => requestAnimationFrame(resolve));
+              const dialog = document.querySelector('#voice-mixer-dialog');
+              return {
+                columns: getComputedStyle(dialog.querySelector('.mixer-console')).gridTemplateColumns.split(' ').length,
+                overflow: dialog.scrollWidth > dialog.clientWidth,
+                width: dialog.getBoundingClientRect().width,
+                viewport: innerWidth
+              };
+            })()""")
+            call_id += 1
+            command(socket, call_id, "Emulation.setDeviceMetricsOverride", {
+                "width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False,
+            })
+            call_id += 1
+            evaluate(socket, call_id, "document.querySelector('#voice-mixer-dialog').close()")
+            call_id += 1
+            seek_probe = evaluate(socket, call_id, """(() => {
+              state.clock.pause();
+              seekToMeasure(0, false, false);
+              const rect = document.querySelector('#pitch-lane').getBoundingClientRect();
+              return {x: rect.left + rect.width * .82, y: rect.top + rect.height * .5};
+            })()""")
+            call_id += 1
+            command(socket, call_id, "Input.dispatchMouseEvent", {
+                "type": "mousePressed", "x": seek_probe["x"], "y": seek_probe["y"], "button": "left", "clickCount": 1,
+            })
+            call_id += 1
+            command(socket, call_id, "Input.dispatchMouseEvent", {
+                "type": "mouseReleased", "x": seek_probe["x"], "y": seek_probe["y"], "button": "left", "clickCount": 1,
+            })
+            call_id += 1
+            seek_result = evaluate(socket, call_id, """(() => {
+              const selected = measureIndexAt(state.scoringStartBeat);
+              const expected = state.occurrenceMeasures[Math.max(0, selected - 1)].startBeat;
+              return {selected, scoring: state.scoringStartBeat, playback: state.clock.snapshot().beat, expected};
             })()""")
             call_id += 1
             resize = evaluate(socket, call_id, """(async () => {
@@ -204,6 +390,13 @@ def main() -> int:
               plumeWidthSlider: document.querySelector('#settings-v1-plume-width')?.value,
               plumeWidthLabel: document.querySelector('#settings-v1-plume-width-value')?.textContent,
               transposeChoices: document.querySelector('#transpose')?.options.length,
+              transposeLabel: document.querySelector('.transpose-control > span')?.textContent,
+              transposeValue: document.querySelector('#transpose-value')?.textContent,
+              phraseUiRemoved: !document.querySelector('#exercise') && !document.querySelector('#exercise-dialog'),
+              advancedUiRemoved: document.querySelector('#ground-truth')?.offsetParent === null,
+              mixerChannels: document.querySelectorAll('#voice-mixer-dialog .mixer-channel').length,
+              metronomeOffset: state.metronomeOffsetMs,
+              metronomeOffsetControl: document.querySelector('#settings-metronome-offset')?.value,
               diagnosticsHidden: document.querySelector('#benchmark')?.hidden
                 && document.querySelector('#admin-review')?.hidden,
               scoreReady: Boolean(document.querySelector('#score-image')?.naturalWidth),
@@ -227,18 +420,63 @@ def main() -> int:
             assert result["bundlePiece"] == expected_piece and result["published"] is True, result
             assert result["selectedPart"] == expected_part, result
             assert result["plumeWidth"] == 2.5 and result["plumeWidthSlider"] == "250" and result["plumeWidthLabel"] == "250%", result
-            assert result["transposeChoices"] == 1 and result["diagnosticsHidden"], result
+            assert result["transposeChoices"] == 25 and result["diagnosticsHidden"], result
+            assert result["transposeLabel"] == "Transpose" and result["transposeValue"] == "±0", result
+            assert result["phraseUiRemoved"] and result["advancedUiRemoved"], result
+            assert result["mixerChannels"] == 5, result
+            assert result["metronomeOffset"] == 30 and result["metronomeOffsetControl"] == "30", result
             assert result["scoreReady"] and f"/library-assets/{expected_piece}/" in result["audioSource"], result
             if voice_mix["available"]:
+                assert all(level > .0001 for level in audio_assets.values()), audio_assets
                 assert voice_mix["full"]["kind"] == "full-mix" and voice_mix["full"]["stems"] == 0, voice_mix
-                assert voice_mix["full"]["source"].endswith("/score.mp3"), voice_mix
+                assert urlsplit(voice_mix["full"]["source"]).path.endswith("/score.mp3"), voice_mix
                 assert voice_mix["own"]["kind"] == "stem-mix" and voice_mix["own"]["stems"] == 1, voice_mix
+                assert all(parse_qs(urlsplit(url).query).get("v") == [result["buildVersion"]]
+                           for url in voice_mix["own"]["stemUrls"]), voice_mix
                 assert voice_mix["full"]["running"] and voice_mix["own"]["running"], voice_mix
                 if voice_mix["full"]["canSeek"]:
                     assert voice_mix["full"]["performanceTime"] >= voice_mix["beforeSwitch"] - .1, voice_mix
                 if voice_mix["own"]["canSeek"]:
                     assert voice_mix["own"]["performanceTime"] >= voice_mix["beforeSwitch"] - .1, voice_mix
+                custom = voice_mix["custom"]
+                assert custom["kind"] == "stem-mix" and custom["stems"] == 0, custom
+                assert custom["masterPartId"] == expected_part, custom
+                assert urlsplit(custom["source"]).path.endswith(f"/voice-{expected_part}.mp3"), custom
+                assert parse_qs(urlsplit(custom["source"]).query).get("v") == [result["buildVersion"]], custom
+                assert custom["accompanimentEnabled"] is False and not custom["backingMuted"], custom
+                assert 0 < custom["masterLevel"] < .36, custom
+                soprano_only = custom["sopranoOnly"]
+                assert urlsplit(soprano_only["source"]).path.endswith("/voice-P1.mp3"), soprano_only
+                assert soprano_only["masterPartId"] == "P1" and soprano_only["otherStems"] == 0, soprano_only
+                assert soprano_only["muted"] is False and soprano_only["level"] > 0, soprano_only
+                assert custom["speed"] == .75 and custom["preservesPitch"], custom
+                assert custom["halfSpeed"] == .5 and custom["halfSpeedPreservesPitch"], custom
+                assert custom["workletReady"] and custom["pitchRatios"], custom
+                expected_ratio = 2 ** (3 / 12)
+                assert all(abs(value - expected_ratio) < .001 for value in custom["pitchRatios"]), custom
+                navigation = voice_mix["navigation"]
+                if navigation["canSeek"]:
+                    assert abs(navigation["actualBeat"] - navigation["expectedBeat"]) < .01, navigation
             assert microphone == {"status": "active", "worker": True, "workerDisabled": False}, microphone
+            assert preliminary_result["open"] and preliminary_result["preliminary"] == "true", preliminary_result
+            assert preliminary_result["heading"] == "Risultati preliminari", preliminary_result
+            assert "75%" in preliminary_result["text"] and "battuta" in preliminary_result["progress"], preliminary_result
+            assert preliminary_result["resumeVisible"], preliminary_result
+            assert preliminary_result["attemptActive"] and not preliminary_result["running"], preliminary_result
+            assert mixer_layout["width"] >= 850 and mixer_layout["channels"] == 5, mixer_layout
+            assert mixer_layout["columns"] == 5 and mixer_layout["verticalFaders"], mixer_layout
+            assert set(mixer_layout["labels"]) <= {"Mute", "Unmute"} and not mixer_layout["overflow"], mixer_layout
+            assert mixer_layout["muted"] == {"selected": False, "label": "Unmute", "pressed": "true", "disabled": True}, mixer_layout
+            assert mixer_layout["allMuted"] == {"label": "Mixer", "plan": "muted", "source": None,
+                                                  "disabled": True, "stems": 0}, mixer_layout
+            assert mixer_layout["ownPreset"] == {"organ": False, "source": f"voice-{expected_part}.mp3",
+                                                    "voice": expected_part, "otherStems": 0}, mixer_layout
+            assert mixer_layout["allVoicesPreset"] == {"organ": False, "source": "voice-P1.mp3",
+                                                          "otherStems": 3}, mixer_layout
+            assert mixer_mobile["columns"] == 2 and not mixer_mobile["overflow"], mixer_mobile
+            assert mixer_mobile["width"] <= mixer_mobile["viewport"], mixer_mobile
+            assert seek_result["selected"] > 0 and seek_result["scoring"] > seek_result["playback"], seek_result
+            assert abs(seek_result["playback"] - seek_result["expected"]) < .01, seek_result
             assert resize["score"] != resize["before"]["score"], resize
             assert resize["bitmap"] != resize["before"]["bitmap"] and resize["bitmap"] == resize["expected"], resize
             assert not result["errors"], result["errors"]
@@ -326,7 +564,11 @@ def main() -> int:
                 "defaultPlumeWidth": result["plumeWidthLabel"],
                 "resourceCount": len(result["resources"]),
                 "microphone": microphone,
+                "preliminaryResult": preliminary_result,
+                "mixerLayout": {"desktop": mixer_layout, "mobile": mixer_mobile},
+                "seekWithPreroll": seek_result,
                 "voiceMix": voice_mix,
+                "audioAssetsRms": audio_assets,
                 "dividerResize": resize,
                 "externalRequests": external,
                 "errors": result["errors"],

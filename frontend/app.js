@@ -1,5 +1,5 @@
 const { NormalizedScoreRuntime, MediaPlaybackClock } = window.ChoirScore;
-const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, adjacentMelodicIntervals, measureSeekState, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
+const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, adjacentMelodicIntervals, measureSeekState, metronomePerformanceTime, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
 const { detectPitch, PitchSmoother, OctaveAwarePitchTracker, yinCandidates, decodeYinCandidatePath, mpmCandidates, decodeCrepeProbabilities } = window.ChoirPitch;
 const PitchShared = window.ChoirPitchShared;
 const FluidPitchTrail = window.ChoirFluidPitchTrail;
@@ -35,11 +35,11 @@ const UI_CONFIG = Object.freeze({
 });
 
 const els = Object.fromEntries([
-  'transpose', 'settings-display-pitch-algorithm', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
-  'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
-  'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close', 'settings-dialog', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-reset',
-  'result-dialog', 'result-text', 'result-progress', 'retry', 'next-phrase', 'result-close',
-  'phrase-loop', 'note-names',
+  'transpose', 'transpose-value', 'settings-display-pitch-algorithm', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
+  'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-accompaniment', 'voice-mixer-accompaniment-enabled', 'voice-mixer-accompaniment-level', 'voice-mixer-accompaniment-value', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
+  'settings-dialog', 'settings-metronome-offset', 'settings-metronome-offset-value', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-reset',
+  'result-dialog', 'result-heading', 'result-text', 'result-progress', 'retry', 'result-resume', 'result-close',
+  'note-names',
   'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-title', 'library-title-save', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-viewer-link', 'settings',
   'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
   'score-loading', 'score-pitch-divider', 'pitch-lane', 'pitch-fluid-layer', 'intonation-readout', 'live-note', 'live-cents', 'live-state', 'pitch-layer-v1', 'pitch-layer-crepe',
@@ -51,8 +51,6 @@ const state = {
   lyricTextScale: UiPreferences.read(),
   showIntervals: false,
   transpose: 0,
-  phrase: null,
-  autoLoop: false,
   noteNames: 'italian',
   attemptActive: false,
   attempt: { voicedMs: 0, insideMs: 0 },
@@ -71,9 +69,12 @@ const state = {
   playbackPlan: null,
   voiceMixChangeToken: 0,
   voiceMixResumeRequested: false,
-  playbackMixer: new MediaElementMixer(),
+  playbackMixer: new MediaElementMixer({ pitchWorkletUrl: 'pitch_shifter_worklet.js' }),
   voiceStemAudio: new Map(),
   selectedVoiceIds: new Set(),
+  voiceLevels: new Map(),
+  accompanimentEnabled: true,
+  accompanimentLevel: 1,
   bundleManifest: null,
   bundleApproved: false,
   scoreGeometry: new Map(),
@@ -83,6 +84,7 @@ const state = {
   lastSnapshot: null,
   metronomeContext: null,
   lastMetronomeBeat: null,
+  metronomeOffsetMs: 30,
   rememberedMetronomeVolume: 34,
   syncDebug: new URLSearchParams(window.location.search).has('syncDebug'),
   microphoneStatus: 'idle',
@@ -139,6 +141,8 @@ function updateDetectorSettingsUi() {
   els.settingsTextScale.value = String(Math.round(state.lyricTextScale * 100));
   els.settingsTextScaleValue.textContent = `${Math.round(state.lyricTextScale * 100)}%`;
   els.settingsShowIntervals.checked = state.showIntervals;
+  els.settingsMetronomeOffset.value = String(state.metronomeOffsetMs);
+  els.settingsMetronomeOffsetValue.textContent = `${state.metronomeOffsetMs >= 0 ? '+' : '−'}${Math.abs(state.metronomeOffsetMs)} ms`;
   const threshold = state.detectorSettings.rmsThreshold;
   els.settingsV1Rms.value = String(rmsSliderFromThreshold(threshold));
   els.settingsV1RmsValue.textContent = `${formatRmsThreshold(threshold)} RMS`;
@@ -316,7 +320,9 @@ function loadScoreImage(page = 1) {
 }
 
 function voiceStemUrl(filename) {
-  return `${state.bundleManifest.assets.audio_root}/${filename}`;
+  const path = `${state.bundleManifest.assets.audio_root}/${filename}`;
+  const version = RUNTIME_CONFIG.buildVersion;
+  return version ? `${path}?v=${encodeURIComponent(version)}` : path;
 }
 
 function pauseVoiceStems() {
@@ -328,11 +334,24 @@ function discardVoiceStems() {
   state.voiceStemAudio.clear();
 }
 
+function voiceLevel(partId) {
+  const level = state.voiceLevels.get(partId);
+  return Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 1;
+}
+
+function mixNormalization() {
+  if (state.playbackPlan?.kind === 'full-mix') return 1;
+  const accompanimentCount = state.accompanimentEnabled && state.backingManifest?.accompaniment_file ? 1 : 0;
+  const voiceCount = (state.playbackPlan?.voiceStems?.length ?? state.voiceStemAudio.size)
+    + (state.playbackPlan?.masterPartId ? 1 : 0);
+  return 1 / Math.sqrt(Math.max(1, voiceCount + accompanimentCount));
+}
+
 function syncVoiceStemLevels() {
-  const count = Math.max(1, state.voiceStemAudio.size);
-  const level = Math.min(1, Number(els.volume.value) / 100 * .9 / Math.sqrt(count));
-  for (const audio of state.voiceStemAudio.values()) {
-    state.playbackMixer.setLevel(audio, level);
+  const masterLevel = Number(els.volume.value) / 100;
+  const normalization = mixNormalization();
+  for (const [partId, audio] of state.voiceStemAudio.entries()) {
+    state.playbackMixer.setLevel(audio, masterLevel * voiceLevel(partId) * normalization);
     audio.playbackRate = Number(els.playbackSpeed.value);
     audio.preservesPitch = true;
     audio.webkitPreservesPitch = true;
@@ -342,7 +361,21 @@ function syncVoiceStemLevels() {
 function syncBackingLevel() {
   const silentClock = state.playbackPlan?.silentMaster ?? (Object.keys(state.backingManifest?.voice_stems ?? {}).length > 0
     && !state.backingManifest?.accompaniment_file);
-  state.playbackMixer.setLevel(els.backingAudio, Number(els.volume.value) / 100, { forceMuted: silentClock });
+  const fullMix = state.playbackPlan?.kind === 'full-mix';
+  const masterPartId = state.playbackPlan?.masterPartId;
+  const channelLevel = fullMix ? 1 : masterPartId ? voiceLevel(masterPartId) : state.accompanimentLevel;
+  const level = Number(els.volume.value) / 100 * channelLevel * mixNormalization();
+  state.playbackMixer.setLevel(els.backingAudio, level, {
+    forceMuted: silentClock || (!fullMix && !masterPartId && !state.accompanimentEnabled),
+  });
+}
+
+function canUseFullMix() {
+  const ids = Object.keys(state.backingManifest?.voice_stems ?? {});
+  const hasAccompaniment = Boolean(state.backingManifest?.accompaniment_file);
+  return Boolean(state.backingManifest?.full_mix_file)
+    && (!hasAccompaniment || (state.accompanimentEnabled && state.accompanimentLevel >= .999))
+    && ids.length > 0 && ids.every((partId) => state.selectedVoiceIds.has(partId) && voiceLevel(partId) >= .999);
 }
 
 function configureVoiceStems() {
@@ -359,13 +392,7 @@ function configureVoiceStems() {
     state.voiceStemAudio.set(partId, audio);
   }
   syncVoiceStemLevels();
-  const availableIds = Object.keys(stems);
-  const selectedCount = availableIds.filter((partId) => state.selectedVoiceIds.has(partId)).length;
-  const ownPart = state.runtime?.parts.find((part) => part.id === state.runtime.selectedPartId);
-  els.accompanimentMode.textContent = !mixerAvailable ? 'Mix non separabile'
-    : selectedCount === availableIds.length ? 'Mix completo'
-      : selectedCount === 1 && state.selectedVoiceIds.has(state.runtime.selectedPartId) ? `Solo ${ownPart?.name ?? 'la mia parte'}`
-        : selectedCount ? `Voci · ${selectedCount}` : state.backingManifest?.accompaniment_file ? 'Solo base' : 'Nessuna voce';
+  els.accompanimentMode.textContent = 'Mixer';
   els.accompanimentMode.title = mixerAvailable
     ? 'Scegli quali parti vocali ascoltare' : 'Questo brano dispone soltanto del mix audio completo';
 }
@@ -382,16 +409,50 @@ async function playVoiceStems() {
 function renderVoiceMixer() {
   const stems = state.backingManifest?.voice_stems ?? {};
   const parts = vocalParts(state.runtime).filter((part) => stems[part.id]);
+  const hasAccompaniment = Boolean(state.backingManifest?.accompaniment_file);
+  const accompanimentActive = hasAccompaniment && state.accompanimentEnabled;
+  els.voiceMixerAccompaniment.hidden = !hasAccompaniment;
+  els.voiceMixerAccompanimentEnabled.disabled = !hasAccompaniment;
+  els.voiceMixerAccompanimentEnabled.textContent = accompanimentActive ? 'Mute' : 'Unmute';
+  els.voiceMixerAccompanimentEnabled.setAttribute('aria-pressed', String(!accompanimentActive));
+  els.voiceMixerAccompaniment.classList.toggle('is-muted', !accompanimentActive);
+  els.voiceMixerAccompanimentLevel.value = String(Math.round(state.accompanimentLevel * 100));
+  els.voiceMixerAccompanimentLevel.disabled = !accompanimentActive;
+  els.voiceMixerAccompanimentValue.value = `${Math.round(state.accompanimentLevel * 100)}%`;
   els.voiceMixerOptions.replaceChildren(...parts.map((part) => {
-    const label = document.createElement('label');
-    const input = document.createElement('input');
-    input.type = 'checkbox'; input.value = part.id; input.checked = state.selectedVoiceIds.has(part.id);
-    input.addEventListener('change', () => {
-      if (input.checked) state.selectedVoiceIds.add(part.id); else state.selectedVoiceIds.delete(part.id);
-      void applyVoiceSelection(state.selectedVoiceIds);
+    const active = state.selectedVoiceIds.has(part.id);
+    const row = document.createElement('section'); row.className = 'mixer-channel';
+    row.classList.toggle('is-muted', !active);
+    row.setAttribute('aria-label', `Canale ${part.name}`);
+    const heading = document.createElement('div'); heading.className = 'mixer-channel-heading';
+    const name = document.createElement('strong'); name.textContent = part.name;
+    const detail = document.createElement('span'); detail.textContent = part.id === state.runtime.selectedPartId ? 'mia parte' : 'voce';
+    heading.append(name, detail);
+    const output = document.createElement('output');
+    const slider = document.createElement('input');
+    slider.type = 'range'; slider.min = '0'; slider.max = '100'; slider.value = String(Math.round(voiceLevel(part.id) * 100));
+    slider.setAttribute('aria-label', `Volume ${part.name}`); slider.disabled = !active;
+    output.value = `${slider.value}%`;
+    const fader = document.createElement('div'); fader.className = 'mixer-fader'; fader.append(slider);
+    const mute = document.createElement('button'); mute.type = 'button'; mute.className = 'mixer-mute';
+    mute.textContent = active ? 'Mute' : 'Unmute'; mute.setAttribute('aria-pressed', String(!active));
+    mute.setAttribute('aria-label', `${active ? 'Silenzia' : 'Riattiva'} ${part.name}`);
+    mute.addEventListener('click', () => {
+      const next = new Set(state.selectedVoiceIds);
+      if (next.has(part.id)) next.delete(part.id); else next.add(part.id);
+      void applyVoiceSelection(next);
+      savePreferences();
     });
-    label.append(input, document.createTextNode(part.id === state.runtime.selectedPartId ? `${part.name} · mia parte` : part.name));
-    return label;
+    slider.addEventListener('input', () => {
+      state.voiceLevels.set(part.id, Number(slider.value) / 100); output.value = `${slider.value}%`;
+      if (state.playbackPlan?.kind !== 'full-mix') {
+        syncVoiceStemLevels();
+        if (state.playbackPlan?.masterPartId === part.id) syncBackingLevel();
+      }
+    });
+    slider.addEventListener('change', () => { void applyVoiceSelection(state.selectedVoiceIds); savePreferences(); });
+    row.append(heading, output, fader, mute);
+    return row;
   }));
 }
 
@@ -411,17 +472,21 @@ function configureBacking() {
   state.playbackPlan = buildMediaPlaybackPlan({
     mixFile: speedFile ?? state.backingManifest.full_mix_file ?? mix.file,
     accompanimentFile: state.backingManifest.accompaniment_file,
+    accompanimentEnabled: state.accompanimentEnabled,
     voiceStems: state.backingManifest.voice_stems,
     selectedVoiceIds: state.selectedVoiceIds,
+    preferFullMix: canUseFullMix(),
   });
   const baseFile = state.playbackPlan.masterFile;
-  if (!baseFile) { els.backingAudio.removeAttribute('src'); els.togglePlayback.disabled = true; return; }
-  const file = `${state.bundleManifest.assets.audio_root}/${baseFile}`;
-  const source = state.transpose && RUNTIME_CONFIG.transposeUrlTemplate
-    ? RUNTIME_CONFIG.transposeUrlTemplate
-      .replace('{file}', encodeURIComponent(file))
-      .replace('{semitones}', encodeURIComponent(state.transpose))
-    : file;
+  if (!baseFile) {
+    discardVoiceStems();
+    els.backingAudio.pause();
+    els.backingAudio.removeAttribute('src');
+    els.backingAudio.load();
+    els.togglePlayback.disabled = true;
+    return;
+  }
+  const source = voiceStemUrl(baseFile);
   if (els.backingAudio.getAttribute('src') !== source) {
     els.backingAudio.src = source;
     els.backingAudio.load();
@@ -430,11 +495,13 @@ function configureBacking() {
   syncBackingLevel();
   els.backingAudio.playbackRate = state.usesPreRenderedSpeed ? 1 : speed;
   els.backingAudio.preservesPitch = true;
+  els.backingAudio.webkitPreservesPitch = true;
+  state.playbackMixer.setTranspose(state.transpose);
   configureVoiceStems();
 }
 
 function waitForMediaReady(media, minimumReadyState = 1, timeoutMs = 8000) {
-  if (!media || media.readyState >= minimumReadyState || media.error) return Promise.resolve();
+  if (!media || !media.getAttribute('src') || media.readyState >= minimumReadyState || media.error) return Promise.resolve();
   return new Promise((resolve) => {
     const eventName = minimumReadyState >= 3 ? 'canplay' : 'loadedmetadata';
     let timeout;
@@ -706,12 +773,11 @@ function applyPitchEstimate(rawEstimate, beat, sampledAt, analysisMs, running) {
   } else if (state.displayPitchAlgorithm === 'v1') state.displayPitch = displayPitchFromTracked(state.trackedPitch);
   else state.displayPitch = state.displayPitchFilter.filter(state.trackedPitch, sampledAt / 1000);
   document.getElementById('microphone-level').value = state.microphoneRms;
-  document.getElementById('test-microphone-level').value = state.microphoneRms;
   const microphoneHelp = state.trackedPitch == null
     ? state.microphoneRms < activeRecognitionSettings().rmsThreshold ? 'Microfono aperto: segnale troppo debole. Controlla ingresso e volume in Windows.' : 'Il segnale arriva. Tieni una nota per riconoscerla.'
     : `Nota riconosciuta: ${noteLabel(state.trackedPitch)}. Sei pronto per iniziare.`;
   const microphoneHelpElement = document.getElementById('microphone-help');
-  if (microphoneHelpElement.textContent !== microphoneHelp) microphoneHelpElement.textContent = microphoneHelp;
+  if (microphoneHelpElement && microphoneHelpElement.textContent !== microphoneHelp) microphoneHelpElement.textContent = microphoneHelp;
 
   // Retain invalid observations too: the renderer must see silence boundaries.
   if (running || state.displayPitch != null || rawPitch != null) {
@@ -1231,13 +1297,10 @@ function render() {
   state.rafId = null;
   if (!state.runtime) return;
   let snapshot = state.clock.snapshot();
-  const endBeat = state.phrase ? state.occurrenceMeasures[state.phrase.end].endBeat : totalBeats();
+  const endBeat = totalBeats();
   if (state.attemptActive && snapshot.beat >= endBeat - .01) {
     state.clock.pause(); state.clock.seekBeat(endBeat); snapshot = state.clock.snapshot();
     finishAttempt(); updatePlaybackButton();
-    if (state.autoLoop && state.phrase) {
-      els.resultDialog.close(); seekToMeasure(state.phrase.start); togglePlayback(); return;
-    }
   }
   if (snapshot.beat >= totalBeats()) {
     state.clock.pause(); state.clock.seekBeat(totalBeats()); snapshot = state.clock.snapshot(); updatePlaybackButton();
@@ -1287,16 +1350,20 @@ function playMetronomeClick(accented) {
 
 function renderMetronome(snapshot) {
   if (!snapshot.running) { state.lastMetronomeBeat = null; return; }
-  const measureIndex = measureIndexAt(snapshot.beat);
+  const offsetScoreSeconds = state.metronomeOffsetMs / 1000 * Math.max(.1, snapshot.speed || 1);
+  if (offsetScoreSeconds > 0 && snapshot.performanceTime < offsetScoreSeconds) return;
+  const metronomeTime = metronomePerformanceTime(snapshot.performanceTime, snapshot.speed, state.metronomeOffsetMs);
+  const metronomeBeat = Math.max(0, state.runtime.beatAtSeconds(metronomeTime));
+  const measureIndex = measureIndexAt(metronomeBeat);
   const measure = state.occurrenceMeasures[measureIndex];
   const metronomeBeatLength = 4 / (measure?.timeSignatureDenominator ?? 4);
-  const beatInMeasure = Math.max(0, Math.floor(((snapshot.beat - (measure?.startBeat ?? 0)) / metronomeBeatLength) + 0.015));
+  const beatInMeasure = Math.max(0, Math.floor((metronomeBeat - (measure?.startBeat ?? 0)) / metronomeBeatLength));
   const metricalBeatIndex = (measure?.beatOffset ?? 0) + beatInMeasure;
   const beatToken = `${measureIndex}:${metricalBeatIndex}`;
   if (state.lastMetronomeBeat == null) {
     state.lastMetronomeBeat = beatToken;
-    const nearestPulse = (measure?.startBeat ?? 0) + Math.round((snapshot.beat - (measure?.startBeat ?? 0)) / metronomeBeatLength) * metronomeBeatLength;
-    if (Math.abs(snapshot.beat - nearestPulse) < 0.06) {
+    const nearestPulse = (measure?.startBeat ?? 0) + Math.round((metronomeBeat - (measure?.startBeat ?? 0)) / metronomeBeatLength) * metronomeBeatLength;
+    if (Math.abs(metronomeBeat - nearestPulse) < 0.06) {
       playMetronomeClick(metricalBeatIndex === 0);
     }
     return;
@@ -1329,9 +1396,17 @@ function updatePlaybackButton() {
   els.togglePlayback.setAttribute('aria-pressed', String(running));
 }
 
-function seekToMeasure(index, autoPlay = false) {
+function updateTransposeControl() {
+  const semitones = Number(state.transpose) || 0;
+  els.transposeValue.textContent = semitones === 0 ? '±0' : `${semitones > 0 ? '+' : '−'}${Math.abs(semitones)}`;
+  els.transposeValue.setAttribute('aria-label', semitones === 0
+    ? 'Tonalità originale' : `${semitones > 0 ? 'Trasposto su' : 'Trasposto giù'} di ${Math.abs(semitones)} semitoni`);
+}
+
+function seekToMeasure(index, autoPlay = false, preRoll = true) {
   state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
-  const seek = measureSeekState(state.occurrenceMeasures, index);
+  state.gridInspect.active = false;
+  const seek = measureSeekState(state.occurrenceMeasures, index, { preRoll });
   state.selectedMeasureIndex = seek.selectedIndex;
   state.scoringStartBeat = seek.scoringStart;
   state.clock.seekBeat(seek.playbackStart);
@@ -1347,10 +1422,12 @@ function seekToMeasure(index, autoPlay = false) {
 
 async function togglePlayback() {
   if (!state.bundleApproved) { showToast('Serve l’approvazione admin di questo bundle.'); return; }
+  if (state.playbackPlan?.kind === 'muted') { showToast('Attiva almeno una traccia nel Mixer.'); return; }
   if (state.clock.snapshot().beat >= totalBeats()) state.clock.seekBeat(0);
   if (state.clock.running) {
     state.clock.pause();
     savePitchHistory();
+    showAttemptResult({ preliminary: true });
   } else {
     state.gridInspect.active = false;
     try {
@@ -1359,11 +1436,14 @@ async function togglePlayback() {
       syncVoiceStemLevels();
     } catch (error) {
       console.warn('Unable to start Web Audio mixer; using media fallback', error);
+      if (state.transpose) {
+        showToast('La trasposizione non è supportata da questo browser. Torna alla tonalità originale.');
+        updatePlaybackButton(); return;
+      }
     }
     if (state.microphoneStatus !== 'active') await toggleMicrophone();
     if (!state.attemptActive) {
       state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
-      if (state.phrase && state.clock.snapshot().beat >= state.occurrenceMeasures[state.phrase.end].endBeat) seekToMeasure(state.phrase.start);
     }
     try { await state.clock.play(); }
     catch (error) { console.error('Audio playback failed', error, els.backingAudio.error); showToast(`Audio non avviato: ${error?.message || 'sorgente non disponibile'}`); }
@@ -1375,7 +1455,7 @@ async function togglePlayback() {
 
 function bindGridInspection() {
   const canvas = els.pitchLane;
-  canvas.title = 'In pausa: trascina per esplorare; rotella = altezza; Shift+rotella = tempo; Ctrl/Cmd+rotella = zoom; doppio clic = ripristina.';
+  canvas.title = 'In pausa: tocca o trascina orizzontalmente per scegliere una battuta. Play inizia dalla battuta precedente.';
   const reset = () => {
     state.gridInspect = { active: false, viewBeat: state.clock.snapshot().beat, pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null };
     render();
@@ -1398,29 +1478,41 @@ function bindGridInspection() {
     }
     render();
   }, { passive: false });
+  const beatAtPointer = (clientX) => {
+    const rect = canvas.getBoundingClientRect();
+    const plot = { left: rect.width < 700 ? 48 : 58, right: rect.width - 8 };
+    const inspect = state.gridInspect;
+    const displayBeat = inspect.active ? inspect.viewBeat : state.clock.snapshot().beat;
+    const historyBeats = UI_CONFIG.historyBeats / (inspect.active ? inspect.timeZoom : 1);
+    const futureBeats = UI_CONFIG.futureBeats / (inspect.active ? inspect.timeZoom : 1);
+    const nowX = timeToX(displayBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
+    const ratio = (clientX - rect.left - nowX) / Math.max(1, plot.right - plot.left);
+    return Math.max(0, Math.min(totalBeats(), displayBeat + ratio * (historyBeats + futureBeats)));
+  };
   canvas.addEventListener('pointerdown', (event) => {
     if (state.clock.running || event.button !== 0) return;
-    const view = state.gridInspect;
-    if (!view.active) { view.active = true; view.viewBeat = state.clock.snapshot().beat; }
-    view.pointer = { x: event.clientX, y: event.clientY };
+    state.gridInspect.pointer = { id: event.pointerId, x: event.clientX };
     canvas.setPointerCapture(event.pointerId);
-    canvas.classList.add('is-panning');
+    canvas.classList.add('is-seeking');
   });
   canvas.addEventListener('pointermove', (event) => {
-    const view = state.gridInspect;
-    if (!view.pointer || state.clock.running) return;
-    const dx = event.clientX - view.pointer.x;
-    const dy = event.clientY - view.pointer.y;
-    view.pointer = { x: event.clientX, y: event.clientY };
-    const timeSpan = (UI_CONFIG.historyBeats + UI_CONFIG.futureBeats) / view.timeZoom;
-    const pitchSpan = ((state.pitchViewport?.bounds.max ?? 67) - (state.pitchViewport?.bounds.min ?? 55)) / view.pitchZoom;
-    view.viewBeat = Math.max(0, Math.min(totalBeats(), view.viewBeat - dx * timeSpan / Math.max(1, canvas.clientWidth)));
-    view.pitchOffset += dy * pitchSpan / Math.max(1, canvas.clientHeight);
-    render();
+    if (state.gridInspect.pointer?.id !== event.pointerId) return;
+    state.gridInspect.pointer.x = event.clientX;
   });
-  const finishPan = () => { state.gridInspect.pointer = null; canvas.classList.remove('is-panning'); };
-  canvas.addEventListener('pointerup', finishPan);
-  canvas.addEventListener('pointercancel', finishPan);
+  const finishSeek = (event, cancelled = false) => {
+    const pointer = state.gridInspect.pointer;
+    if (!pointer || pointer.id !== event.pointerId) return;
+    state.gridInspect.pointer = null;
+    canvas.releasePointerCapture?.(event.pointerId);
+    canvas.classList.remove('is-seeking');
+    if (cancelled || state.clock.running) return;
+    const selected = measureIndexAt(beatAtPointer(pointer.x));
+    seekToMeasure(selected, false, true);
+    const measure = state.occurrenceMeasures[selected];
+    showToast(`Pronto dalla battuta ${measure?.number ?? selected + 1}: una battuta di preascolto prima del play.`);
+  };
+  canvas.addEventListener('pointerup', finishSeek);
+  canvas.addEventListener('pointercancel', (event) => finishSeek(event, true));
 }
 
 function showToast(message) {
@@ -1429,13 +1521,11 @@ function showToast(message) {
 }
 
 function updateMicrophoneButton() {
-  els.togglePlayback.disabled = state.microphoneStatus === 'requesting';
+  els.togglePlayback.disabled = state.microphoneStatus === 'requesting' || state.playbackPlan?.kind === 'muted';
 }
 
 async function stopMicrophone() {
   document.getElementById('microphone-level').value = 0;
-  document.getElementById('test-microphone-level').value = 0;
-  document.getElementById('microphone-help').textContent = 'Attiva il microfono e canta una nota per verificare il segnale.';
   state.microphoneStream?.getTracks().forEach((track) => track.stop());
   state.microphoneSource?.disconnect();
   state.microphoneAnalyser?.disconnect();
@@ -2894,30 +2984,45 @@ function listenToBenchmarkTake(take = state.benchmark.pending) {
   });
 }
 
-function finishAttempt() {
-  state.attemptActive = false;
-  els.nextPhrase.disabled = !state.phrase || state.phrase.end >= state.occurrenceMeasures.length - 1;
+function showAttemptResult({ preliminary = false } = {}) {
+  els.resultDialog.dataset.preliminary = String(preliminary);
+  els.resultHeading.textContent = preliminary ? 'Risultati preliminari' : 'Prova completata';
+  els.retry.textContent = preliminary ? 'Ricomincia' : 'Riprova';
+  els.resultResume.hidden = !preliminary;
   els.resultProgress.textContent = '';
+  if (preliminary) {
+    const measure = state.occurrenceMeasures[measureIndexAt(state.clock.snapshot().beat)];
+    els.resultProgress.textContent = `Calcolato fino alla battuta ${measure?.number ?? 'corrente'}. Puoi riprendere dallo stesso punto senza perdere i dati raccolti.`;
+  }
   if (state.attempt.voicedMs < 1000) {
     els.resultText.textContent = 'Voce riconosciuta per meno di un secondo: dati insufficienti per valutare questa prova.';
   } else {
     const score = Math.round(state.attempt.insideMs / state.attempt.voicedMs * 100);
-    els.resultText.textContent = `${score}% del tempo di voce riconosciuta entro ±${UI_CONFIG.acceptableCents} cent dal target. Silenzio e segnale incerto sono esclusi.`;
-    const key = `${preferenceKey()}:result:${state.runtime.scoreVersionId}:${state.phrase?.start ?? 0}:${state.phrase?.end ?? 'all'}:${state.transpose}:${els.playbackSpeed.value}`;
-    try {
-      const previous = JSON.parse(localStorage.getItem(key));
-      if (previous && Number.isFinite(previous.score)) {
-        const delta = score - previous.score;
-        els.resultProgress.textContent = delta === 0 ? 'Stesso risultato del tentativo precedente.' : `${delta > 0 ? '+' : ''}${delta} punti percentuali rispetto al tentativo precedente.`;
-      }
-      localStorage.setItem(key, JSON.stringify({ score }));
-    } catch (_) {}
+    const prefix = preliminary ? 'Finora, ' : '';
+    els.resultText.textContent = `${prefix}${score}% del tempo di voce riconosciuta entro ±${UI_CONFIG.acceptableCents} cent dal target. Silenzio e segnale incerto sono esclusi.`;
+    if (!preliminary) {
+      const key = `${preferenceKey()}:result:${state.runtime.scoreVersionId}:complete:${state.transpose}:${els.playbackSpeed.value}`;
+      try {
+        const previous = JSON.parse(localStorage.getItem(key));
+        if (previous && Number.isFinite(previous.score)) {
+          const delta = score - previous.score;
+          els.resultProgress.textContent = delta === 0 ? 'Stesso risultato del tentativo precedente.' : `${delta > 0 ? '+' : ''}${delta} punti percentuali rispetto al tentativo precedente.`;
+        }
+        localStorage.setItem(key, JSON.stringify({ score }));
+      } catch (_) {}
+    }
   }
   if (!els.resultDialog.open) els.resultDialog.showModal();
 }
 
+function finishAttempt() {
+  state.attemptActive = false;
+  showAttemptResult();
+}
+
 function globalDetectorPreferences() {
   return {
+    metronomeOffsetMs: state.metronomeOffsetMs,
     v1RmsThreshold: state.detectorSettings.rmsThreshold,
     v1WeakVoiceMode: state.detectorSettings.weakVoiceMode,
     v1FastAlpha: state.detectorSettings.fastAlpha,
@@ -2942,6 +3047,9 @@ function savePreferences() {
   try {
     localStorage.setItem(preferenceKey(), JSON.stringify({ transpose: state.transpose,
       speed: els.playbackSpeed.value, volume: els.volume.value, metronome: els.metronomeVolume.value,
+      metronomeOffsetMs: state.metronomeOffsetMs,
+      selectedVoiceIds: [...state.selectedVoiceIds], voiceLevels: Object.fromEntries(state.voiceLevels),
+      accompanimentEnabled: state.accompanimentEnabled, accompanimentLevel: state.accompanimentLevel,
       noteNames: state.noteNames, noteNamesPreferenceVersion: 2, showIntervals: state.showIntervals,
       scoreHeight: Math.round(els.scoreViewport.clientHeight), scoreHeightPreferenceVersion: 2,
       v1RmsThreshold: state.detectorSettings.rmsThreshold,
@@ -2970,11 +3078,17 @@ function restorePreferences() {
   detectorSaved = detectorSaved && typeof detectorSaved === 'object' ? detectorSaved : saved;
   state.transpose = Number.isInteger(saved.transpose) && Math.abs(saved.transpose) <= 12 ? saved.transpose : 0;
   els.transpose.value = String(state.transpose);
-  // The current practice session must start on the complete piece.  A saved
-  // one-measure exercise is especially misleading: it can finish before a
-  // singer has had a full second of scoreable notes.  Phrase exercises are
-  // deliberately transient; only an explicit URL deep link may set one.
-  state.autoLoop = false; els.phraseLoop.checked = false;
+  const availableVoiceIds = Object.keys(state.backingManifest?.voice_stems ?? {});
+  if (Array.isArray(saved.selectedVoiceIds)) {
+    state.selectedVoiceIds = new Set(saved.selectedVoiceIds.filter((partId) => availableVoiceIds.includes(partId)));
+  }
+  state.voiceLevels = new Map(availableVoiceIds.map((partId) => {
+    const level = Number(saved.voiceLevels?.[partId]);
+    return [partId, Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 1];
+  }));
+  state.accompanimentEnabled = Boolean(state.backingManifest?.accompaniment_file) && saved.accompanimentEnabled !== false;
+  state.accompanimentLevel = Number.isFinite(Number(saved.accompanimentLevel))
+    ? Math.max(0, Math.min(1, Number(saved.accompanimentLevel))) : 1;
   // Existing preferences used English as the implicit default. Migrate those
   // users to Italian while preserving any deliberate choice made from now on.
   state.noteNames = saved.noteNamesPreferenceVersion === 2 && saved.noteNames === 'international' ? 'international' : 'italian';
@@ -2986,10 +3100,12 @@ function restorePreferences() {
   // Playback position is session-only. Opening a piece must always begin at
   // the first measure instead of restoring a stale position from localStorage.
   state.selectedMeasureIndex = 0;
-  state.phrase = null;
   els.playbackSpeed.value = ['0.5', '0.75', '1'].includes(saved.speed) ? saved.speed : '1';
   els.volume.value = Number.isFinite(Number(saved.volume)) ? Math.max(0, Math.min(100, Number(saved.volume))) : 62;
   els.metronomeVolume.value = Number.isFinite(Number(saved.metronome)) ? Math.max(0, Math.min(100, Number(saved.metronome))) : 0;
+  const savedMetronomeOffset = Number(detectorSaved.metronomeOffsetMs ?? saved.metronomeOffsetMs);
+  state.metronomeOffsetMs = Number.isFinite(savedMetronomeOffset)
+    ? Math.round(Math.max(-100, Math.min(200, savedMetronomeOffset)) / 5) * 5 : 30;
   state.detectorSettings.rmsThreshold = Number.isFinite(Number(detectorSaved.v1RmsThreshold))
     ? Math.max(V1_RMS_THRESHOLD.min, Math.min(V1_RMS_THRESHOLD.max, Number(detectorSaved.v1RmsThreshold)))
     : V1_RMS_THRESHOLD.default;
@@ -3106,44 +3222,49 @@ function bindControls() {
   document.querySelector('.toolbar-more').addEventListener('click', (event) => {
     if (event.target.closest('button')) event.currentTarget.removeAttribute('open');
   });
-  document.getElementById('test-microphone').addEventListener('click', toggleMicrophone);
   els.accompanimentMode.addEventListener('click', () => {
+    // Opening the mixer is an intentional pause point.  Keep this flag so
+    // applying a new routing resumes the same musical instant afterwards.
+    if (state.clock.running) {
+      state.voiceMixResumeRequested = true;
+      state.clock.pause();
+      updatePlaybackButton();
+      render();
+    }
     renderVoiceMixer();
     if (!els.voiceMixerDialog.open) els.voiceMixerDialog.showModal();
   });
   els.voiceMixerClose.addEventListener('click', () => els.voiceMixerDialog.close());
+  els.voiceMixerAccompanimentEnabled.addEventListener('click', () => {
+    state.accompanimentEnabled = !state.accompanimentEnabled;
+    void applyVoiceSelection(state.selectedVoiceIds); savePreferences();
+  });
+  els.voiceMixerAccompanimentLevel.addEventListener('input', () => {
+    state.accompanimentLevel = Number(els.voiceMixerAccompanimentLevel.value) / 100;
+    els.voiceMixerAccompanimentValue.value = `${els.voiceMixerAccompanimentLevel.value}%`;
+    if (state.playbackPlan?.kind !== 'full-mix') syncBackingLevel();
+  });
+  els.voiceMixerAccompanimentLevel.addEventListener('change', () => {
+    void applyVoiceSelection(state.selectedVoiceIds); savePreferences();
+  });
   els.voiceMixerOwn.addEventListener('click', () => {
+    state.accompanimentEnabled = false;
     void applyVoiceSelection([state.runtime.selectedPartId]);
+    savePreferences();
   });
   els.voiceMixerAll.addEventListener('click', () => {
+    state.accompanimentEnabled = false;
     void applyVoiceSelection(Object.keys(state.backingManifest?.voice_stems ?? {}));
+    savePreferences();
   });
   window.addEventListener('pagehide', savePreferences);
-  els.exercise.addEventListener('click', () => {
-    state.clock.pause(); updatePlaybackButton();
-    const options = () => state.occurrenceMeasures.map((measure, index) => new Option(`${index + 1} · battuta ${measure.number}`, String(index)));
-    els.phraseStart.replaceChildren(...options()); els.phraseEnd.replaceChildren(...options());
-    els.phraseStart.value = String(state.phrase?.start ?? measureIndexAt(state.clock.snapshot().beat));
-    els.phraseEnd.value = String(state.phrase?.end ?? Math.min(state.occurrenceMeasures.length - 1, Number(els.phraseStart.value) + 3));
-    els.exerciseDialog.showModal();
-  });
-  els.exerciseClose.addEventListener('click', () => els.exerciseDialog.close());
-  els.phraseApply.addEventListener('click', () => {
-    const start = Number(els.phraseStart.value), end = Number(els.phraseEnd.value);
-    if (end < start) { showToast('La battuta finale deve seguire quella iniziale.'); return; }
-    state.phrase = { start, end }; state.autoLoop = els.phraseLoop.checked; state.attemptActive = false;
-    seekToMeasure(start); savePreferences(); els.exerciseDialog.close();
-  });
-  els.phraseClear.addEventListener('click', () => { state.phrase = null; state.attemptActive = false; savePreferences(); els.exerciseDialog.close(); });
   els.resultClose.addEventListener('click', () => els.resultDialog.close());
-  els.noteNames.addEventListener('change', () => { state.noteNames = els.noteNames.value; savePreferences(); render(); });
-  els.retry.addEventListener('click', () => { els.resultDialog.close(); seekToMeasure(state.phrase?.start ?? 0); togglePlayback(); });
-  els.nextPhrase.addEventListener('click', () => {
-    if (!state.phrase) return;
-    const length = state.phrase.end - state.phrase.start + 1, start = state.phrase.end + 1;
-    state.phrase = { start, end: Math.min(state.occurrenceMeasures.length - 1, start + length - 1) };
-    els.resultDialog.close(); seekToMeasure(start); savePreferences(); togglePlayback();
+  els.resultResume.addEventListener('click', () => {
+    els.resultDialog.close();
+    if (!state.clock.running) void togglePlayback();
   });
+  els.noteNames.addEventListener('change', () => { state.noteNames = els.noteNames.value; savePreferences(); render(); });
+  els.retry.addEventListener('click', () => { state.attemptActive = false; els.resultDialog.close(); seekToMeasure(0); togglePlayback(); });
   els.backingAudio.addEventListener('loadedmetadata', () => {
     if (state.pendingAudioTime != null) { state.clock.seekPerformanceTime(state.pendingAudioTime); state.pendingAudioTime = null; render(); }
   });
@@ -3157,15 +3278,13 @@ function bindControls() {
       if (Math.abs(audio.currentTime - els.backingAudio.currentTime) > .08) audio.currentTime = els.backingAudio.currentTime;
     }
   });
-  els.transpose.addEventListener('change', () => {
-    const snapshot = state.clock.snapshot();
-    state.clock.pause();
+  els.transpose.addEventListener('change', async () => {
     state.transpose = Number(els.transpose.value);
+    updateTransposeControl();
     state.attemptActive = false;
     state.pitchViewport = null; beginPitchTake();
-    configureBacking();
-    state.pendingAudioTime = snapshot.performanceTime;
-    state.clock.seekPerformanceTime(snapshot.performanceTime);
+    state.playbackMixer.setTranspose(state.transpose);
+    await applyVoiceSelection(state.selectedVoiceIds);
     savePreferences(); updatePlaybackButton(); render();
     showToast(state.transpose ? `Trasposizione ${state.transpose > 0 ? '+' : ''}${state.transpose} semitoni. Spartito originale.` : 'Tonalità originale');
   });
@@ -3260,22 +3379,15 @@ function bindControls() {
     if (state.benchmark.capture) { event.preventDefault(); els.benchmarkStatus.textContent = 'Interrompi o scarta prima la registrazione attiva.'; }
   });
   els.neuralLive.addEventListener('click', toggleNeuralLive);
-  els.previousMeasure.addEventListener('click', () => seekToMeasure(Math.max(0, measureIndexAt(state.clock.snapshot().beat) - 1)));
-  els.nextMeasure.addEventListener('click', () => seekToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(state.clock.snapshot().beat) + 1)));
+  els.previousMeasure.addEventListener('click', () => seekToMeasure(Math.max(0, measureIndexAt(state.clock.snapshot().beat) - 1), false, false));
+  els.nextMeasure.addEventListener('click', () => seekToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(state.clock.snapshot().beat) + 1), false, false));
   els.partSelector.addEventListener('change', () => changePart(els.partSelector.value));
   els.playbackSpeed.addEventListener('change', async () => {
-    const speed = Number(els.playbackSpeed.value);
-    const snapshot = state.clock.snapshot();
-    const wasRunning = state.clock.running;
     state.attemptActive = false; state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
-    state.clock.pause();
-    configureBacking();
-    if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(speed); else state.clock.setSpeed(speed);
-    state.clock.seekPerformanceTime(snapshot.performanceTime);
-    state.pendingAudioTime = snapshot.performanceTime;
+    await applyVoiceSelection(state.selectedVoiceIds);
     state.lastMetronomeBeat = null;
-    if (wasRunning) await state.clock.play();
     state.attemptActive = state.clock.running;
+    savePreferences();
     updatePlaybackButton();
     render();
   });
@@ -3313,6 +3425,14 @@ function bindControls() {
     state.showIntervals = els.settingsShowIntervals.checked;
     savePreferences(); render();
     showToast(state.showIntervals ? 'Frecce degli intervalli attive.' : 'Frecce degli intervalli nascoste.');
+  });
+  els.settingsMetronomeOffset.addEventListener('input', () => {
+    state.metronomeOffsetMs = Number(els.settingsMetronomeOffset.value);
+    state.lastMetronomeBeat = null; updateDetectorSettingsUi();
+  });
+  els.settingsMetronomeOffset.addEventListener('change', () => {
+    savePreferences();
+    showToast(`Metronomo: ${state.metronomeOffsetMs >= 0 ? '+' : '−'}${Math.abs(state.metronomeOffsetMs)} ms.`);
   });
   els.settingsDisplayPitchAlgorithm.addEventListener('change', () => {
     state.displayPitchAlgorithm = els.settingsDisplayPitchAlgorithm.value === 'v1' ? 'v1' : 'v1+display-filter';
@@ -3364,6 +3484,7 @@ function bindControls() {
   els.settingsReset.addEventListener('click', () => {
     state.lyricTextScale = UiPreferences.write(UiPreferences.DEFAULT_LYRIC_SCALE);
     state.showIntervals = false;
+    state.metronomeOffsetMs = 30;
     state.detectorSettings.rmsThreshold = V1_RMS_THRESHOLD.default;
     state.detectorSettings.weakVoiceMode = false;
     Object.assign(state.detectorSettings, V1_TRACKER_DEFAULTS);
@@ -3380,8 +3501,8 @@ function bindControls() {
   window.addEventListener('beforeunload', () => { savePitchHistory(); state.microphoneStream?.getTracks().forEach((track) => track.stop()); });
   document.addEventListener('keydown', (event) => {
     if (event.code === 'Space' && !['SELECT', 'INPUT', 'BUTTON'].includes(document.activeElement?.tagName)) { event.preventDefault(); togglePlayback(); }
-    if (event.code === 'ArrowLeft' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) - 1);
-    if (event.code === 'ArrowRight' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) + 1);
+    if (event.code === 'ArrowLeft' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) - 1, false, false);
+    if (event.code === 'ArrowRight' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) + 1, false, false);
   });
   els.scoreImage.addEventListener('load', () => { state.activeScoreSegment = null; els.scoreLoading.hidden = true; render(); });
   els.scoreImage.addEventListener('error', () => { els.scoreLoading.hidden = false; els.scoreLoading.textContent = 'Spartito non disponibile'; });
@@ -3553,14 +3674,9 @@ async function loadPracticePiece(pieceId) {
   // newly opened piece, even if that piece has older saved preferences.
   state.transpose = 0;
   els.transpose.value = '0';
+  updateTransposeControl();
   restorePitchHistory();
   state.occurrenceMeasures = buildOccurrenceMeasures(state.runtime);
-  const deepLink = new URLSearchParams(window.location.search), phraseStart = Number(deepLink.get('phraseStart') ?? NaN),
-    phraseEnd = Number(deepLink.get('phraseEnd') ?? NaN);
-  if (Number.isInteger(phraseStart) && Number.isInteger(phraseEnd) && phraseStart >= 0 && phraseEnd >= phraseStart
-      && phraseEnd < state.occurrenceMeasures.length) {
-    state.phrase = { start: phraseStart, end: phraseEnd }; state.autoLoop = true; state.attemptActive = false;
-  }
   configureBacking();
   state.clock = new MediaPlaybackClock({ mediaElement: els.backingAudio, scoreRuntime: state.runtime });
   if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(Number(els.playbackSpeed.value));
@@ -3577,9 +3693,7 @@ async function loadPracticePiece(pieceId) {
   els.pieceTitle.textContent = libraryPiece ? pieceDisplayTitle(libraryPiece) : state.runtime.title.split('·')[0].trim();
   els.scoreViewerLink.href = `score-viewer.html?piece=${encodeURIComponent(bundleManifest.piece_id)}`;
   els.scorePartLabel.textContent = parts.find((part) => part.id === state.runtime.selectedPartId)?.name ?? 'Parte';
-  const initialMeasure = state.phrase?.start ?? 0;
-  bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(initialMeasure); updatePlaybackButton();
-  if (state.phrase && deepLink.get('autoplayPhrase') === '1') setTimeout(() => { if (!state.clock.running) togglePlayback(); }, 250);
+  bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(0); updatePlaybackButton();
   window.addEventListener('message', (event) => {
     if (event.origin === location.origin && event.data?.type === 'choir-bundle-approval') location.reload();
   });
