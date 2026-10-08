@@ -38,7 +38,7 @@ MUSESCORE_CANDIDATES = (
     Path(r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe"),
 )
 _library_lock = threading.Lock()
-LIBRARY_ASSET_LAYOUT_VERSION = 12
+LIBRARY_ASSET_LAYOUT_VERSION = 13
 DEFAULT_SCORE_TEMPO_BPM = 80.0
 SOURCE_FINGERPRINT_VERSION = 1
 _IGNORED_MSCZ_MEMBERS = frozenset({"META-INF/container.xml", "viewsettings.json"})
@@ -297,6 +297,42 @@ def _set_choir_aahs(musicxml: Path, vocal_part_ids: set[str]) -> None:
     tree.write(musicxml, encoding="utf-8", xml_declaration=True)
 
 
+def _set_organ_fast_strings(musicxml: Path) -> None:
+    """Keep an organ's notation/name while using MS Basic Strings Fast audio.
+
+    MuseScore's source archive may already use the preset, but its MusicXML
+    export describes the instrument as an organ. Re-importing that MusicXML
+    for browser audio would otherwise silently restore the organ timbre.
+    """
+    tree = ET.parse(musicxml)
+    root = tree.getroot()
+    changed = False
+    for score_part in root.findall("./part-list/score-part"):
+        if not re.search(r"\b(organo|organ)\b", score_part.findtext("part-name") or "", re.I):
+            continue
+        instrument = score_part.find("score-instrument")
+        if instrument is None:
+            instrument = ET.SubElement(score_part, "score-instrument", {"id": f"{score_part.get('id')}-I1"})
+        name = instrument.find("instrument-name")
+        if name is None:
+            name = ET.SubElement(instrument, "instrument-name")
+        name.text = "Strings Fast"
+        sound = instrument.find("instrument-sound")
+        if sound is None:
+            sound = ET.SubElement(instrument, "instrument-sound")
+        sound.text = "strings.group"
+        midi = score_part.find("midi-instrument")
+        if midi is None:
+            midi = ET.SubElement(score_part, "midi-instrument", {"id": instrument.get("id", f"{score_part.get('id')}-I1")})
+        program = midi.find("midi-program")
+        if program is None:
+            program = ET.SubElement(midi, "midi-program")
+        program.text = "49"  # MusicXML is one-based; MS Basic Strings Fast is preset 48.
+        changed = True
+    if changed:
+        tree.write(musicxml, encoding="utf-8", xml_declaration=True)
+
+
 def _export_part_svg(musicxml: Path, destination: Path, part_id: str, executable: str,
                      tempo_directions: list[tuple[int, str | None, ET.Element]]) -> list[str]:
     """Render one vocal staff, never the SATB/organ full-score page."""
@@ -450,6 +486,7 @@ def _build_library_piece(source: Path) -> dict:
         score_json.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         vocal_parts = [part for part in payload["parts"] if not _is_accompaniment(part["name"])]
         _set_choir_aahs(musicxml, {part["id"] for part in vocal_parts})
+        _set_organ_fast_strings(musicxml)
         _export_audio_stem(musicxml, score_audio, executable)
         complete_root = ET.parse(musicxml).getroot()
         tempo_directions = _tempo_directions(complete_root)

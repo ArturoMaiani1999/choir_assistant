@@ -2,15 +2,18 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-09-28
+**Last reviewed:** 2026-10-09
 
 ## Contract
 
 During rehearsal, `HTMLAudioElement.currentTime` is the playback authority.
 `MediaPlaybackClock` converts that media position through the score tempo map;
-the resulting snapshot drives notation, target selection, pitch-lane position,
-metronome and transport. `requestAnimationFrame` redraws state but is not a
-musical clock.
+the resulting snapshot drives notation, target selection, metronome and
+transport. The piano roll and plotted pitch use a separate, user-adjustable
+visual delay (150 ms by default); detector timestamps and scoring keep the
+undelayed media time. The plume advance is applied relative to that delayed
+visual timeline. `requestAnimationFrame` redraws state but is not a musical
+clock.
 
 ## Bundle model
 
@@ -29,6 +32,9 @@ vocal stems may be enabled together.
 
 The local authoring server may generate or transform audio. Production serves
 only allowlisted, pre-generated assets and has no audio-processing endpoint.
+The browser bundle exporter retains Choir Aahs for SATB and assigns MS Basic
+Strings Fast to any organ part before exporting the full mix and accompaniment.
+The score still labels that part as an organ.
 
 ## Speed and transposition
 

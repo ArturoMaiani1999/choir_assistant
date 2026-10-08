@@ -16,6 +16,13 @@ assert.ok(Math.abs((yA - yASharp) - (yHighA - yHighASharp)) < 1e-9, 'all semiton
 const nowX = math.timeToX(12, 12, 50, 1250, 4.5, 7.5);
 assert.equal(nowX, 500, 'NOW is 37.5% of plot width');
 assert.equal(math.timeToX(13, 12, 50, 1250, 4.5, 7.5) - nowX, 100, 'one beat has stable width');
+const tempoMap = { beatAtSeconds: seconds => seconds < 2 ? seconds * 2 : 4 + (seconds - 2) };
+assert.equal(math.delayedVisualBeat(tempoMap, 3, 1, 150), 4.85,
+  '150 ms delays the visual beat across tempo changes without shifting audio');
+assert.equal(math.delayedVisualBeat(tempoMap, 3, .5, 150), 4.925,
+  'the visual delay is wall time even at half playback speed');
+assert.equal(math.delayedVisualBeat(tempoMap, .1, 1, 150), 0,
+  'visual time stays at the start of the piece');
 
 assert.deepEqual([1, 2, 3, 4, 5, 6, 7].map(math.melodicIntervalLabel), [null, '2', '3m', '3M', '4', null, '5']);
 assert.equal(math.melodicIntervalLabel(-3), '3m', 'descending intervals use the same label');

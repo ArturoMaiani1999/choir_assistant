@@ -49,6 +49,12 @@
     const safeOffset = Number(offsetMs) || 0;
     return Math.max(0, safeTime - safeOffset / 1000 * safeSpeed);
   }
+  function delayedVisualBeat(runtime, performanceTime, speed, delayMs) {
+    const safeTime = Math.max(0, Number(performanceTime) || 0);
+    const safeSpeed = Math.max(.1, Number(speed) || 1);
+    const safeDelay = Math.max(0, Number(delayMs) || 0);
+    return runtime.beatAtSeconds(Math.max(0, safeTime - safeDelay / 1000 * safeSpeed));
+  }
   function rhythmGridLines(measures, visibleStart, visibleEnd) {
     const lines = [];
     measures.forEach((measure, index) => {
@@ -76,5 +82,5 @@
     const animating = Math.abs(target.min - bounds.min) > .01 || Math.abs(target.max - bounds.max) > .01;
     return { bounds: animating ? bounds : { ...target }, animating };
   }
-  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, metronomePerformanceTime, rhythmGridLines, smoothPitchBounds };
+  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, smoothPitchBounds };
 });

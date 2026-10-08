@@ -166,6 +166,10 @@
         <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-advance">Anticipo temporale <output id="settings-v1-plume-advance-value">200 ms</output></label>
         <input id="settings-v1-plume-advance" type="range" min="0" max="400" step="10" value="200" />
         <div class="detector-setting-scale"><span>0 ms · timestamp reale</span><span>400 ms · più anticipata</span></div>
+        <label class="detector-setting-label tracker-setting-label" for="settings-piano-roll-delay">Ritardo piano roll <output id="settings-piano-roll-delay-value">150 ms</output></label>
+        <input id="settings-piano-roll-delay" type="range" min="0" max="400" step="10" value="150" />
+        <div class="detector-setting-scale"><span>0 ms · tempo reale</span><span>400 ms · più ritardato</span></div>
+        <p>Ritarda insieme le note del piano roll e la traccia della voce rispetto all’audio. È indipendente dall’anticipo della plume e non cambia il punteggio.</p>
         <p>La linea cyan mostra il pitch; il flusso interno dà vita alla ribbon senza deformare il dato. L’anticipo temporale aiuta a compensare visivamente la latenza, anche con cuffie Bluetooth. Queste regolazioni non cambiano il punteggio.</p>
       </section>
       </section>

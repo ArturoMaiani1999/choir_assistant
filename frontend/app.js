@@ -1,5 +1,5 @@
 const { NormalizedScoreRuntime, MediaPlaybackClock } = window.ChoirScore;
-const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, adjacentMelodicIntervals, measureSeekState, metronomePerformanceTime, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
+const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, adjacentMelodicIntervals, measureSeekState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
 const { detectPitch, PitchSmoother, OctaveAwarePitchTracker, yinCandidates, decodeYinCandidatePath, mpmCandidates, decodeCrepeProbabilities } = window.ChoirPitch;
 const PitchShared = window.ChoirPitchShared;
 const FluidPitchTrail = window.ChoirFluidPitchTrail;
@@ -37,7 +37,7 @@ const UI_CONFIG = Object.freeze({
 const els = Object.fromEntries([
   'transpose', 'transpose-value', 'settings-display-pitch-algorithm', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
   'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-accompaniment', 'voice-mixer-accompaniment-enabled', 'voice-mixer-accompaniment-level', 'voice-mixer-accompaniment-value', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
-  'settings-dialog', 'settings-metronome-offset', 'settings-metronome-offset-value', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-reset',
+  'settings-dialog', 'settings-metronome-offset', 'settings-metronome-offset-value', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
   'result-dialog', 'result-heading', 'result-text', 'result-progress', 'retry', 'result-resume', 'result-close',
   'note-names',
   'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-title', 'library-title-save', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-viewer-link', 'settings',
@@ -85,6 +85,7 @@ const state = {
   metronomeContext: null,
   lastMetronomeBeat: null,
   metronomeOffsetMs: 30,
+  pianoRollDelayMs: 150,
   rememberedMetronomeVolume: 34,
   syncDebug: new URLSearchParams(window.location.search).has('syncDebug'),
   microphoneStatus: 'idle',
@@ -166,6 +167,8 @@ function updateDetectorSettingsUi() {
   els.settingsV1PlumeIntensityValue.textContent = `${Math.round(state.plumeSettings.intensity * 100)}%`;
   els.settingsV1PlumeAdvance.value = String(state.plumeSettings.timeAdvanceMs);
   els.settingsV1PlumeAdvanceValue.textContent = `${state.plumeSettings.timeAdvanceMs} ms`;
+  els.settingsPianoRollDelay.value = String(state.pianoRollDelayMs);
+  els.settingsPianoRollDelayValue.textContent = `${state.pianoRollDelayMs} ms`;
   els.settingsDisplayPitchAlgorithm.value = state.displayPitchAlgorithm;
 }
 
@@ -1088,6 +1091,10 @@ function visuallyAdvancedPitchBeat(beat) {
   return state.runtime.beatAtSeconds(Math.max(0, scoreSeconds));
 }
 
+function currentPianoRollBeat(snapshot = state.clock.snapshot()) {
+  return delayedVisualBeat(state.runtime, snapshot.performanceTime, snapshot.speed, state.pianoRollDelayMs);
+}
+
 function drawPitchLane(beat) {
   const canvas = els.pitchLane;
   const rect = canvas.getBoundingClientRect();
@@ -1175,7 +1182,7 @@ function drawPitchLane(beat) {
     const toleranceHeight = rowHeight * (UI_CONFIG.targetToleranceCents / 50);
     ctx.fillStyle = 'rgba(217,168,91,.10)';
     roundedRect(ctx, x, y - toleranceHeight / 2, endX - x, toleranceHeight, 3); ctx.fill();
-    ctx.fillStyle = event.onsetBeat <= beat && beat < event.onsetBeat + event.durationBeats ? '#e4b665' : '#bd8e4c';
+    ctx.fillStyle = event.onsetBeat <= displayBeat && displayBeat < event.onsetBeat + event.durationBeats ? '#e4b665' : '#bd8e4c';
     roundedRect(ctx, x, y - blockHeight / 2, Math.max(2, endX - x - 2), blockHeight, 3); ctx.fill();
     const graceEnd = timeToX(event.onsetBeat + event.attackGraceBeats, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
     ctx.fillStyle = 'rgba(7,19,25,.24)'; ctx.fillRect(x, y - blockHeight / 2, Math.max(0, graceEnd - x), blockHeight);
@@ -1231,7 +1238,7 @@ function drawPitchLane(beat) {
   }
   ctx.restore(); ctx.shadowBlur = 0;
 
-  const currentTarget = state.runtime.targetAt(beat);
+  const currentTarget = state.runtime.targetAt(displayBeat);
   ctx.fillStyle = '#0a181e'; ctx.fillRect(noteLabelX - 4, plot.top - 8, nowX - noteLabelX - 1, plot.bottom - plot.top + 16);
   for (let pitch = Math.ceil(bounds.min); pitch <= Math.floor(bounds.max); pitch += 1) {
     const y = pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
@@ -1239,7 +1246,7 @@ function drawPitchLane(beat) {
     ctx.fillStyle = active ? '#f0cf8f' : '#93a9a8';
     ctx.font = `${active ? '700 ' : ''}${Math.max(8, Math.min(12, rowHeight * .8))}px Inter, sans-serif`;
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
-    ctx.fillText(noteLabel(pitch, beat), noteLabelX, y);
+    ctx.fillText(noteLabel(pitch, displayBeat), noteLabelX, y);
   }
   if (Number.isFinite(state.displayPitch) && (state.displayPitch < bounds.min || state.displayPitch > bounds.max)) {
     ctx.fillStyle = '#68d1cb'; ctx.textAlign = 'left';
@@ -1316,7 +1323,9 @@ function render() {
   if (els.scoreMeasureLabel.textContent !== scoreMeasureLabel) els.scoreMeasureLabel.textContent = scoreMeasureLabel;
   if (els.measureCounter.textContent !== measureCounter) els.measureCounter.textContent = measureCounter;
   renderScore(snapshot.beat);
-  drawPitchLane(snapshot.beat);
+  // Delay only the pitch-lane timeline. Audio, metronome and scoring continue
+  // to use the media clock; the plume advance remains relative to this lane.
+  drawPitchLane(currentPianoRollBeat(snapshot));
   renderReadout(snapshot.beat, snapshot.running);
   renderSyncDebug(snapshot);
   if (snapshot.running || state.microphoneStatus === 'active' || state.pitchViewport?.animating) state.rafId = requestAnimationFrame(render); else state.rafId = null;
@@ -1457,7 +1466,7 @@ function bindGridInspection() {
   const canvas = els.pitchLane;
   canvas.title = 'In pausa: tocca o trascina orizzontalmente per scegliere una battuta. Play inizia dalla battuta precedente.';
   const reset = () => {
-    state.gridInspect = { active: false, viewBeat: state.clock.snapshot().beat, pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null };
+    state.gridInspect = { active: false, viewBeat: currentPianoRollBeat(), pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null };
     render();
   };
   canvas.addEventListener('dblclick', () => { if (!state.clock.running) reset(); });
@@ -1465,7 +1474,7 @@ function bindGridInspection() {
     if (state.clock.running) return;
     event.preventDefault();
     const view = state.gridInspect;
-    if (!view.active) { view.active = true; view.viewBeat = state.clock.snapshot().beat; }
+    if (!view.active) { view.active = true; view.viewBeat = currentPianoRollBeat(); }
     const span = (state.pitchViewport?.bounds.max ?? 67) - (state.pitchViewport?.bounds.min ?? 55);
     if (event.ctrlKey || event.metaKey) {
       const zoom = Math.exp(-event.deltaY * .0025);
@@ -1482,7 +1491,7 @@ function bindGridInspection() {
     const rect = canvas.getBoundingClientRect();
     const plot = { left: rect.width < 700 ? 48 : 58, right: rect.width - 8 };
     const inspect = state.gridInspect;
-    const displayBeat = inspect.active ? inspect.viewBeat : state.clock.snapshot().beat;
+    const displayBeat = inspect.active ? inspect.viewBeat : currentPianoRollBeat();
     const historyBeats = UI_CONFIG.historyBeats / (inspect.active ? inspect.timeZoom : 1);
     const futureBeats = UI_CONFIG.futureBeats / (inspect.active ? inspect.timeZoom : 1);
     const nowX = timeToX(displayBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
@@ -3023,6 +3032,7 @@ function finishAttempt() {
 function globalDetectorPreferences() {
   return {
     metronomeOffsetMs: state.metronomeOffsetMs,
+    pianoRollDelayMs: state.pianoRollDelayMs,
     v1RmsThreshold: state.detectorSettings.rmsThreshold,
     v1WeakVoiceMode: state.detectorSettings.weakVoiceMode,
     v1FastAlpha: state.detectorSettings.fastAlpha,
@@ -3048,6 +3058,7 @@ function savePreferences() {
     localStorage.setItem(preferenceKey(), JSON.stringify({ transpose: state.transpose,
       speed: els.playbackSpeed.value, volume: els.volume.value, metronome: els.metronomeVolume.value,
       metronomeOffsetMs: state.metronomeOffsetMs,
+      pianoRollDelayMs: state.pianoRollDelayMs,
       selectedVoiceIds: [...state.selectedVoiceIds], voiceLevels: Object.fromEntries(state.voiceLevels),
       accompanimentEnabled: state.accompanimentEnabled, accompanimentLevel: state.accompanimentLevel,
       noteNames: state.noteNames, noteNamesPreferenceVersion: 2, showIntervals: state.showIntervals,
@@ -3106,6 +3117,9 @@ function restorePreferences() {
   const savedMetronomeOffset = Number(detectorSaved.metronomeOffsetMs ?? saved.metronomeOffsetMs);
   state.metronomeOffsetMs = Number.isFinite(savedMetronomeOffset)
     ? Math.round(Math.max(-100, Math.min(200, savedMetronomeOffset)) / 5) * 5 : 30;
+  const savedPianoRollDelay = Number(detectorSaved.pianoRollDelayMs ?? saved.pianoRollDelayMs);
+  state.pianoRollDelayMs = Number.isFinite(savedPianoRollDelay)
+    ? Math.round(Math.max(0, Math.min(400, savedPianoRollDelay)) / 10) * 10 : 150;
   state.detectorSettings.rmsThreshold = Number.isFinite(Number(detectorSaved.v1RmsThreshold))
     ? Math.max(V1_RMS_THRESHOLD.min, Math.min(V1_RMS_THRESHOLD.max, Number(detectorSaved.v1RmsThreshold)))
     : V1_RMS_THRESHOLD.default;
@@ -3481,10 +3495,16 @@ function bindControls() {
       showToast('Aspetto della plume v1 salvato.');
     });
   }
+  els.settingsPianoRollDelay.addEventListener('input', () => {
+    state.pianoRollDelayMs = Number(els.settingsPianoRollDelay.value);
+    updateDetectorSettingsUi(); render();
+  });
+  els.settingsPianoRollDelay.addEventListener('change', savePreferences);
   els.settingsReset.addEventListener('click', () => {
     state.lyricTextScale = UiPreferences.write(UiPreferences.DEFAULT_LYRIC_SCALE);
     state.showIntervals = false;
     state.metronomeOffsetMs = 30;
+    state.pianoRollDelayMs = 150;
     state.detectorSettings.rmsThreshold = V1_RMS_THRESHOLD.default;
     state.detectorSettings.weakVoiceMode = false;
     Object.assign(state.detectorSettings, V1_TRACKER_DEFAULTS);

@@ -137,6 +137,31 @@ def main() -> int:
                     + json.dumps(diagnostics, ensure_ascii=False)
                 )
 
+            visual_delay = evaluate(socket, call_id, """(() => {
+              const advance = state.plumeSettings.timeAdvanceMs;
+              const snapshot = { performanceTime: 3, speed: .75 };
+              const actualBeat = state.runtime.beatAtSeconds(snapshot.performanceTime);
+              const delayed = currentPianoRollBeat(snapshot);
+              const slider = els.settingsPianoRollDelay;
+              const initial = { value: slider.value, label: els.settingsPianoRollDelayValue.textContent,
+                ms: state.pianoRollDelayMs, beat: delayed };
+              slider.value = '250'; slider.dispatchEvent(new Event('input'));
+              slider.dispatchEvent(new Event('change'));
+              const changed = { ms: state.pianoRollDelayMs, beat: currentPianoRollBeat(snapshot),
+                advance: state.plumeSettings.timeAdvanceMs,
+                stored: JSON.parse(localStorage.getItem(GLOBAL_DETECTOR_PREFERENCES_KEY)).pianoRollDelayMs };
+              slider.value = '150'; slider.dispatchEvent(new Event('input'));
+              slider.dispatchEvent(new Event('change'));
+              return { initial, changed, actualBeat, restored: state.pianoRollDelayMs, advance };
+            })()""")
+            call_id += 1
+            assert visual_delay["initial"]["ms"] == 150 and visual_delay["initial"]["label"] == "150 ms", visual_delay
+            assert visual_delay["initial"]["beat"] < visual_delay["actualBeat"], visual_delay
+            assert visual_delay["changed"]["ms"] == visual_delay["changed"]["stored"] == 250, visual_delay
+            assert visual_delay["changed"]["beat"] < visual_delay["initial"]["beat"], visual_delay
+            assert visual_delay["changed"]["advance"] == visual_delay["advance"], visual_delay
+            assert visual_delay["restored"] == 150, visual_delay
+
             voice_mix = evaluate(socket, call_id, """(async () => {
               const allIds = Object.keys(state.backingManifest?.voice_stems ?? {});
               await state.playbackMixer.resume([els.backingAudio, ...state.voiceStemAudio.values()]);
@@ -562,6 +587,7 @@ def main() -> int:
                 "piece": result["bundlePiece"],
                 "part": result["selectedPart"],
                 "defaultPlumeWidth": result["plumeWidthLabel"],
+                "visualDelay": visual_delay,
                 "resourceCount": len(result["resources"]),
                 "microphone": microphone,
                 "preliminaryResult": preliminary_result,
