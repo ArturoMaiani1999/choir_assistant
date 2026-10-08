@@ -6,7 +6,7 @@ const FluidPitchTrail = window.ChoirFluidPitchTrail;
 const { OneEuroFilter } = window.ChoirOneEuro;
 const UiPreferences = window.ChoirUiPreferences;
 const VocalFeedback = window.VocalFeedback;
-const { MediaElementMixer } = window.ChoirMedia;
+const { MediaElementMixer, buildMediaPlaybackPlan } = window.ChoirMedia;
 const RUNTIME_CONFIG = window.ChoirRuntimeConfig ?? Object.freeze({});
 
 function libraryBundleUrl(pieceId) {
@@ -68,6 +68,9 @@ const state = {
   rafId: null,
   lastAnnouncedState: '',
   backingManifest: null,
+  playbackPlan: null,
+  voiceMixChangeToken: 0,
+  voiceMixResumeRequested: false,
   playbackMixer: new MediaElementMixer(),
   voiceStemAudio: new Map(),
   selectedVoiceIds: new Set(),
@@ -337,8 +340,8 @@ function syncVoiceStemLevels() {
 }
 
 function syncBackingLevel() {
-  const silentClock = Object.keys(state.backingManifest?.voice_stems ?? {}).length > 0
-    && !state.backingManifest?.accompaniment_file;
+  const silentClock = state.playbackPlan?.silentMaster ?? (Object.keys(state.backingManifest?.voice_stems ?? {}).length > 0
+    && !state.backingManifest?.accompaniment_file);
   state.playbackMixer.setLevel(els.backingAudio, Number(els.volume.value) / 100, { forceMuted: silentClock });
 }
 
@@ -347,19 +350,21 @@ function configureVoiceStems() {
   const stems = state.backingManifest?.voice_stems ?? {};
   const mixerAvailable = Object.keys(stems).length > 0;
   els.accompanimentMode.disabled = !mixerAvailable;
-  for (const partId of state.selectedVoiceIds) {
-    if (!stems[partId]) continue;
-    const audio = new Audio(voiceStemUrl(stems[partId]));
+  const plannedStems = state.playbackPlan?.voiceStems
+    ?? [...state.selectedVoiceIds].filter((partId) => stems[partId]).map((partId) => ({ partId, file: stems[partId] }));
+  for (const { partId, file } of plannedStems) {
+    const audio = new Audio(voiceStemUrl(file));
     audio.preload = 'auto';
     audio.playsInline = true;
     state.voiceStemAudio.set(partId, audio);
   }
   syncVoiceStemLevels();
-  const availableIds = Object.keys(stems), selectedCount = state.voiceStemAudio.size;
+  const availableIds = Object.keys(stems);
+  const selectedCount = availableIds.filter((partId) => state.selectedVoiceIds.has(partId)).length;
   const ownPart = state.runtime?.parts.find((part) => part.id === state.runtime.selectedPartId);
   els.accompanimentMode.textContent = !mixerAvailable ? 'Mix non separabile'
     : selectedCount === availableIds.length ? 'Mix completo'
-      : selectedCount === 1 && state.voiceStemAudio.has(state.runtime.selectedPartId) ? `Solo ${ownPart?.name ?? 'la mia parte'}`
+      : selectedCount === 1 && state.selectedVoiceIds.has(state.runtime.selectedPartId) ? `Solo ${ownPart?.name ?? 'la mia parte'}`
         : selectedCount ? `Voci · ${selectedCount}` : state.backingManifest?.accompaniment_file ? 'Solo base' : 'Nessuna voce';
   els.accompanimentMode.title = mixerAvailable
     ? 'Scegli quali parti vocali ascoltare' : 'Questo brano dispone soltanto del mix audio completo';
@@ -383,8 +388,7 @@ function renderVoiceMixer() {
     input.type = 'checkbox'; input.value = part.id; input.checked = state.selectedVoiceIds.has(part.id);
     input.addEventListener('change', () => {
       if (input.checked) state.selectedVoiceIds.add(part.id); else state.selectedVoiceIds.delete(part.id);
-      configureVoiceStems();
-      if (state.clock.running) void playVoiceStems();
+      void applyVoiceSelection(state.selectedVoiceIds);
     });
     label.append(input, document.createTextNode(part.id === state.runtime.selectedPartId ? `${part.name} · mia parte` : part.name));
     return label;
@@ -404,18 +408,108 @@ function configureBacking() {
   const speed = Number(els.playbackSpeed.value);
   const speedFile = mix.files_by_speed?.[String(speed)];
   state.usesPreRenderedSpeed = Boolean(speedFile) && !state.backingManifest.accompaniment_file;
-  const baseFile = state.backingManifest.accompaniment_file ?? speedFile ?? mix.file;
+  state.playbackPlan = buildMediaPlaybackPlan({
+    mixFile: speedFile ?? state.backingManifest.full_mix_file ?? mix.file,
+    accompanimentFile: state.backingManifest.accompaniment_file,
+    voiceStems: state.backingManifest.voice_stems,
+    selectedVoiceIds: state.selectedVoiceIds,
+  });
+  const baseFile = state.playbackPlan.masterFile;
+  if (!baseFile) { els.backingAudio.removeAttribute('src'); els.togglePlayback.disabled = true; return; }
   const file = `${state.bundleManifest.assets.audio_root}/${baseFile}`;
-  els.backingAudio.src = state.transpose && RUNTIME_CONFIG.transposeUrlTemplate
+  const source = state.transpose && RUNTIME_CONFIG.transposeUrlTemplate
     ? RUNTIME_CONFIG.transposeUrlTemplate
       .replace('{file}', encodeURIComponent(file))
       .replace('{semitones}', encodeURIComponent(state.transpose))
     : file;
+  if (els.backingAudio.getAttribute('src') !== source) {
+    els.backingAudio.src = source;
+    els.backingAudio.load();
+  }
   els.togglePlayback.disabled = false;
   syncBackingLevel();
   els.backingAudio.playbackRate = state.usesPreRenderedSpeed ? 1 : speed;
   els.backingAudio.preservesPitch = true;
   configureVoiceStems();
+}
+
+function waitForMediaReady(media, minimumReadyState = 1, timeoutMs = 8000) {
+  if (!media || media.readyState >= minimumReadyState || media.error) return Promise.resolve();
+  return new Promise((resolve) => {
+    const eventName = minimumReadyState >= 3 ? 'canplay' : 'loadedmetadata';
+    let timeout;
+    const finish = () => {
+      clearTimeout(timeout);
+      media.removeEventListener(eventName, finish);
+      media.removeEventListener('error', finish);
+      resolve();
+    };
+    media.addEventListener(eventName, finish, { once: true });
+    media.addEventListener('error', finish, { once: true });
+    timeout = setTimeout(finish, timeoutMs);
+    media.load();
+  });
+}
+
+function waitForMediaSeek(media, timeoutMs = 2000) {
+  if (!media?.seeking) return Promise.resolve();
+  return new Promise((resolve) => {
+    let timeout;
+    const finish = () => {
+      clearTimeout(timeout);
+      media.removeEventListener('seeked', finish);
+      media.removeEventListener('error', finish);
+      resolve();
+    };
+    media.addEventListener('seeked', finish, { once: true });
+    media.addEventListener('error', finish, { once: true });
+    timeout = setTimeout(finish, timeoutMs);
+  });
+}
+
+async function applyVoiceSelection(selectedVoiceIds) {
+  const changeToken = ++state.voiceMixChangeToken;
+  const snapshot = state.clock.snapshot();
+  const shouldResume = state.clock.running || state.voiceMixResumeRequested;
+  state.voiceMixResumeRequested = shouldResume;
+  if (state.clock.running) {
+    state.clock.pause();
+    updatePlaybackButton();
+  }
+  state.selectedVoiceIds = new Set(selectedVoiceIds);
+  configureBacking();
+  renderVoiceMixer();
+  if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(Number(els.playbackSpeed.value));
+  else state.clock.setSpeed(Number(els.playbackSpeed.value));
+
+  const media = [els.backingAudio, ...state.voiceStemAudio.values()];
+  await Promise.all(media.map((item) => waitForMediaReady(item, shouldResume ? 3 : 1)));
+  if (changeToken !== state.voiceMixChangeToken) return;
+  if (els.backingAudio.readyState >= 1) {
+    state.clock.seekPerformanceTime(snapshot.performanceTime);
+    await waitForMediaSeek(els.backingAudio);
+    state.pendingAudioTime = null;
+  } else {
+    state.pendingAudioTime = snapshot.performanceTime;
+  }
+  for (const audio of state.voiceStemAudio.values()) {
+    if (audio.readyState >= 1) audio.currentTime = els.backingAudio.currentTime;
+  }
+
+  if (shouldResume) {
+    try {
+      await state.playbackMixer.resume(media);
+      syncBackingLevel();
+      syncVoiceStemLevels();
+      await state.clock.play();
+    } catch (error) {
+      console.error('Voice mix change failed', error);
+      showToast('Cambio del mix non riuscito. Riprova.');
+    }
+  }
+  state.voiceMixResumeRequested = false;
+  updatePlaybackButton();
+  render();
 }
 
 function buildScoreGeometry(partId) {
@@ -3019,14 +3113,10 @@ function bindControls() {
   });
   els.voiceMixerClose.addEventListener('click', () => els.voiceMixerDialog.close());
   els.voiceMixerOwn.addEventListener('click', () => {
-    state.selectedVoiceIds = new Set([state.runtime.selectedPartId]);
-    configureVoiceStems(); renderVoiceMixer();
-    if (state.clock.running) void playVoiceStems();
+    void applyVoiceSelection([state.runtime.selectedPartId]);
   });
   els.voiceMixerAll.addEventListener('click', () => {
-    state.selectedVoiceIds = new Set(Object.keys(state.backingManifest?.voice_stems ?? {}));
-    configureVoiceStems(); renderVoiceMixer();
-    if (state.clock.running) void playVoiceStems();
+    void applyVoiceSelection(Object.keys(state.backingManifest?.voice_stems ?? {}));
   });
   window.addEventListener('pagehide', savePreferences);
   els.exercise.addEventListener('click', () => {

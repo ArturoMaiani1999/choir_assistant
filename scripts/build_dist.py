@@ -181,6 +181,8 @@ def build_piece(piece: dict, destination: Path) -> dict:
     for mix in audio_manifest.get("mixes", {}).values():
         required.add(mix["file"])
         required.update(mix.get("files_by_speed", {}).values())
+    if audio_manifest.get("full_mix_file"):
+        required.add(audio_manifest["full_mix_file"])
     if audio_manifest.get("accompaniment_file"):
         required.add(audio_manifest["accompaniment_file"])
     required.update(audio_manifest.get("voice_stems", {}).values())

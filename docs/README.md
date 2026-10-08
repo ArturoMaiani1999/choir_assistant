@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-04
+**Last reviewed:** 2026-10-05
 
 This directory separates current contracts and procedures from historical
 investigation. If two documents disagree, the canonical documents listed here
@@ -32,6 +32,12 @@ take precedence over anything under `archive/`.
 
 - [Pitch tracking](engineering/pitch-tracking/README.md) — current contract,
   tracker, validation and expert material.
+
+## Business
+
+- [500-user cost model](business/500-user-cost-model.md) — first- and
+  second-year costs, licensing assumptions, price sensitivity and public-domain
+  alternative for a 500-user commercial service.
 
 ## Operations
 

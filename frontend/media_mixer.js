@@ -6,6 +6,41 @@
     return Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : 0;
   }
 
+  function buildMediaPlaybackPlan({
+    mixFile = null,
+    accompanimentFile = null,
+    voiceStems = {},
+    selectedVoiceIds = [],
+  } = {}) {
+    const availableStems = Object.entries(voiceStems ?? {})
+      .filter(([partId, file]) => Boolean(partId) && Boolean(file));
+    const selected = new Set(selectedVoiceIds ?? []);
+    const selectedStems = availableStems
+      .filter(([partId]) => selected.has(partId))
+      .map(([partId, file]) => ({ partId, file }));
+    const useFullMix = Boolean(mixFile)
+      && availableStems.length > 0
+      && selectedStems.length === availableStems.length;
+
+    if (useFullMix) {
+      return {
+        kind: 'full-mix',
+        masterFile: mixFile,
+        silentMaster: false,
+        voiceStems: [],
+      };
+    }
+
+    return {
+      kind: 'stem-mix',
+      masterFile: accompanimentFile || mixFile || null,
+      // Without accompaniment, the full score is only the media clock while
+      // the selected stems provide the audible output.
+      silentMaster: !accompanimentFile && availableStems.length > 0,
+      voiceStems: selectedStems,
+    };
+  }
+
   class MediaElementMixer {
     constructor({ AudioContextClass = global.AudioContext || global.webkitAudioContext } = {}) {
       this.AudioContextClass = AudioContextClass;
@@ -93,7 +128,7 @@
     }
   }
 
-  const api = { MediaElementMixer, clampLevel };
+  const api = { MediaElementMixer, clampLevel, buildMediaPlaybackPlan };
   global.ChoirMedia = Object.freeze(api);
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

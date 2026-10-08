@@ -552,6 +552,7 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
             (asset_root / "audio-manifest.json").write_text(json.dumps({
                 "score_version_id": metadata["score_version_id"], "timeline_hash": timeline_hash,
                 "mixes": {part_id: {"file": "score.mp3", "files_by_speed": {}} for part_id in part_ids},
+                "full_mix_file": "score.mp3",
                 "accompaniment_file": metadata.get("accompaniment_file"),
                 "voice_stems": metadata.get("voice_stems", {}),
             }), encoding="utf-8")

@@ -137,6 +137,37 @@ def main() -> int:
                     + json.dumps(diagnostics, ensure_ascii=False)
                 )
 
+            voice_mix = evaluate(socket, call_id, """(async () => {
+              const allIds = Object.keys(state.backingManifest?.voice_stems ?? {});
+              await state.playbackMixer.resume([els.backingAudio, ...state.voiceStemAudio.values()]);
+              await state.clock.play();
+              await new Promise(resolve => setTimeout(resolve, 250));
+              const beforeSwitch = state.clock.snapshot().performanceTime;
+              const canSeekToBefore = () => [...Array(els.backingAudio.seekable.length).keys()]
+                .some(index => els.backingAudio.seekable.start(index) <= beforeSwitch
+                  && els.backingAudio.seekable.end(index) + .01 >= beforeSwitch);
+              await applyVoiceSelection(allIds);
+              const full = {
+                kind: state.playbackPlan?.kind,
+                stems: state.voiceStemAudio.size,
+                source: document.querySelector('#backing-audio')?.currentSrc,
+                running: state.clock.running,
+                canSeek: canSeekToBefore(),
+                performanceTime: state.clock.snapshot().performanceTime
+              };
+              await applyVoiceSelection([state.runtime.selectedPartId]);
+              const own = {
+                kind: state.playbackPlan?.kind,
+                stems: state.voiceStemAudio.size,
+                source: document.querySelector('#backing-audio')?.currentSrc,
+                running: state.clock.running,
+                canSeek: canSeekToBefore(),
+                performanceTime: state.clock.snapshot().performanceTime
+              };
+              state.clock.pause();
+              return {available: allIds.length, beforeSwitch, full, own};
+            })()""")
+            call_id += 1
             microphone = evaluate(socket, call_id, """(async () => {
               await toggleMicrophone();
               await new Promise(resolve => setTimeout(resolve, 700));
@@ -198,6 +229,15 @@ def main() -> int:
             assert result["plumeWidth"] == 2.5 and result["plumeWidthSlider"] == "250" and result["plumeWidthLabel"] == "250%", result
             assert result["transposeChoices"] == 1 and result["diagnosticsHidden"], result
             assert result["scoreReady"] and f"/library-assets/{expected_piece}/" in result["audioSource"], result
+            if voice_mix["available"]:
+                assert voice_mix["full"]["kind"] == "full-mix" and voice_mix["full"]["stems"] == 0, voice_mix
+                assert voice_mix["full"]["source"].endswith("/score.mp3"), voice_mix
+                assert voice_mix["own"]["kind"] == "stem-mix" and voice_mix["own"]["stems"] == 1, voice_mix
+                assert voice_mix["full"]["running"] and voice_mix["own"]["running"], voice_mix
+                if voice_mix["full"]["canSeek"]:
+                    assert voice_mix["full"]["performanceTime"] >= voice_mix["beforeSwitch"] - .1, voice_mix
+                if voice_mix["own"]["canSeek"]:
+                    assert voice_mix["own"]["performanceTime"] >= voice_mix["beforeSwitch"] - .1, voice_mix
             assert microphone == {"status": "active", "worker": True, "workerDisabled": False}, microphone
             assert resize["score"] != resize["before"]["score"], resize
             assert resize["bitmap"] != resize["before"]["bitmap"] and resize["bitmap"] == resize["expected"], resize
@@ -286,6 +326,7 @@ def main() -> int:
                 "defaultPlumeWidth": result["plumeWidthLabel"],
                 "resourceCount": len(result["resources"]),
                 "microphone": microphone,
+                "voiceMix": voice_mix,
                 "dividerResize": resize,
                 "externalRequests": external,
                 "errors": result["errors"],

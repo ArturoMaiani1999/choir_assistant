@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict');
-const { MediaElementMixer } = require('./media_mixer.js');
+const { MediaElementMixer, buildMediaPlaybackPlan } = require('./media_mixer.js');
 
 function fakeMedia() {
   return {
@@ -44,6 +44,33 @@ class FakeAudioContext {
 }
 
 async function run() {
+  const manifest = {
+    mixFile: 'score.mp3',
+    accompanimentFile: 'accompaniment.mp3',
+    voiceStems: { P1: 'voice-P1.mp3', P2: 'voice-P2.mp3', P3: 'voice-P3.mp3', P4: 'voice-P4.mp3' },
+  };
+  assert.deepEqual(buildMediaPlaybackPlan({ ...manifest, selectedVoiceIds: ['P1'] }), {
+    kind: 'stem-mix', masterFile: 'accompaniment.mp3', silentMaster: false,
+    voiceStems: [{ partId: 'P1', file: 'voice-P1.mp3' }],
+  });
+  assert.deepEqual(buildMediaPlaybackPlan({ ...manifest, selectedVoiceIds: ['P1', 'P2', 'P3', 'P4'] }), {
+    kind: 'full-mix', masterFile: 'score.mp3', silentMaster: false, voiceStems: [],
+  }, 'all voices must use one pre-rendered stream on every device');
+  assert.deepEqual(buildMediaPlaybackPlan({
+    mixFile: 'score.mp3', voiceStems: { P1: 'voice-P1.mp3', P2: 'voice-P2.mp3' }, selectedVoiceIds: ['P2'],
+  }), {
+    kind: 'stem-mix', masterFile: 'score.mp3', silentMaster: true,
+    voiceStems: [{ partId: 'P2', file: 'voice-P2.mp3' }],
+  });
+  assert.deepEqual(buildMediaPlaybackPlan({
+    mixFile: 'score.mp3', voiceStems: { P1: 'voice-P1.mp3' }, selectedVoiceIds: ['P1'],
+  }), {
+    kind: 'full-mix', masterFile: 'score.mp3', silentMaster: false, voiceStems: [],
+  }, 'a monodic full selection must not keep a muted master plus a second decoder');
+  assert.deepEqual(buildMediaPlaybackPlan({ mixFile: 'score.mp3', selectedVoiceIds: [] }), {
+    kind: 'stem-mix', masterFile: 'score.mp3', silentMaster: false, voiceStems: [],
+  }, 'a non-separable score remains ordinary single-stream playback');
+
   const media = fakeMedia();
   const mixer = new MediaElementMixer({ AudioContextClass: FakeAudioContext });
 
