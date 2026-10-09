@@ -57,6 +57,12 @@ assert.deepEqual(guidedIntro.events.slice(0, 3).map(event => event.midi), guided
   'each plucked attack introduces the same note that the strings sustain');
 assert.equal(guidedIntro.scoring.holdSeconds, 1.5);
 assert.equal(lab.buildRepeatTimeline({ midi: 64 }, 1, () => .5).scoring.holdSeconds, 3);
+assert.ok(Math.abs(lab.referenceNormalizationGain(.02, .1) - 6.5) < 1e-9,
+  'quiet voice samples are normalized to the reference RMS');
+assert.ok(Math.abs(lab.referenceNormalizationGain(.01, .8) - 2.8125) < 1e-9,
+  'high-crest samples retain peak headroom at the maximum volume');
+assert.ok(Math.abs(lab.referenceNormalizationGain(.2, .8) - .65) < 1e-9,
+  'already loud samples are only attenuated enough to reach the reference RMS');
 for (const midi of [40, 48, 55, 64, 72, 77]) {
   const timeline = lab.buildRepeatTimeline({ midi }, 0, () => .5);
   assert.equal(timeline.events.at(-1).midi, midi, 'SATB targets retain their MIDI octave');

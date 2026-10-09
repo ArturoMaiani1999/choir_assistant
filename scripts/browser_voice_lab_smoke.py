@@ -200,6 +200,10 @@ def main() -> int:
                 assert voice["transitionEnd"] > voice["scoringAt"] + 1, voice
                 assert voice["anchor"] in (50, 56, 62, 67) and voice["role"] == "tenor", voice
                 assert voice["sampleRms"] > .001, voice
+                combined_string_rms = math.sqrt(sum(event["estimatedRms"] ** 2 for event in string_events))
+                assert voice["normalizationGain"] >= .6, voice
+                assert voice["estimatedSustainedRms"] >= combined_string_rms * .95, {
+                    "voice": voice, "strings": string_events, "combinedStringRms": combined_string_rms}
                 assert early["state"] in ("ASCOLTA", "LA TUA NOTA", "CERCA LA NOTA", "STABILIZZA"), early
                 assert early["progressVisible"] and early["success"]["visible"], early
                 assert early["success"]["state"] in ("NOTA TROVATA", "NOTA CENTRATA"), early

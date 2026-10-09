@@ -365,14 +365,16 @@
       if (!response.ok) throw new Error(`Muse Choir ${role} non disponibile`);
       return response.arrayBuffer();
     }).then((data) => audioContext().decodeAudioData(data)).then((buffer) => {
-      let sumSquares = 0, samples = 0;
+      let sumSquares = 0, samples = 0, peak = 0;
       for (let channel = 0; channel < buffer.numberOfChannels; channel += 1) {
         const data = buffer.getChannelData(channel);
-        for (let index = 0; index < data.length; index += 1) { sumSquares += data[index] * data[index]; samples += 1; }
+        for (let index = 0; index < data.length; index += 1) {
+          sumSquares += data[index] * data[index]; samples += 1; peak = Math.max(peak, Math.abs(data[index]));
+        }
       }
       const rms = samples ? Math.sqrt(sumSquares / samples) : 0;
       if (rms < .0001) throw new Error(`Campione Muse Choir ${role} silenzioso`);
-      return { buffer, anchor, role, rms };
+      return { buffer, anchor, role, rms, peak, normalizationGain: Core.referenceNormalizationGain(rms, peak) };
     });
     state.voiceBuffers.set(key, pending);
     try { const asset = await pending; state.voiceBuffers.set(key, asset); return asset; }
@@ -448,11 +450,14 @@
     source.buffer = asset.buffer; source.playbackRate.value = 2 ** ((note.midi - anchor) / 12); source.loop = false;
     if (asset.buffer.duration / source.playbackRate.value < duration) throw new Error('Campione Muse Choir troppo corto');
     const fadeStart = Math.max(at + .08, at + duration - diminuendoSeconds);
-    gain.gain.setValueAtTime(.0001, at); gain.gain.exponentialRampToValueAtTime(gainValue, at + .12);
-    gain.gain.setValueAtTime(gainValue, fadeStart); gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
+    const normalizedGain = gainValue * asset.normalizationGain;
+    gain.gain.setValueAtTime(.0001, at); gain.gain.exponentialRampToValueAtTime(normalizedGain, at + .12);
+    gain.gain.setValueAtTime(normalizedGain, fadeStart); gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
     source.connect(gain).connect(voiceOutput()); source.start(at); source.stop(at + duration + .03);
     reportAudioEvent('voice', at, { end: at + duration, diminuendoStart: fadeStart, midi: note.midi, anchor,
-      role: state.role, gain: gainValue, sampleRms: asset.rms, sourceDuration: asset.buffer.duration }); return { source, gain };
+      role: state.role, gain: gainValue, normalizedGain, normalizationGain: asset.normalizationGain,
+      estimatedRms: asset.rms * normalizedGain * state.voiceVolume,
+      sampleRms: asset.rms, samplePeak: asset.peak, sourceDuration: asset.buffer.duration }); return { source, gain };
   }
   function playGuidingVoice(note, at, scoringAt, endAt) {
     const anchor = choirAnchor(note), asset = state.voiceBuffers.get(`${state.role}-${anchor}`);
@@ -462,17 +467,23 @@
     const available = asset.buffer.duration / source.playbackRate.value;
     if (available < endAt - at) throw new Error('Campione Muse Choir troppo corto');
     const transitionEnd = Math.min(endAt - .45, scoringAt + 1.4);
+    const previewGain = .18, sustainedGain = .035;
+    const normalizedPreviewGain = previewGain * asset.normalizationGain;
+    const normalizedSustainedGain = sustainedGain * asset.normalizationGain;
     gain.gain.setValueAtTime(.0001, at);
-    gain.gain.exponentialRampToValueAtTime(.18, at + .14);
-    gain.gain.setValueAtTime(.18, at + .22);
+    gain.gain.exponentialRampToValueAtTime(normalizedPreviewGain, at + .14);
+    gain.gain.setValueAtTime(normalizedPreviewGain, at + .22);
     // One uninterrupted, gentle slope bridges the presentation beat and the
     // sustained accompaniment; no gain breakpoint is placed on the bar line.
-    gain.gain.exponentialRampToValueAtTime(.035, transitionEnd);
-    gain.gain.setValueAtTime(.035, Math.max(transitionEnd, endAt - .45));
+    gain.gain.exponentialRampToValueAtTime(normalizedSustainedGain, transitionEnd);
+    gain.gain.setValueAtTime(normalizedSustainedGain, Math.max(transitionEnd, endAt - .45));
     gain.gain.exponentialRampToValueAtTime(.0001, endAt);
     source.connect(gain).connect(voiceOutput()); source.start(at); source.stop(endAt + .03);
-    reportAudioEvent('voice', at, { end: endAt, scoringAt, transitionEnd, sustainedGain: .035, midi: note.midi,
-      anchor, role: state.role, gain: .18, sampleRms: asset.rms, sourceDuration: asset.buffer.duration });
+    reportAudioEvent('voice', at, { end: endAt, scoringAt, transitionEnd, sustainedGain, midi: note.midi,
+      anchor, role: state.role, gain: previewGain, normalizedPreviewGain, normalizedSustainedGain,
+      normalizationGain: asset.normalizationGain, estimatedPreviewRms: asset.rms * normalizedPreviewGain * state.voiceVolume,
+      estimatedSustainedRms: asset.rms * normalizedSustainedGain * state.voiceVolume,
+      sampleRms: asset.rms, samplePeak: asset.peak, sourceDuration: asset.buffer.duration });
     return source;
   }
   function playPluck(event, at, beatSeconds) {
@@ -505,7 +516,9 @@
       gain.gain.exponentialRampToValueAtTime(.0001, endAt);
       source.connect(gain).connect(context.destination);
       source.start(at); source.stop(endAt + .03);
-      reportAudioEvent('string-layer', at, { midi: event.midi, end: endAt, gain: sustainGain, beat: event.beat });
+      reportAudioEvent('string-layer', at, { midi: event.midi, end: endAt, gain: sustainGain, beat: event.beat,
+        sampleRms: asset.rms, normalizationGain: asset.normalizationGain,
+        estimatedRms: asset.rms * asset.normalizationGain * .72 * sustainGain });
       return source;
     });
   }

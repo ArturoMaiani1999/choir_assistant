@@ -82,6 +82,20 @@
     return index === 0 ? 'guided' : 'full';
   }
 
+  function referenceNormalizationGain(rms, peak, {
+    targetRms = .13,
+    maximumGain = 8,
+    minimumGain = .6,
+    loudestCueGain = .2,
+    maximumVolume = 2,
+    peakCeiling = .9,
+  } = {}) {
+    if (!(rms > 0) || !(peak > 0)) return 1;
+    const rmsGain = targetRms / rms;
+    const peakSafeGain = peakCeiling / (peak * loudestCueGain * maximumVolume);
+    return clamp(Math.min(rmsGain, peakSafeGain), minimumGain, maximumGain);
+  }
+
   function buildRepeatTimeline(note, index = 0, random = Math.random) {
     const targetMidi = note?.midi;
     if (!Number.isInteger(targetMidi)) throw new RangeError('Nota target non valida');
@@ -458,7 +472,7 @@
     return { competencies, blocks: blocks.slice(0, 4), estimatedMinutes: Math.max(3, Math.min(8, blocks.length * 2)) };
   }
 
-  return { INTERVALS, LEVEL_INTERVALS, ROLE_INTERVAL_BASES, INTERVAL_TIMING, ROLL_VISIBLE_MEASURES, rollPixelsPerSecond, HARMONY_RANGE, TARGET_BAND_HALF_WIDTH_CENTS, REPEAT_LEVELS, repeatLevelForIndex, buildRepeatTimeline, buildIntervalPreviewTimeline, midiToHz, midiToName, centsBetween, validateRange, randomNote, allowedIntervals, planHarmony,
+  return { INTERVALS, LEVEL_INTERVALS, ROLE_INTERVAL_BASES, INTERVAL_TIMING, ROLL_VISIBLE_MEASURES, rollPixelsPerSecond, HARMONY_RANGE, TARGET_BAND_HALF_WIDTH_CENTS, REPEAT_LEVELS, repeatLevelForIndex, referenceNormalizationGain, buildRepeatTimeline, buildIntervalPreviewTimeline, midiToHz, midiToName, centsBetween, validateRange, randomNote, allowedIntervals, planHarmony,
     generateInterval, generateScoredInterval, definition, result, analyseSustained, analyseSungInterval, EARLY_COMPLETION_DEFAULTS,
     evaluatePitchProgress, pitchTrialOutcome, buildInitialPitchSession, buildEarTrainingBlock, scheduleEarRetry, buildSingingIntervalBlock, rollPitchBounds,
     deriveCompetencies, extractRepertoirePhrase, competencePriority, categoriesConsolidated, buildRecommendedSession };
