@@ -694,7 +694,7 @@ def main() -> int:
               mixerButton.click();
               const mixerOpensPaused = mixerDialog.open && audio.paused;
               const mixerChannels = [...document.querySelectorAll('#viewer-mixer-options input[type="checkbox"]')];
-              for (const channel of mixerChannels.slice(0, 2)) {
+              for (const channel of mixerChannels.slice(0, 1)) {
                 channel.click();
                 await new Promise(resolve => setTimeout(resolve, 220));
               }
@@ -716,7 +716,17 @@ def main() -> int:
               const audio = document.querySelector('#viewer-audio');
               await new Promise(resolve => setTimeout(resolve, 150));
               const keyboardResumesAfterMixer = !audio.paused;
-              return {keyboardResumesAfterMixer};
+              const startTime = audio.currentTime;
+              const startClock = Number(document.querySelector('#viewer-pages').dataset.playbackSeconds);
+              const startPlayhead = document.querySelector('.viewer-playhead.is-active');
+              const startCursor = {page:startPlayhead?.parentElement?.dataset.page,
+                left:startPlayhead?.style.left, top:startPlayhead?.style.top};
+              await new Promise(resolve => setTimeout(resolve, 700));
+              const endPlayhead = document.querySelector('.viewer-playhead.is-active');
+              return {keyboardResumesAfterMixer, organDisabled:!document.querySelector('#viewer-mixer-options input')?.checked,
+                startTime, endTime:audio.currentTime, startClock,
+                endClock:Number(document.querySelector('#viewer-pages').dataset.playbackSeconds), startCursor,
+                endCursor:{page:endPlayhead?.parentElement?.dataset.page,left:endPlayhead?.style.left,top:endPlayhead?.style.top}};
             })()""")
             call_id += 1
             command(socket, call_id, "Input.dispatchKeyEvent", {
@@ -726,6 +736,30 @@ def main() -> int:
             command(socket, call_id, "Input.dispatchKeyEvent", {
                 "type": "keyUp", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
             })
+            call_id += 1
+            viewer_score_navigation = evaluate(socket, call_id, r"""(async () => {
+              const audio = document.querySelector('#viewer-audio');
+              await new Promise(resolve => setTimeout(resolve, 80));
+              const targets = [...document.querySelectorAll('.viewer-measure-hit')];
+              const target = targets[Math.min(2, targets.length - 1)];
+              const rect = target.getBoundingClientRect();
+              target.dispatchEvent(new MouseEvent('click', {bubbles:true, detail:1,
+                clientX:rect.left + rect.width * .65, clientY:rect.top + rect.height / 2}));
+              for (let i = 0; i < 40 && audio.paused; i++) await new Promise(resolve => setTimeout(resolve, 50));
+              await new Promise(resolve => setTimeout(resolve, 100));
+              const expectedSeconds = Number(document.querySelector('#viewer-pages').dataset.lastSeekSeconds);
+              const scoreClick = {playing:!audio.paused, currentTime:audio.currentTime, expectedSeconds,
+                measure:document.querySelector('#viewer-pages').dataset.lastSeekMeasure};
+              if (!audio.paused) document.querySelector('#viewer-play').click();
+              document.querySelector('#viewer-restart').click();
+              for (let i = 0; i < 40 && audio.paused; i++) await new Promise(resolve => setTimeout(resolve, 50));
+              await new Promise(resolve => setTimeout(resolve, 100));
+              const restart = {playing:!audio.paused, currentTime:audio.currentTime,
+                seekBeat:Number(document.querySelector('#viewer-pages').dataset.lastSeekBeat)};
+              if (!audio.paused) document.querySelector('#viewer-play').click();
+              return {targetCount:targets.length, restartButton:Boolean(document.querySelector('#viewer-restart')),
+                scoreClick, restart};
+            })()""")
             call_id += 1
             viewer = evaluate(socket, call_id, r"""(async () => {
               const audio = document.querySelector('#viewer-audio');
@@ -765,6 +799,7 @@ def main() -> int:
             viewer.update(viewer_start)
             viewer.update(viewer_state)
             viewer.update(viewer_resume)
+            viewer.update(viewer_score_navigation)
 
             viewer_external = []
             for resource in viewer["resources"]:
@@ -780,10 +815,17 @@ def main() -> int:
             assert viewer["activePlayheads"] == 1, viewer
             assert 0 < viewer["activePlayheadHeight"] < viewer["pageHeight"], viewer
             assert viewer["audioTransport"] and viewer["playheadCount"] == viewer["pageCount"], viewer
+            assert viewer["targetCount"] == viewer["writtenMeasures"] and viewer["restartButton"], viewer
+            assert viewer["scoreClick"]["playing"] and viewer["scoreClick"]["expectedSeconds"] > 0, viewer
+            assert abs(viewer["scoreClick"]["currentTime"] - viewer["scoreClick"]["expectedSeconds"]) < .35, viewer
+            assert viewer["restart"]["playing"] and viewer["restart"]["seekBeat"] == 0, viewer
+            assert viewer["restart"]["currentTime"] < .5, viewer
             assert viewer["keyboardStartedPlayback"] and viewer["spaceDidNotOpenMixer"], viewer
             assert viewer["keyboardPausedPlayback"], viewer
             assert viewer["mixerOpensPaused"] and viewer["mixerChannels"] >= 2, viewer
             assert viewer["mixerEditsStayPaused"] and viewer["keyboardResumesAfterMixer"], viewer
+            assert viewer["organDisabled"] and viewer["endClock"] > viewer["startClock"] + .4, viewer
+            assert viewer["endCursor"] != viewer["startCursor"], viewer
             assert viewer["getUserMediaCalls"] == 0, viewer
             assert not viewer["hasPitchUi"], viewer
             assert not viewer["forbiddenResources"], viewer

@@ -5,7 +5,7 @@
   const elementIds = {
     back: 'viewer-back', title: 'viewer-title', piece: 'viewer-piece', pages: 'viewer-pages', status: 'viewer-status',
     position: 'viewer-page-position', zoomOut: 'viewer-zoom-out', zoomFit: 'viewer-zoom-fit', zoomIn: 'viewer-zoom-in',
-    play: 'viewer-play', mixerOpen: 'viewer-mixer-open', mixer: 'viewer-mixer', mixerOptions: 'viewer-mixer-options',
+    restart: 'viewer-restart', play: 'viewer-play', mixerOpen: 'viewer-mixer-open', mixer: 'viewer-mixer', mixerOptions: 'viewer-mixer-options',
     mixerClose: 'viewer-mixer-close', audio: 'viewer-audio', time: 'viewer-time',
   };
   const els = Object.fromEntries(Object.entries(elementIds).map(([key, id]) => [key, document.getElementById(id)]));
@@ -14,6 +14,8 @@
   let library = [], pageObserver = null, zoom = 960, loadGeneration = 0;
   let runtime = null, audioManifest = null, bundle = null, activeElements = [], voiceElements = new Map(), raf = 0, playbackPosition = 0;
   let selections = { accompaniment: true, voices: new Set() }, pageCount = 0, lastCursorPage = -1, fullScoreSlots = [];
+  let transportStartedAt = null, transportStartedPosition = 0;
+  const seekableAudioUrls = new Map();
   const paperPreferenceKey = 'choir-score-paper:v1';
   const paperColors = new Set(['#c3c0b6', '#e3e8e6', '#ffffff']);
 
@@ -59,8 +61,36 @@
     });
   }
   function stopActive() { activeElements.forEach((audio) => { audio.pause(); mixer.release(audio); }); activeElements = []; voiceElements.clear(); }
-  async function applyMix({ resume = !els.audio.paused, time = activeElements.length ? els.audio.currentTime : playbackPosition } = {}) {
+  function clearSeekableAudioUrls() { for (const url of seekableAudioUrls.values()) URL.revokeObjectURL(url); seekableAudioUrls.clear(); }
+  function waitForMetadata(audio) {
+    return new Promise((resolve,reject)=>{
+      if(audio.readyState>=1){resolve();return;}
+      const cleanup=()=>{audio.removeEventListener('loadedmetadata',ready);audio.removeEventListener('error',failed);};
+      const ready=()=>{cleanup();resolve();},failed=()=>{cleanup();reject(new Error('Audio non disponibile'));};
+      audio.addEventListener('loadedmetadata',ready,{once:true});audio.addEventListener('error',failed,{once:true});
+    });
+  }
+  async function makeAudioRandomAccess(audio) {
+    if (!audio || audio.src.startsWith('blob:')) return;
+    const source=audio.currentSrc||audio.src; if(!source)return;
+    let blobUrl=seekableAudioUrls.get(source);
+    if(!blobUrl){const response=await fetch(source,{cache:'force-cache'});if(!response.ok)throw new Error('Audio non disponibile');blobUrl=URL.createObjectURL(await response.blob());seekableAudioUrls.set(source,blobUrl);}
+    audio.pause();audio.dataset.originalSource=source;audio.src=blobUrl;audio.load();await waitForMetadata(audio);
+  }
+  async function ensureRandomAccess(seconds) {
+    if (seconds<=.05||Math.abs((els.audio.currentTime||0)-seconds)<.08)return;
+    els.pages.classList.add('is-audio-seeking');
+    try { await Promise.all(activeElements.map(makeAudioRandomAccess)); }
+    finally { els.pages.classList.remove('is-audio-seeking'); }
+  }
+  function transportSeconds() {
+    if (transportStartedAt == null || els.audio.paused) return Math.max(0, els.audio.currentTime || playbackPosition);
+    const elapsed = Math.max(0, (performance.now()-transportStartedAt)/1000);
+    return Math.max(els.audio.currentTime || 0, transportStartedPosition+elapsed);
+  }
+  async function applyMix({ resume = !els.audio.paused, time = activeElements.length ? transportSeconds() : playbackPosition } = {}) {
     if (!audioManifest) return;
+    playbackPosition=Math.max(0,Number(time)||0);
     const plan = selectedPlan();
     if (plan.kind === 'muted') { playbackPosition = Math.max(0,time); stopActive(); els.audio.removeAttribute('src'); els.audio.load(); els.play.textContent = '▶ Play'; els.play.setAttribute('aria-pressed','false'); return; }
     const wasPlaying = resume; stopActive();
@@ -170,9 +200,57 @@
     const progress=Math.max(0,Math.min(1,(safeBeat-occurrence.startBeat)/Math.max(.001,occurrence.endBeat-occurrence.startBeat)));
     return {...slot,x:slot.startX+(slot.endX-slot.startX)*progress,measureNumber:runtime.measures[measureIndex]?.number??'?'};
   }
+  function occurrenceForWrittenMeasure(measureIndex) {
+    const writtenMeasure = runtime?.measures?.[measureIndex];
+    if (!writtenMeasure) return null;
+    const occurrences = (runtime.performanceOccurrences ?? []).filter((item)=>item.writtenMeasureId===writtenMeasure.id);
+    if (!occurrences.length) return null;
+    const currentBeat = runtime.beatAtSeconds(els.audio.currentTime || playbackPosition);
+    return occurrences.find((item)=>item.startBeat<=currentBeat&&currentBeat<item.endBeat)
+      ?? occurrences.find((item)=>item.startBeat>=currentBeat-.001) ?? occurrences[0];
+  }
+  function setPlaybackTime(seconds) {
+    const safeSeconds = Math.max(0, Number(seconds) || 0); playbackPosition = safeSeconds;
+    transportStartedPosition=safeSeconds;transportStartedAt=els.audio.paused?null:performance.now();
+    for (const audio of activeElements) {
+      try { audio.currentTime = safeSeconds; } catch (_) { /* Metadata retry occurs when playback starts. */ }
+    }
+    try { els.audio.currentTime = safeSeconds; } catch (_) {}
+    lastCursorPage = -1; updateCursor();
+  }
+  async function startFromBeat(beat) {
+    if (!runtime) return;
+    const safeBeat = Math.max(0, Math.min(totalBeats(), Number(beat) || 0));
+    const seconds = runtime.secondsAtBeat(safeBeat); setPlaybackTime(seconds); await ensureRandomAccess(seconds); setPlaybackTime(seconds);
+    els.pages.dataset.lastSeekBeat = String(safeBeat); els.pages.dataset.lastSeekSeconds = String(seconds);
+    await startPlayback();
+  }
+  async function startFromScore(measureIndex, progress = 0) {
+    const occurrence = occurrenceForWrittenMeasure(measureIndex); if (!occurrence) return;
+    const ratio = Math.max(0, Math.min(.999, Number(progress) || 0));
+    const beat = occurrence.startBeat + (occurrence.endBeat - occurrence.startBeat) * ratio;
+    els.pages.dataset.lastSeekMeasure = String(runtime.measures[measureIndex]?.number ?? measureIndex + 1);
+    await startFromBeat(beat);
+  }
+  function installMeasureTargets() {
+    for (const [measureIndex, slot] of fullScoreSlots.entries()) {
+      const page = document.querySelector(`.viewer-page[data-page="${slot.page}"]`); if (!page) continue;
+      const target = document.createElement('button'); target.type = 'button'; target.className = 'viewer-measure-hit';
+      const measureNumber = runtime.measures[measureIndex]?.number ?? measureIndex + 1;
+      target.setAttribute('aria-label', `Riproduci dalla battuta ${measureNumber}`); target.title = `Riproduci dalla battuta ${measureNumber}`;
+      target.dataset.measureIndex = String(measureIndex); target.style.left = `${slot.startX}%`; target.style.top = `${slot.topY}%`;
+      target.style.width = `${slot.endX-slot.startX}%`; target.style.height = `${slot.bottomY-slot.topY}%`;
+      target.addEventListener('click',(event)=>{
+        const rect=target.getBoundingClientRect();
+        const progress=event.detail===0?0:(event.clientX-rect.left)/Math.max(1,rect.width);
+        startFromScore(measureIndex,progress).catch(handlePlaybackError);
+      });
+      page.append(target);
+    }
+  }
   function updateCursor() {
     if (!runtime || !pageCount) return;
-    const seconds = els.audio.currentTime || playbackPosition; playbackPosition = seconds;
+    const seconds = transportSeconds(); playbackPosition = seconds; els.pages.dataset.playbackSeconds=String(seconds);
     const beat = runtime.beatAtSeconds(seconds), position = scorePositionAtBeat(beat);
     const progress = Math.max(0, Math.min(.9999, beat / totalBeats()));
     const pageIndex = position ? position.page - 1 : Math.min(pageCount - 1, Math.floor(progress * pageCount));
@@ -193,10 +271,18 @@
     if (!activeElements.length) await applyMix({ resume:false });
     if (!activeElements.length) return;
     try { await mixer.resume(activeElements); } catch (_) { /* Native playback fallback remains available. */ }
-    await Promise.all(activeElements.map((audio) => { audio.currentTime = els.audio.currentTime; return audio.play(); }));
+    // playbackPosition remains authoritative while a freshly loaded media
+    // element is still reporting zero for a seek it has already accepted.
+    const requestedTime = Math.max(0, playbackPosition);
+    await Promise.all(activeElements.map((audio) => { audio.currentTime = requestedTime; return audio.play(); }));
+    transportStartedPosition=requestedTime;transportStartedAt=performance.now();
     els.play.textContent = 'Ⅱ Pausa'; els.play.setAttribute('aria-pressed','true'); cancelAnimationFrame(raf); raf = requestAnimationFrame(updateCursor);
   }
-  function pausePlayback() { activeElements.forEach((audio) => audio.pause()); els.play.textContent = '▶ Play'; els.play.setAttribute('aria-pressed','false'); cancelAnimationFrame(raf); updateCursor(); }
+  function pausePlayback() {
+    playbackPosition=transportSeconds();transportStartedAt=null;
+    activeElements.forEach((audio) => audio.pause());
+    els.play.textContent = '▶ Play'; els.play.setAttribute('aria-pressed','false'); cancelAnimationFrame(raf); updateCursor();
+  }
   function handlePlaybackError(error) {
     // A rapid play/pause gesture can reject an older play() promise after the
     // audio has already been paused. It is expected and must not replace the score.
@@ -212,7 +298,7 @@
     }
   }
   async function openPiece(pieceId, { updateHistory = true } = {}) {
-    const generation = ++loadGeneration; pausePlayback(); stopActive();
+    const generation = ++loadGeneration; pausePlayback(); stopActive(); clearSeekableAudioUrls();
     const piece = library.find((item) => item.piece_id === pieceId) ?? library[0];
     if (!piece) throw new Error('Non ci sono partiture disponibili');
     setStatus('Preparazione della partitura…'); els.piece.value = piece.piece_id; els.title.textContent = displayTitle(piece);
@@ -241,7 +327,7 @@
       page.append(image,line,caption); fragment.append(page);
     });
     els.pages.replaceChildren(fragment); els.pages.setAttribute('aria-busy','false'); els.position.value=`Pagina 1 / ${sources.length}`; els.position.hidden=false;
-    updateMixerOptions(); await applyMix({ resume:false, time:0 }); observePages(sources.length); window.scrollTo({top:0,behavior:'auto'});
+    installMeasureTargets(); updateMixerOptions(); await applyMix({ resume:false, time:0 }); observePages(sources.length); window.scrollTo({top:0,behavior:'auto'});
   }
   function setZoom(nextZoom) { zoom=Math.max(560,Math.min(1440,nextZoom)); document.body.dataset.zoom='manual'; document.documentElement.style.setProperty('--page-width',`${zoom}px`); }
   function setPaperColor(value,persist=false) {
@@ -262,11 +348,13 @@
     await openPiece(selected,{updateHistory:requested!==selected});
     els.piece.addEventListener('change',()=>openPiece(els.piece.value).catch((error)=>setStatus(error.message,true)));
     els.zoomOut.addEventListener('click',()=>setZoom(zoom-120)); els.zoomIn.addEventListener('click',()=>setZoom(zoom+120)); els.zoomFit.addEventListener('click',()=>{document.body.dataset.zoom='fit';});
+    els.restart.addEventListener('click',()=>startFromBeat(0).catch(handlePlaybackError));
     els.play.addEventListener('click',()=>els.audio.paused?startPlayback().catch(handlePlaybackError):pausePlayback());
     els.mixerOpen.addEventListener('click',()=>{ pausePlayback(); els.mixer.showModal(); });
     els.mixerClose.addEventListener('click',()=>els.mixer.close());
     els.audio.addEventListener('ended',pausePlayback);
     els.audio.addEventListener('timeupdate',synchronizeStems);
+    window.addEventListener('pagehide',clearSeekableAudioUrls);
     document.addEventListener('keydown',(event)=>{
       if (event.code === 'Space') {
         event.preventDefault();
