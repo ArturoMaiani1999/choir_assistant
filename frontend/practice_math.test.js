@@ -46,6 +46,10 @@ const measures = [
 assert.deepEqual(math.measureSeekState(measures, 2), { selectedIndex: 2, playbackStart: 3, scoringStart: 6 });
 assert.deepEqual(math.measureSeekState(measures, 0), { selectedIndex: 0, playbackStart: 0, scoringStart: 0 });
 assert.deepEqual(math.measureSeekState(measures, 2, { preRoll: false }), { selectedIndex: 2, playbackStart: 6, scoringStart: 6 });
+assert.deepEqual(math.attemptResumeState(measures, 7.25), { resumeIndex: 2, playbackStart: 3, scoringStart: 7.25 },
+  'resume keeps the exact checkpoint and starts one complete measure earlier');
+assert.deepEqual(math.attemptResumeState(measures, 1.5), { resumeIndex: 0, playbackStart: 0, scoringStart: 1.5 },
+  'a checkpoint in the first measure cannot seek before the piece');
 assert.equal(math.metronomePerformanceTime(2, 1, 30), 1.97, 'positive offset delays the metronome by 30 wall-clock ms');
 assert.equal(math.metronomePerformanceTime(2, .5, 30), 1.985, 'offset remains 30 wall-clock ms at half speed');
 assert.equal(math.metronomePerformanceTime(2, 1, -50), 2.05, 'negative offset advances the metronome');

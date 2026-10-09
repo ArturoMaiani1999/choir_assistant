@@ -43,6 +43,17 @@
       playbackStart: preRoll ? measures[Math.max(0, safeIndex - 1)]?.startBeat ?? 0 : scoringStart,
       scoringStart };
   }
+  function attemptResumeState(measures, checkpointBeat) {
+    const endBeat = measures.at(-1)?.endBeat ?? 0;
+    const resumeBeat = Math.max(0, Math.min(endBeat, Number(checkpointBeat) || 0));
+    let resumeIndex = measures.findIndex((measure) => measure.startBeat <= resumeBeat && resumeBeat < measure.endBeat);
+    if (resumeIndex < 0) resumeIndex = Math.max(0, measures.length - 1);
+    return {
+      resumeIndex,
+      playbackStart: measures[Math.max(0, resumeIndex - 1)]?.startBeat ?? 0,
+      scoringStart: resumeBeat,
+    };
+  }
   function metronomePerformanceTime(performanceTime, speed, offsetMs) {
     const safeTime = Math.max(0, Number(performanceTime) || 0);
     const safeSpeed = Math.max(.1, Number(speed) || 1);
@@ -82,5 +93,5 @@
     const animating = Math.abs(target.min - bounds.min) > .01 || Math.abs(target.max - bounds.max) > .01;
     return { bounds: animating ? bounds : { ...target }, animating };
   }
-  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, smoothPitchBounds };
+  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, attemptResumeState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, smoothPitchBounds };
 });

@@ -1,5 +1,5 @@
 const { NormalizedScoreRuntime, MediaPlaybackClock } = window.ChoirScore;
-const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, adjacentMelodicIntervals, measureSeekState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
+const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, adjacentMelodicIntervals, measureSeekState, attemptResumeState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
 const { detectPitch, PitchSmoother, OctaveAwarePitchTracker, yinCandidates, decodeYinCandidatePath, mpmCandidates, decodeCrepeProbabilities } = window.ChoirPitch;
 const PitchShared = window.ChoirPitchShared;
 const FluidPitchTrail = window.ChoirFluidPitchTrail;
@@ -62,6 +62,7 @@ const state = {
   occurrenceMeasures: [],
   selectedMeasureIndex: 0,
   scoringStartBeat: 0,
+  resumeCheckpointBeat: null,
   scorePage: 1,
   rafId: null,
   lastAnnouncedState: '',
@@ -783,13 +784,15 @@ function applyPitchEstimate(rawEstimate, beat, sampledAt, analysisMs, running) {
   if (microphoneHelpElement && microphoneHelpElement.textContent !== microphoneHelp) microphoneHelpElement.textContent = microphoneHelp;
 
   // Retain invalid observations too: the renderer must see silence boundaries.
-  if (running || state.displayPitch != null || rawPitch != null) {
+  // Paused listening and the one-measure count-in remain visible in the live
+  // readout, but must never become part of the recorded attempt.
+  const recording = running && state.clock?.running && beat >= state.scoringStartBeat;
+  if (recording) {
     const previous = state.pitchSamples.at(-1);
     const sample = { beat, trackedPitch: state.trackedPitch, displayPitch: state.displayPitch, rawPitch,
       confirmationState: state.pitchConfirmationState,
       confidence: estimate.confidence, clarity: estimate.clarity, takeId: state.pitchTakeId };
-    if (!running && previous?.takeId === state.pitchTakeId && Math.abs(beat - previous.beat) < .025) state.pitchSamples[state.pitchSamples.length - 1] = sample;
-    else if (!previous || previous.takeId !== state.pitchTakeId || beat - previous.beat >= .025) state.pitchSamples.push(sample);
+    if (!previous || previous.takeId !== state.pitchTakeId || beat - previous.beat >= .025) state.pitchSamples.push(sample);
   }
   if (state.pitchSamples.length > 12000) state.pitchSamples.splice(0, state.pitchSamples.length - 12000);
 }
@@ -831,7 +834,7 @@ function ensurePitchWorker() {
 function analyseMicrophone(beat, running, now) {
   if (!state.microphoneBuffer || state.pitchWorkerInFlight) return;
   state.microphoneAnalyser.getFloatTimeDomainData(state.microphoneBuffer);
-  queueNeuralLiveInference(state.microphoneBuffer, state.microphoneContext.sampleRate, beat);
+  queueNeuralLiveInference(state.microphoneBuffer, state.microphoneContext.sampleRate, beat, running);
   const worker = ensurePitchWorker();
   if (worker) {
     const buffer = state.microphoneBuffer.buffer;
@@ -932,7 +935,7 @@ function resampleLiveCrepeFrame(samples, sourceRate) {
   return output;
 }
 
-function queueNeuralLiveInference(samples, sourceRate, beat) {
+function queueNeuralLiveInference(samples, sourceRate, beat, running) {
   const neural = state.neuralLive;
   const now = performance.now();
   if (!neural.enabled || neural.inFlight || now - neural.lastStartedMs < 50) return;
@@ -953,8 +956,10 @@ function queueNeuralLiveInference(samples, sourceRate, beat) {
       if (neural.durationsMs.length > 80) neural.durationsMs.shift();
       neural.lastLatencyMs = elapsedMs;
       neural.latestPitch = Number.isFinite(result.hz) ? 69 + 12 * Math.log2(result.hz / 440) : null;
-      neural.samples.push({ beat, pitch: neural.latestPitch, takeId: state.pitchTakeId, salience: Float32Array.from(probabilities.subarray(0, 360)) });
-      if (neural.samples.length > 12000) neural.samples.splice(0, neural.samples.length - 12000);
+      if (running && state.clock?.running && beat >= state.scoringStartBeat) {
+        neural.samples.push({ beat, pitch: neural.latestPitch, takeId: state.pitchTakeId, salience: Float32Array.from(probabilities.subarray(0, 360)) });
+        if (neural.samples.length > 12000) neural.samples.splice(0, neural.samples.length - 12000);
+      }
     } catch (error) {
       if (generation === state.neuralLive.generation) {
         neural.error = 'inferenza non disponibile';
@@ -1263,6 +1268,17 @@ function drawPitchLane(beat) {
       state.displayPitch < bounds.min ? plot.bottom - 10 : plot.top + 10);
   }
 
+  if (inspecting && Number.isFinite(state.resumeCheckpointBeat)) {
+    const resumeX = timeToX(state.resumeCheckpointBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
+    if (resumeX >= plot.left && resumeX <= plot.right) {
+      ctx.strokeStyle = '#68d1cb'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(Math.round(resumeX) + .5, plot.top); ctx.lineTo(Math.round(resumeX) + .5, plot.bottom); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = '#68d1cb'; ctx.font = '700 9px Inter, sans-serif';
+      ctx.textAlign = resumeX > plot.right - 70 ? 'right' : 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('RIPRESA', resumeX + (resumeX > plot.right - 70 ? -5 : 5), plot.top + 4);
+    }
+  }
+
   ctx.strokeStyle = '#f0cf8f'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(Math.round(nowX) + .5, plot.top); ctx.lineTo(Math.round(nowX) + .5, plot.bottom); ctx.stroke();
 }
 
@@ -1455,6 +1471,7 @@ function queueAudioSeek(performanceTime) {
 
 function seekToMeasure(index, autoPlay = false, preRoll = true) {
   state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
+  state.resumeCheckpointBeat = null;
   state.gridInspect.active = false;
   const seek = measureSeekState(state.occurrenceMeasures, index, { preRoll });
   state.selectedMeasureIndex = seek.selectedIndex;
@@ -1469,15 +1486,41 @@ function seekToMeasure(index, autoPlay = false, preRoll = true) {
   updatePlaybackButton(); render();
 }
 
+function rememberAttemptCheckpoint(beat) {
+  if (!state.attemptActive) return;
+  state.resumeCheckpointBeat = Math.max(0, Math.min(totalBeats(), Math.max(beat, state.scoringStartBeat)));
+  const measure = state.occurrenceMeasures[measureIndexAt(state.resumeCheckpointBeat)];
+  els.scoringCue.textContent = `In pausa · ripresa battuta ${measure?.number ?? 1}`;
+}
+
+function prepareAttemptResume() {
+  if (!state.attemptActive || !Number.isFinite(state.resumeCheckpointBeat)) return false;
+  const resume = attemptResumeState(state.occurrenceMeasures, state.resumeCheckpointBeat);
+  state.selectedMeasureIndex = resume.resumeIndex;
+  state.scoringStartBeat = resume.scoringStart;
+  state.lastSampleMs = null;
+  state.lastMetronomeBeat = null;
+  queueAudioSeek(state.runtime.secondsAtBeat(resume.playbackStart));
+  const playbackMeasure = state.occurrenceMeasures[Math.max(0, resume.resumeIndex - 1)];
+  const resumeMeasure = state.occurrenceMeasures[resume.resumeIndex];
+  els.scoringCue.textContent = resume.playbackStart === resume.scoringStart
+    ? `Ripresa battuta ${resumeMeasure?.number ?? 1}`
+    : `Preascolto ${playbackMeasure?.number ?? 1} · ripresa ${resumeMeasure?.number ?? 1}`;
+  return true;
+}
+
 async function togglePlayback() {
   if (!state.bundleApproved) { showToast('Serve l’approvazione admin di questo bundle.'); return; }
   if (state.playbackPlan?.kind === 'muted') { showToast('Attiva almeno una traccia nel Mixer.'); return; }
   if (playbackSnapshot().beat >= totalBeats()) state.clock.seekBeat(0);
   if (state.clock.running) {
+    const checkpointBeat = playbackSnapshot().beat;
     state.clock.pause();
+    rememberAttemptCheckpoint(checkpointBeat);
     savePitchHistory();
   } else {
     state.gridInspect.active = false;
+    prepareAttemptResume();
     if (state.pendingAudioTime != null) {
       await waitForMediaReady(els.backingAudio, 3);
       applyPendingAudioSeek();
@@ -1507,7 +1550,7 @@ async function togglePlayback() {
 
 function bindGridInspection() {
   const canvas = els.pitchLane;
-  canvas.title = 'In pausa: tocca o trascina orizzontalmente per scegliere una battuta. Play inizia dalla battuta precedente.';
+  canvas.title = 'In pausa: trascina orizzontalmente per ispezionare. Play riprende dal punto memorizzato, con una battuta di preascolto.';
   const reset = () => {
     state.gridInspect = { active: false, viewBeat: currentPianoRollBeat(), pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null };
     render();
@@ -1530,6 +1573,10 @@ function bindGridInspection() {
     }
     render();
   }, { passive: false });
+  const horizontalSpan = () => {
+    const inspect = state.gridInspect;
+    return (UI_CONFIG.historyBeats + UI_CONFIG.futureBeats) / (inspect.active ? inspect.timeZoom : 1);
+  };
   const beatAtPointer = (clientX) => {
     const rect = canvas.getBoundingClientRect();
     const plot = { left: rect.width < 700 ? 48 : 58, right: rect.width - 8 };
@@ -1543,28 +1590,37 @@ function bindGridInspection() {
   };
   canvas.addEventListener('pointerdown', (event) => {
     if (state.clock.running || event.button !== 0) return;
-    state.gridInspect.pointer = { id: event.pointerId, x: event.clientX };
+    const view = state.gridInspect;
+    if (!view.active) { view.active = true; view.viewBeat = currentPianoRollBeat(); }
+    state.gridInspect.pointer = { id: event.pointerId, startX: event.clientX, startViewBeat: view.viewBeat, moved: false };
     canvas.setPointerCapture(event.pointerId);
-    canvas.classList.add('is-seeking');
+    canvas.classList.add('is-inspecting');
+    event.preventDefault();
   });
   canvas.addEventListener('pointermove', (event) => {
-    if (state.gridInspect.pointer?.id !== event.pointerId) return;
-    state.gridInspect.pointer.x = event.clientX;
+    const pointer = state.gridInspect.pointer;
+    if (pointer?.id !== event.pointerId) return;
+    const rect = canvas.getBoundingClientRect();
+    const plotWidth = Math.max(1, rect.width - (rect.width < 700 ? 48 : 58) - 8);
+    const deltaX = event.clientX - pointer.startX;
+    if (Math.abs(deltaX) >= 3) pointer.moved = true;
+    state.gridInspect.viewBeat = Math.max(0, Math.min(totalBeats(),
+      pointer.startViewBeat - deltaX / plotWidth * horizontalSpan()));
+    render();
+    event.preventDefault();
   });
-  const finishSeek = (event, cancelled = false) => {
+  const finishInspection = (event, cancelled = false) => {
     const pointer = state.gridInspect.pointer;
     if (!pointer || pointer.id !== event.pointerId) return;
     state.gridInspect.pointer = null;
     canvas.releasePointerCapture?.(event.pointerId);
-    canvas.classList.remove('is-seeking');
+    canvas.classList.remove('is-inspecting');
     if (cancelled || state.clock.running) return;
-    const selected = measureIndexAt(beatAtPointer(pointer.x));
-    seekToMeasure(selected, false, true);
-    const measure = state.occurrenceMeasures[selected];
-    showToast(`Pronto dalla battuta ${measure?.number ?? selected + 1}: una battuta di preascolto prima del play.`);
+    if (!pointer.moved) state.gridInspect.viewBeat = beatAtPointer(event.clientX);
+    render();
   };
-  canvas.addEventListener('pointerup', finishSeek);
-  canvas.addEventListener('pointercancel', (event) => finishSeek(event, true));
+  canvas.addEventListener('pointerup', finishInspection);
+  canvas.addEventListener('pointercancel', (event) => finishInspection(event, true));
 }
 
 function showToast(message) {
@@ -3069,6 +3125,7 @@ function showAttemptResult({ preliminary = false } = {}) {
 
 function finishAttempt() {
   state.attemptActive = false;
+  state.resumeCheckpointBeat = null;
   showAttemptResult();
 }
 
@@ -3254,6 +3311,7 @@ function bindScorePitchDivider() {
 
 function changePart(partId) {
   state.attemptActive = false;
+  state.resumeCheckpointBeat = null;
   if (state.clock.running) state.clock.pause();
   savePitchHistory();
   state.runtime.selectPart(partId);
@@ -3335,7 +3393,7 @@ function bindControls() {
   els.transpose.addEventListener('change', async () => {
     state.transpose = Number(els.transpose.value);
     updateTransposeControl();
-    state.attemptActive = false;
+    state.attemptActive = false; state.resumeCheckpointBeat = null;
     state.pitchViewport = null; beginPitchTake();
     state.playbackMixer.setTranspose(state.transpose);
     await applyVoiceSelection(state.selectedVoiceIds);
@@ -3438,7 +3496,7 @@ function bindControls() {
   els.nextMeasure.addEventListener('click', () => seekToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(playbackSnapshot().beat) + 1), false, false));
   els.partSelector.addEventListener('change', () => changePart(els.partSelector.value));
   els.playbackSpeed.addEventListener('change', async () => {
-    state.attemptActive = false; state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
+    state.attemptActive = false; state.resumeCheckpointBeat = null; state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
     await applyVoiceSelection(state.selectedVoiceIds);
     state.lastMetronomeBeat = null;
     state.attemptActive = state.clock.running;
@@ -3662,6 +3720,7 @@ function restartPractice() {
   state.clock.pause();
   clearPitchHistory();
   state.attemptActive = false;
+  state.resumeCheckpointBeat = null;
   state.attempt = { voicedMs: 0, insideMs: 0 };
   state.lastSampleMs = null;
   if (els.resultDialog.open) els.resultDialog.close();

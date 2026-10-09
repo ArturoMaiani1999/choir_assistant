@@ -448,25 +448,50 @@ def main() -> int:
             })()""")
             call_id += 1
             assert mixer_space["running"] and not mixer_space["dialogOpen"], mixer_space
-            seek_probe = evaluate(socket, call_id, """(() => {
-              state.clock.pause();
-              seekToMeasure(0, false, false);
+            inspection_probe = evaluate(socket, call_id, """(() => {
+              state.clock.pause(); state.pendingAudioTime = null;
+              const resumeIndex = Math.min(2, state.occurrenceMeasures.length - 1);
+              const measure = state.occurrenceMeasures[resumeIndex];
+              const checkpoint = measure.startBeat + Math.min(1, (measure.endBeat - measure.startBeat) / 2);
+              state.scoringStartBeat = 0;
+              state.attemptActive = true;
+              state.resumeCheckpointBeat = null;
+              rememberAttemptCheckpoint(checkpoint);
+              state.pitchSamples.push({beat:state.resumeCheckpointBeat - .1, displayPitch:60,
+                trackedPitch:60, takeId:state.pitchTakeId, confidence:1, clarity:1});
               const rect = document.querySelector('#pitch-lane').getBoundingClientRect();
-              return {x: rect.left + rect.width * .82, y: rect.top + rect.height * .5};
+              return {startX: rect.left + rect.width * .72, endX: rect.left + rect.width * .42,
+                y: rect.top + rect.height * .5, checkpoint:state.resumeCheckpointBeat,
+                pausedBeat:state.clock.snapshot().beat, samples:state.pitchSamples.length};
             })()""")
             call_id += 1
             command(socket, call_id, "Input.dispatchMouseEvent", {
-                "type": "mousePressed", "x": seek_probe["x"], "y": seek_probe["y"], "button": "left", "clickCount": 1,
+                "type": "mousePressed", "x": inspection_probe["startX"], "y": inspection_probe["y"], "button": "left", "clickCount": 1,
             })
             call_id += 1
             command(socket, call_id, "Input.dispatchMouseEvent", {
-                "type": "mouseReleased", "x": seek_probe["x"], "y": seek_probe["y"], "button": "left", "clickCount": 1,
+                "type": "mouseMoved", "x": inspection_probe["endX"], "y": inspection_probe["y"], "button": "left", "buttons": 1,
             })
             call_id += 1
-            seek_result = evaluate(socket, call_id, """(() => {
-              const selected = measureIndexAt(state.scoringStartBeat);
-              const expected = state.occurrenceMeasures[Math.max(0, selected - 1)].startBeat;
-              return {selected, scoring: state.scoringStartBeat, playback: state.clock.snapshot().beat, expected};
+            command(socket, call_id, "Input.dispatchMouseEvent", {
+                "type": "mouseReleased", "x": inspection_probe["endX"], "y": inspection_probe["y"], "button": "left", "clickCount": 1,
+            })
+            call_id += 1
+            inspection_result = evaluate(socket, call_id, """(async () => {
+              const afterDrag = {active:state.gridInspect.active, viewBeat:state.gridInspect.viewBeat,
+                checkpoint:state.resumeCheckpointBeat, pausedBeat:state.clock.snapshot().beat,
+                samples:state.pitchSamples.length};
+              const resumeIndex = measureIndexAt(state.resumeCheckpointBeat);
+              const expectedStart = state.occurrenceMeasures[Math.max(0, resumeIndex - 1)].startBeat;
+              const prepared = prepareAttemptResume();
+              const preparedBeat = playbackSnapshot().beat;
+              await togglePlayback();
+              await new Promise(resolve => setTimeout(resolve, 40));
+              const resumed = {running:state.clock.running, playback:state.clock.snapshot().beat,
+                scoring:state.scoringStartBeat, inspectActive:state.gridInspect.active,
+                samples:state.pitchSamples.length, expectedStart, prepared, preparedBeat};
+              state.clock.pause(); state.attemptActive = false; state.resumeCheckpointBeat = null;
+              return {afterDrag, resumed};
             })()""")
             call_id += 1
             resize = evaluate(socket, call_id, """(async () => {
@@ -579,8 +604,16 @@ def main() -> int:
                                                           "otherStems": 3}, mixer_layout
             assert mixer_mobile["columns"] == 2 and not mixer_mobile["overflow"], mixer_mobile
             assert mixer_mobile["width"] <= mixer_mobile["viewport"], mixer_mobile
-            assert seek_result["selected"] > 0 and seek_result["scoring"] > seek_result["playback"], seek_result
-            assert abs(seek_result["playback"] - seek_result["expected"]) < .01, seek_result
+            after_drag = inspection_result["afterDrag"]
+            resumed = inspection_result["resumed"]
+            assert after_drag["active"] and abs(after_drag["viewBeat"] - inspection_probe["pausedBeat"]) > .2, inspection_result
+            assert abs(after_drag["checkpoint"] - inspection_probe["checkpoint"]) < .01, inspection_result
+            assert abs(after_drag["pausedBeat"] - inspection_probe["pausedBeat"]) < .01, inspection_result
+            assert after_drag["samples"] == inspection_probe["samples"], inspection_result
+            assert resumed["running"] and not resumed["inspectActive"], inspection_result
+            assert abs(resumed["scoring"] - inspection_probe["checkpoint"]) < .01, inspection_result
+            assert resumed["prepared"] and abs(resumed["preparedBeat"] - resumed["expectedStart"]) < .01, inspection_result
+            assert resumed["playback"] < resumed["scoring"] and resumed["samples"] == inspection_probe["samples"], inspection_result
             assert resize["score"] != resize["before"]["score"], resize
             assert resize["bitmap"] != resize["before"]["bitmap"] and resize["bitmap"] == resize["expected"], resize
             assert not result["errors"], result["errors"]
@@ -772,7 +805,7 @@ def main() -> int:
                 "microphone": microphone,
                 "preliminaryResult": preliminary_result,
                 "mixerLayout": {"desktop": mixer_layout, "mobile": mixer_mobile},
-                "seekWithPreroll": seek_result,
+                "pauseInspectionResume": inspection_result,
                 "voiceMix": voice_mix,
                 "audioAssetsRms": audio_assets,
                 "dividerResize": resize,
