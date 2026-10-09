@@ -546,14 +546,51 @@ def main() -> int:
             viewer = evaluate(socket, call_id, r"""(async () => {
               const grayPaper = document.querySelector('[data-paper="#e3e8e6"]');
               grayPaper.click();
+              const audio = document.querySelector('#viewer-audio');
+              const mixerButton = document.querySelector('#viewer-mixer-open');
+              const mixerDialog = document.querySelector('#viewer-mixer');
+              const space = () => mixerButton.dispatchEvent(new KeyboardEvent('keydown', {
+                code: 'Space', key: ' ', bubbles: true, cancelable: true
+              }));
+              mixerButton.focus();
+              space();
+              await new Promise(resolve => setTimeout(resolve, 180));
+              const keyboardStartedPlayback = !audio.paused;
+              const spaceDidNotOpenMixer = !mixerDialog.open;
+              space();
+              await new Promise(resolve => setTimeout(resolve, 80));
+              const keyboardPausedPlayback = audio.paused;
+              mixerButton.click();
+              const mixerOpensPaused = mixerDialog.open && audio.paused;
+              const mixerChannels = [...document.querySelectorAll('#viewer-mixer-options input[type="checkbox"]')];
+              for (const channel of mixerChannels.slice(0, 2)) {
+                channel.click();
+                await new Promise(resolve => setTimeout(resolve, 220));
+              }
+              const mixerEditsStayPaused = audio.paused && mixerDialog.open;
+              document.querySelector('#viewer-mixer-close').click();
+              space();
+              await new Promise(resolve => setTimeout(resolve, 150));
+              const keyboardResumesAfterMixer = !audio.paused;
+              space();
+              await new Promise(resolve => setTimeout(resolve, 80));
               window.scrollTo(0, 500);
               await new Promise(resolve => setTimeout(resolve, 150));
               const resources = performance.getEntriesByType('resource').map(entry => entry.name);
               return {
                 pageCount: document.querySelectorAll('.viewer-page').length,
+                audioTransport: Boolean(audio && document.querySelector('#viewer-play')),
+                playheadCount: document.querySelectorAll('.viewer-playhead').length,
+                keyboardStartedPlayback,
+                spaceDidNotOpenMixer,
+                keyboardPausedPlayback,
+                mixerOpensPaused,
+                mixerChannels: mixerChannels.length,
+                mixerEditsStayPaused,
+                keyboardResumesAfterMixer,
                 getUserMediaCalls: window.__getUserMediaCalls,
                 hasPitchUi: Boolean(document.querySelector(
-                  'canvas, audio, #pitch-lane, .pitch-region, #microphone, #microphone-level'
+                  'canvas, #pitch-lane, .pitch-region, #microphone, #microphone-level'
                 )),
                 forbiddenResources: resources.filter(resource =>
                   /pitch_detector|pitch_shared|fluid_pitch_trail|vocal_feedback|\/app\.[a-f0-9]+\.js/.test(resource)
@@ -579,6 +616,11 @@ def main() -> int:
                     viewer_external.append(resource)
 
             assert viewer["pageCount"] > 0, viewer
+            assert viewer["audioTransport"] and viewer["playheadCount"] == viewer["pageCount"], viewer
+            assert viewer["keyboardStartedPlayback"] and viewer["spaceDidNotOpenMixer"], viewer
+            assert viewer["keyboardPausedPlayback"], viewer
+            assert viewer["mixerOpensPaused"] and viewer["mixerChannels"] >= 2, viewer
+            assert viewer["mixerEditsStayPaused"] and viewer["keyboardResumesAfterMixer"], viewer
             assert viewer["getUserMediaCalls"] == 0, viewer
             assert not viewer["hasPitchUi"], viewer
             assert not viewer["forbiddenResources"], viewer
