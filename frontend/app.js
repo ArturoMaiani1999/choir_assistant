@@ -1422,14 +1422,37 @@ function updateTransposeControl() {
     ? 'Tonalità originale' : `${semitones > 0 ? 'Trasposto su' : 'Trasposto giù'} di ${Math.abs(semitones)} semitoni`);
 }
 
+function applyPendingAudioSeek() {
+  const target = state.pendingAudioTime;
+  if (target == null || !state.clock) return true;
+  state.clock.seekPerformanceTime(target);
+  const applied = Math.abs(state.clock.snapshot().performanceTime - target) < .05;
+  if (applied) {
+    state.pendingAudioTime = null;
+    for (const audio of state.voiceStemAudio.values()) audio.currentTime = els.backingAudio.currentTime;
+    render();
+  }
+  return applied;
+}
+
+function queueAudioSeek(performanceTime) {
+  state.pendingAudioTime = Math.max(0, Number(performanceTime) || 0);
+  const target = state.pendingAudioTime;
+  applyPendingAudioSeek();
+  // A freshly loaded MP3 may know its duration before it exposes a seekable
+  // range. Keep the user's destination and retry while that range settles.
+  [100, 300, 800, 1600].forEach((delay) => setTimeout(() => {
+    if (state.pendingAudioTime === target) applyPendingAudioSeek();
+  }, delay));
+}
+
 function seekToMeasure(index, autoPlay = false, preRoll = true) {
   state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
   state.gridInspect.active = false;
   const seek = measureSeekState(state.occurrenceMeasures, index, { preRoll });
   state.selectedMeasureIndex = seek.selectedIndex;
   state.scoringStartBeat = seek.scoringStart;
-  state.clock.seekBeat(seek.playbackStart);
-  if (els.backingAudio.readyState === 0) state.pendingAudioTime = state.runtime.secondsAtBeat(seek.playbackStart);
+  queueAudioSeek(state.runtime.secondsAtBeat(seek.playbackStart));
   state.lastMetronomeBeat = null;
   beginPitchTake();
   const playbackNumber = state.occurrenceMeasures[Math.max(0, seek.selectedIndex - 1)]?.number ?? 1;
@@ -3285,9 +3308,9 @@ function bindControls() {
   });
   els.noteNames.addEventListener('change', () => { state.noteNames = els.noteNames.value; savePreferences(); render(); });
   els.retry.addEventListener('click', () => { state.attemptActive = false; els.resultDialog.close(); seekToMeasure(0); togglePlayback(); });
-  els.backingAudio.addEventListener('loadedmetadata', () => {
-    if (state.pendingAudioTime != null) { state.clock.seekPerformanceTime(state.pendingAudioTime); state.pendingAudioTime = null; render(); }
-  });
+  for (const eventName of ['loadedmetadata', 'durationchange', 'canplay', 'progress', 'seeked']) {
+    els.backingAudio.addEventListener(eventName, applyPendingAudioSeek);
+  }
   els.backingAudio.addEventListener('play', () => { void playVoiceStems(); });
   els.backingAudio.addEventListener('pause', pauseVoiceStems);
   els.backingAudio.addEventListener('seeking', () => {
