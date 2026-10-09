@@ -64,7 +64,8 @@ button, select, a { touch-action: manipulation; }
 .viewer-pages { min-width: 100%; display: grid; justify-items: center; gap: 26px; }
 .viewer-page { position: relative; width: min(var(--page-width), calc(100vw - 32px)); margin: 0; background: var(--score-paper); box-shadow: 0 14px 42px rgba(0, 0, 0, .42); }
 .viewer-page img { display: block; width: 100%; height: auto; background: var(--score-paper); mix-blend-mode: multiply; }
-.viewer-playhead { position: absolute; z-index: 2; top: 0; bottom: 0; left: 0; width: 3px; pointer-events: none; background: #f0c84b; box-shadow: 0 0 7px rgba(240,200,75,.8); opacity: .9; }
+.viewer-playhead { position: absolute; z-index: 2; top: 0; left: 0; width: 3px; height: 0; pointer-events: none; background: #f0c84b; box-shadow: 0 0 7px rgba(240,200,75,.8); opacity: 0; transition: opacity .12s; }
+.viewer-playhead.is-active { opacity: .92; }
 .viewer-page figcaption { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .viewer-status { width: min(520px, calc(100vw - 40px)); margin: 18vh auto 0; color: var(--muted); text-align: center; }
 .viewer-status.is-error { color: #edab9b; }

@@ -264,7 +264,12 @@
 
     seekPerformanceTime(seconds) {
       const mediaSeconds = this.preRenderedSpeed ? seconds / this.preRenderedSpeed : seconds;
-      this.media.currentTime = Math.max(0, Math.min(Number.isFinite(this.media.duration) ? this.media.duration : Infinity, mediaSeconds));
+      // Some browsers briefly expose duration === 0 while MP3 metadata is
+      // settling. Zero is not a useful upper bound and would turn every
+      // measure seek into a restart at the beginning.
+      const duration = Number.isFinite(this.media.duration) && this.media.duration > 0
+        ? this.media.duration : Infinity;
+      this.media.currentTime = Math.max(0, Math.min(duration, mediaSeconds));
       return this.snapshot();
     }
 

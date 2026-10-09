@@ -700,8 +700,14 @@ def main() -> int:
               window.scrollTo(0, 500);
               await new Promise(resolve => setTimeout(resolve, 150));
               const resources = performance.getEntriesByType('resource').map(entry => entry.name);
+              const activePlayhead = document.querySelector('.viewer-playhead.is-active');
               return {
                 pageCount: document.querySelectorAll('.viewer-page').length,
+                measureSlots: Number(document.querySelector('#viewer-pages')?.dataset.measureSlots),
+                writtenMeasures: Number(document.querySelector('#viewer-pages')?.dataset.measures),
+                activePlayheads: document.querySelectorAll('.viewer-playhead.is-active').length,
+                activePlayheadHeight: activePlayhead?.getBoundingClientRect().height ?? 0,
+                pageHeight: activePlayhead?.parentElement?.getBoundingClientRect().height ?? 0,
                 audioTransport: Boolean(audio && document.querySelector('#viewer-play')),
                 playheadCount: document.querySelectorAll('.viewer-playhead').length,
                 getUserMediaCalls: window.__getUserMediaCalls,
@@ -735,6 +741,9 @@ def main() -> int:
                     viewer_external.append(resource)
 
             assert viewer["pageCount"] > 0, viewer
+            assert viewer["measureSlots"] == viewer["writtenMeasures"] > 0, viewer
+            assert viewer["activePlayheads"] == 1, viewer
+            assert 0 < viewer["activePlayheadHeight"] < viewer["pageHeight"], viewer
             assert viewer["audioTransport"] and viewer["playheadCount"] == viewer["pageCount"], viewer
             assert viewer["keyboardStartedPlayback"] and viewer["spaceDidNotOpenMixer"], viewer
             assert viewer["keyboardPausedPlayback"], viewer

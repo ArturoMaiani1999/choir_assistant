@@ -61,6 +61,10 @@ const mediaClock = new ChoirScore.MediaPlaybackClock({ mediaElement: media, scor
   assert.equal(mediaClock.speed, .5);
   mediaClock.seekBeat(12);
   assert.equal(media.currentTime, 6);
+  media.duration = 0;
+  mediaClock.seekBeat(8);
+  assert.equal(media.currentTime, 4, 'a transient zero duration must not clamp a measure seek to the start');
+  media.duration = 40;
   mediaClock.setPreRenderedSpeed(.5);
   mediaClock.seekBeat(12);
   assert.equal(media.currentTime, 12, 'pre-rendered 50% audio maps canonical time to the longer media file');
@@ -68,5 +72,5 @@ const mediaClock = new ChoirScore.MediaPlaybackClock({ mediaElement: media, scor
   assert.equal(mediaClock.snapshot().speed, .5);
   mediaClock.pause();
   assert.equal(mediaClock.running, false);
-  console.log('media playback clock: 5 assertions passed');
+  console.log('media playback clock: 6 assertions passed');
 })();

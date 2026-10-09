@@ -13,7 +13,7 @@
   const mixer = new MediaElementMixer();
   let library = [], pageObserver = null, zoom = 960, loadGeneration = 0;
   let runtime = null, audioManifest = null, bundle = null, activeElements = [], voiceElements = new Map(), raf = 0, playbackPosition = 0;
-  let selections = { accompaniment: true, voices: new Set() }, pageCount = 0, lastCursorPage = -1;
+  let selections = { accompaniment: true, voices: new Set() }, pageCount = 0, lastCursorPage = -1, fullScoreSlots = [];
   const paperPreferenceKey = 'choir-score-paper:v1';
   const paperColors = new Set(['#c3c0b6', '#e3e8e6', '#ffffff']);
 
@@ -105,16 +105,84 @@
     }
   }
   function totalBeats() { return Math.max(...(runtime?.performanceOccurrences ?? []).map((item) => item.endBeat), ...(runtime?.allTargetEvents ?? []).map((item) => item.onsetBeat + item.durationBeats), 1); }
+  function points(element) {
+    return (element.getAttribute('points') ?? '').trim().split(/[\s,]+/).map(Number).filter(Number.isFinite);
+  }
+  function clusterBarXs(values) {
+    const clusters = [];
+    [...values].sort((a,b)=>a-b).forEach((value) => {
+      const cluster = clusters.at(-1);
+      if (cluster && value - cluster.at(-1) < 140) cluster.push(value);
+      else clusters.push([value]);
+    });
+    // Double/repeat barlines form one musical boundary. Keep their right edge.
+    return clusters.map((cluster)=>Math.max(...cluster));
+  }
+  function parseFullScorePage(svg, page) {
+    const document = new DOMParser().parseFromString(svg, 'image/svg+xml');
+    const [, , width = 0, height = 0] = (document.documentElement.getAttribute('viewBox') ?? '').trim().split(/\s+/).map(Number);
+    const rawStaffLines = [...document.querySelectorAll('.StaffLines')].map((element)=>points(element)).filter((value)=>value.length>=4);
+    const barLines = [...document.querySelectorAll('.BarLine')].map((element)=>points(element)).filter((value)=>value.length>=4)
+      .map((value)=>({x:value[0],y1:value[1],y2:value[3]}));
+    const staffs = [];
+    for(let index=0;index+4<rawStaffLines.length;index+=5){
+      const lines=rawStaffLines.slice(index,index+5);
+      const staff={startX:Math.min(...lines.map((line)=>line[0])),endX:Math.max(...lines.map((line)=>line[2])),
+        topY:Math.min(...lines.map((line)=>line[1])),bottomY:Math.max(...lines.map((line)=>line[1]))};
+      staff.barXs=clusterBarXs(barLines.filter((bar)=>Math.abs(bar.y1-staff.topY)<35&&bar.x>=staff.startX-50&&bar.x<=staff.endX+50).map((bar)=>bar.x));
+      staff.signature=staff.barXs.map((value)=>Math.round(value/10)*10).join(':'); staffs.push(staff);
+    }
+    return {page,width,height,staffs};
+  }
+  async function buildFullScoreSlots(sources) {
+    const pages = await Promise.all(sources.map(async (source,index)=>{
+      const response=await fetch(source,{cache:'force-cache'}); if(!response.ok)throw new Error('Geometria della partitura non disponibile');
+      return parseFullScorePage(await response.text(),index+1);
+    }));
+    const runLengths=[];
+    pages.forEach((page)=>{let signature=null,length=0;page.staffs.forEach((staff)=>{
+      if(signature==null||staff.signature===signature)length+=1;
+      else{runLengths.push(length);length=1;} signature=staff.signature;
+    });if(length)runLengths.push(length);});
+    const frequencies=new Map();runLengths.forEach((length)=>frequencies.set(length,(frequencies.get(length)??0)+1));
+    const staffsPerSystem=[...frequencies].sort((a,b)=>b[1]-a[1]||a[0]-b[0])[0]?.[0]??1;
+    const slots=[];
+    pages.forEach((page)=>{
+      for(let index=0;index<page.staffs.length;index+=staffsPerSystem){
+        const system=page.staffs.slice(index,index+staffsPerSystem);if(!system.length)continue;
+        const first=system[0],last=system.at(-1),barXs=first.barXs;
+        for(let boundary=0;boundary+1<barXs.length;boundary+=1){
+          if(barXs[boundary+1]-barXs[boundary]<140)continue;
+          slots.push({page:page.page,startX:barXs[boundary]/page.width*100,endX:barXs[boundary+1]/page.width*100,
+            topY:first.topY/page.height*100,bottomY:last.bottomY/page.height*100});
+        }
+      }
+    });
+    return slots;
+  }
+  function scorePositionAtBeat(beat) {
+    if(!runtime||!fullScoreSlots.length)return null;
+    const safeBeat=Math.max(0,beat),occurrences=runtime.performanceOccurrences??[];
+    const occurrence=occurrences.find((item)=>item.startBeat<=safeBeat&&safeBeat<item.endBeat)??occurrences.at(-1);
+    if(!occurrence)return null;
+    const measureIndex=runtime.measures.findIndex((measure)=>measure.id===occurrence.writtenMeasureId),slot=fullScoreSlots[measureIndex];
+    if(!slot)return null;
+    const progress=Math.max(0,Math.min(1,(safeBeat-occurrence.startBeat)/Math.max(.001,occurrence.endBeat-occurrence.startBeat)));
+    return {...slot,x:slot.startX+(slot.endX-slot.startX)*progress,measureNumber:runtime.measures[measureIndex]?.number??'?'};
+  }
   function updateCursor() {
     if (!runtime || !pageCount) return;
     const seconds = els.audio.currentTime || playbackPosition; playbackPosition = seconds;
-    const beat = runtime.beatAtSeconds(seconds), progress = Math.max(0, Math.min(.9999, beat / totalBeats()));
-    const pageIndex = Math.min(pageCount - 1, Math.floor(progress * pageCount));
-    const pageProgress = progress * pageCount - pageIndex;
+    const beat = runtime.beatAtSeconds(seconds), position = scorePositionAtBeat(beat);
+    const progress = Math.max(0, Math.min(.9999, beat / totalBeats()));
+    const pageIndex = position ? position.page - 1 : Math.min(pageCount - 1, Math.floor(progress * pageCount));
     const page = document.querySelector(`.viewer-page[data-page="${pageIndex + 1}"]`);
     if (page) {
       const line = page.querySelector('.viewer-playhead');
-      line.style.left = `${pageProgress * 100}%`;
+      document.querySelectorAll('.viewer-playhead.is-active').forEach((item)=>item.classList.remove('is-active'));
+      if(position){line.style.left=`${position.x}%`;line.style.top=`${position.topY}%`;line.style.height=`${position.bottomY-position.topY}%`;line.dataset.measure=String(position.measureNumber);}
+      else{line.style.left=`${(progress*pageCount-pageIndex)*100}%`;line.style.top='0';line.style.height='100%';line.dataset.measure='';}
+      line.classList.add('is-active');
       if (pageIndex !== lastCursorPage) { lastCursorPage = pageIndex; page.scrollIntoView({ block:'center', behavior:'smooth' }); }
       els.position.value = `Pagina ${pageIndex + 1} / ${pageCount} · Battuta ${runtime.measureAt(beat).number}`;
     }
@@ -156,11 +224,13 @@
     bundle = await response.json(); if (generation !== loadGeneration) return;
     const sources = bundle.assets?.full_score_pages ?? [];
     if (!sources.length) throw new Error('Questo brano non ha una partitura completa');
-    const [scoreResponse, audioResponse] = await Promise.all([fetch(bundle.assets.score), fetch(bundle.assets.audio_manifest)]);
+    const [scoreResponse, audioResponse, scoreSlots] = await Promise.all([fetch(bundle.assets.score), fetch(bundle.assets.audio_manifest), buildFullScoreSlots(sources)]);
     if (!scoreResponse.ok || !audioResponse.ok) throw new Error('Timeline o audio del brano non disponibili');
     const [score, manifest] = await Promise.all([scoreResponse.json(), audioResponse.json()]);
     if (generation !== loadGeneration) return;
-    runtime = window.ChoirScore.NormalizedScoreRuntime.fromNormalizedScore(score); audioManifest = manifest; playbackPosition = 0;
+    runtime = window.ChoirScore.NormalizedScoreRuntime.fromNormalizedScore(score); audioManifest = manifest; playbackPosition = 0; fullScoreSlots=scoreSlots;
+    els.pages.dataset.measureSlots=String(fullScoreSlots.length);els.pages.dataset.measures=String(runtime.measures.length);
+    if(fullScoreSlots.length!==runtime.measures.length)console.warn('Geometria battute partitura incompleta',{slots:fullScoreSlots.length,measures:runtime.measures.length});
     selections = { accompaniment:true, voices:new Set(Object.keys(manifest.voice_stems ?? {})) }; pageCount = sources.length; lastCursorPage = -1;
     const fragment = document.createDocumentFragment();
     sources.forEach((source,index) => {
