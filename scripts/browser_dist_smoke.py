@@ -280,8 +280,14 @@ def main() -> int:
               await new Promise(resolve => setTimeout(resolve, 40));
               await togglePlayback();
               const dialog = document.querySelector('#result-dialog');
+              const pausedWithoutDialog = !dialog.open;
+              const feedback = document.querySelector('#show-feedback');
+              const feedbackVisible = !feedback.hidden;
+              feedback.click();
               const result = {
                 open: dialog.open,
+                pausedWithoutDialog,
+                feedbackVisible,
                 preliminary: dialog.dataset.preliminary,
                 heading: document.querySelector('#result-heading').textContent,
                 text: document.querySelector('#result-text').textContent,
@@ -483,6 +489,7 @@ def main() -> int:
                 if navigation["canSeek"]:
                     assert abs(navigation["actualBeat"] - navigation["expectedBeat"]) < .01, navigation
             assert microphone == {"status": "active", "worker": True, "workerDisabled": False}, microphone
+            assert preliminary_result["pausedWithoutDialog"] and preliminary_result["feedbackVisible"], preliminary_result
             assert preliminary_result["open"] and preliminary_result["preliminary"] == "true", preliminary_result
             assert preliminary_result["heading"] == "Risultati preliminari", preliminary_result
             assert "75%" in preliminary_result["text"] and "battuta" in preliminary_result["progress"], preliminary_result

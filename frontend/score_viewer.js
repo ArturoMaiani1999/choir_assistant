@@ -2,7 +2,7 @@
   'use strict';
 
   const config = window.ChoirRuntimeConfig ?? {};
-  const els = Object.fromEntries(['back','title','piece','pages','status','position','zoomOut','zoomFit','zoomIn','play','mixerOpen','mixer','mixerOptions','mixerClose','audio','time'].map((id) => [id, document.getElementById(`viewer-${id}`)]));
+  const els = Object.fromEntries(['back','title','piece','pages','status','position','zoomOut','zoomFit','zoomIn','play','mixerOpen','mixer','mixerOptions','mixerClose','audio','time'].map((id) => [id, document.getElementById(id === 'position' ? 'viewer-page-position' : `viewer-${id}`)]));
   const { MediaElementMixer, buildMediaPlaybackPlan } = window.ChoirMedia;
   const mixer = new MediaElementMixer();
   let library = [], pageObserver = null, zoom = 960, loadGeneration = 0;
