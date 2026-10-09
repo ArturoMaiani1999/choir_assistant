@@ -272,15 +272,17 @@ def main() -> int:
               custom.halfSpeedPreservesPitch = els.backingAudio.preservesPitch
                 && [...state.voiceStemAudio.values()].every(audio => audio.preservesPitch);
               state.clock.pause();
-              const navigationIndex = Math.min(2, state.occurrenceMeasures.length - 1);
+              seekToMeasure(0, false, false);
+              document.querySelector('#next-measure').click();
+              const navigationIndex = Math.min(1, state.occurrenceMeasures.length - 1);
               const navigationSeconds = state.runtime.secondsAtBeat(state.occurrenceMeasures[navigationIndex].startBeat);
               const navigationSeekable = [...Array(els.backingAudio.seekable.length).keys()]
                 .some(index => els.backingAudio.seekable.start(index) <= navigationSeconds
                   && els.backingAudio.seekable.end(index) + .01 >= navigationSeconds);
-              seekToMeasure(navigationIndex, false, false);
               const navigation = {canSeek:navigationSeekable, index:navigationIndex,
                 expectedBeat:state.occurrenceMeasures[navigationIndex].startBeat,
-                actualBeat:state.clock.snapshot().beat};
+                actualBeat:playbackSnapshot().beat,
+                cue:document.querySelector('#scoring-cue').textContent};
               return {available: allIds.length, beforeSwitch, full, own, custom, navigation};
             })()""")
             call_id += 1
@@ -556,8 +558,8 @@ def main() -> int:
                 expected_ratio = 2 ** (3 / 12)
                 assert all(abs(value - expected_ratio) < .001 for value in custom["pitchRatios"]), custom
                 navigation = voice_mix["navigation"]
-                if navigation["canSeek"]:
-                    assert abs(navigation["actualBeat"] - navigation["expectedBeat"]) < .01, navigation
+                assert abs(navigation["actualBeat"] - navigation["expectedBeat"]) < .01, navigation
+                assert "ingresso da 2" in navigation["cue"].lower(), navigation
             assert microphone == {"status": "active", "worker": True, "workerDisabled": False}, microphone
             assert preliminary_result["pausedWithoutDialog"] and preliminary_result["feedbackVisible"], preliminary_result
             assert preliminary_result["open"] and preliminary_result["preliminary"] == "true", preliminary_result

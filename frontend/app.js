@@ -539,7 +539,7 @@ function waitForMediaSeek(media, timeoutMs = 2000) {
 
 async function applyVoiceSelection(selectedVoiceIds) {
   const changeToken = ++state.voiceMixChangeToken;
-  const snapshot = state.clock.snapshot();
+  const snapshot = playbackSnapshot();
   const shouldResume = state.clock.running || state.voiceMixResumeRequested;
   state.voiceMixResumeRequested = shouldResume;
   if (state.clock.running) {
@@ -1091,7 +1091,7 @@ function visuallyAdvancedPitchBeat(beat) {
   return state.runtime.beatAtSeconds(Math.max(0, scoreSeconds));
 }
 
-function currentPianoRollBeat(snapshot = state.clock.snapshot()) {
+function currentPianoRollBeat(snapshot = playbackSnapshot()) {
   return delayedVisualBeat(state.runtime, snapshot.performanceTime, snapshot.speed, state.pianoRollDelayMs);
 }
 
@@ -1312,7 +1312,7 @@ function render() {
   if (state.rafId) cancelAnimationFrame(state.rafId);
   state.rafId = null;
   if (!state.runtime) return;
-  let snapshot = state.clock.snapshot();
+  let snapshot = playbackSnapshot();
   const endBeat = totalBeats();
   if (state.attemptActive && snapshot.beat >= endBeat - .01) {
     state.clock.pause(); state.clock.seekBeat(endBeat); snapshot = state.clock.snapshot();
@@ -1435,6 +1435,13 @@ function applyPendingAudioSeek() {
   return applied;
 }
 
+function playbackSnapshot() {
+  const snapshot = state.clock.snapshot();
+  if (state.pendingAudioTime == null || snapshot.running) return snapshot;
+  const performanceTime = state.pendingAudioTime;
+  return { ...snapshot, performanceTime, beat: state.runtime.beatAtSeconds(performanceTime) };
+}
+
 function queueAudioSeek(performanceTime) {
   state.pendingAudioTime = Math.max(0, Number(performanceTime) || 0);
   const target = state.pendingAudioTime;
@@ -1458,19 +1465,23 @@ function seekToMeasure(index, autoPlay = false, preRoll = true) {
   const playbackNumber = state.occurrenceMeasures[Math.max(0, seek.selectedIndex - 1)]?.number ?? 1;
   const scoringNumber = state.occurrenceMeasures[seek.selectedIndex]?.number ?? 1;
   els.scoringCue.textContent = seek.playbackStart === seek.scoringStart ? `Ingresso da ${scoringNumber}` : `Preascolto ${playbackNumber} · ingresso ${scoringNumber}`;
-  if (autoPlay && !state.clock.running) state.clock.play().then(() => { updatePlaybackButton(); requestAnimationFrame(render); });
+  if (autoPlay && !state.clock.running) void togglePlayback();
   updatePlaybackButton(); render();
 }
 
 async function togglePlayback() {
   if (!state.bundleApproved) { showToast('Serve l’approvazione admin di questo bundle.'); return; }
   if (state.playbackPlan?.kind === 'muted') { showToast('Attiva almeno una traccia nel Mixer.'); return; }
-  if (state.clock.snapshot().beat >= totalBeats()) state.clock.seekBeat(0);
+  if (playbackSnapshot().beat >= totalBeats()) state.clock.seekBeat(0);
   if (state.clock.running) {
     state.clock.pause();
     savePitchHistory();
   } else {
     state.gridInspect.active = false;
+    if (state.pendingAudioTime != null) {
+      await waitForMediaReady(els.backingAudio, 3);
+      applyPendingAudioSeek();
+    }
     try {
       await state.playbackMixer.resume([els.backingAudio, ...state.voiceStemAudio.values()]);
       syncBackingLevel();
@@ -1486,7 +1497,7 @@ async function togglePlayback() {
     if (!state.attemptActive) {
       state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
     }
-    try { await state.clock.play(); }
+    try { await state.clock.play(); applyPendingAudioSeek(); }
     catch (error) { console.error('Audio playback failed', error, els.backingAudio.error); showToast(`Audio non avviato: ${error?.message || 'sorgente non disponibile'}`); }
     state.attemptActive = state.clock.running;
   }
@@ -3032,7 +3043,7 @@ function showAttemptResult({ preliminary = false } = {}) {
   els.resultResume.hidden = !preliminary;
   els.resultProgress.textContent = '';
   if (preliminary) {
-    const measure = state.occurrenceMeasures[measureIndexAt(state.clock.snapshot().beat)];
+    const measure = state.occurrenceMeasures[measureIndexAt(playbackSnapshot().beat)];
     els.resultProgress.textContent = `Calcolato fino alla battuta ${measure?.number ?? 'corrente'}. Puoi riprendere dallo stesso punto senza perdere i dati raccolti.`;
   }
   if (state.attempt.voicedMs < 1000) {
@@ -3423,8 +3434,8 @@ function bindControls() {
     if (state.benchmark.capture) { event.preventDefault(); els.benchmarkStatus.textContent = 'Interrompi o scarta prima la registrazione attiva.'; }
   });
   els.neuralLive.addEventListener('click', toggleNeuralLive);
-  els.previousMeasure.addEventListener('click', () => seekToMeasure(Math.max(0, measureIndexAt(state.clock.snapshot().beat) - 1), false, false));
-  els.nextMeasure.addEventListener('click', () => seekToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(state.clock.snapshot().beat) + 1), false, false));
+  els.previousMeasure.addEventListener('click', () => seekToMeasure(Math.max(0, measureIndexAt(playbackSnapshot().beat) - 1), false, false));
+  els.nextMeasure.addEventListener('click', () => seekToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(playbackSnapshot().beat) + 1), false, false));
   els.partSelector.addEventListener('change', () => changePart(els.partSelector.value));
   els.playbackSpeed.addEventListener('change', async () => {
     state.attemptActive = false; state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
@@ -3558,8 +3569,8 @@ function bindControls() {
       void togglePlayback();
       return;
     }
-    if (event.code === 'ArrowLeft' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) - 1, false, false);
-    if (event.code === 'ArrowRight' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) + 1, false, false);
+    if (event.code === 'ArrowLeft' && event.altKey) seekToMeasure(measureIndexAt(playbackSnapshot().beat) - 1, false, false);
+    if (event.code === 'ArrowRight' && event.altKey) seekToMeasure(measureIndexAt(playbackSnapshot().beat) + 1, false, false);
   });
   els.scoreImage.addEventListener('load', () => { state.activeScoreSegment = null; els.scoreLoading.hidden = true; render(); });
   els.scoreImage.addEventListener('error', () => { els.scoreLoading.hidden = false; els.scoreLoading.textContent = 'Spartito non disponibile'; });
