@@ -226,6 +226,19 @@
     context.beginPath(); context.arc(head.x, head.y, head.radius, 0, Math.PI * 2); context.fill();
   }
 
+  function drawPitchMarker(context, x, y) {
+    context.save();
+    context.shadowColor = 'rgba(114,224,210,.95)';
+    context.shadowBlur = 14;
+    context.fillStyle = '#82f2e6';
+    context.beginPath(); context.arc(x, y, 4.5, 0, Math.PI * 2); context.fill();
+    context.shadowBlur = 0;
+    context.lineWidth = 1;
+    context.strokeStyle = 'rgba(225,255,251,.9)';
+    context.stroke();
+    context.restore();
+  }
+
   function drawLiveHead(context, samples, xAt, yAt, options = {}) {
     const head = liveHeadPoint(samples, xAt, yAt, options);
     if (!head) return null;
@@ -436,5 +449,5 @@
     }
   }
 
-  return { CONFIG, smoothPoints, joinOffset, trailGeometry, liveHeadPoint, drawLiveHead, drawFallback, Renderer };
+  return { CONFIG, smoothPoints, joinOffset, trailGeometry, liveHeadPoint, drawLiveHead, drawPitchMarker, drawFallback, Renderer };
 });

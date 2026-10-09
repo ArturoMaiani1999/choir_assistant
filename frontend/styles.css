@@ -163,6 +163,17 @@ select option { background: #102229; color: var(--text); }
   border-top: 1px solid var(--line);
   background: #08161c;
 }
+.practice-transport .transport-button,
+.practice-transport .feedback-button {
+  border-color: rgba(205, 214, 216, .16);
+  box-shadow: 0 1px 5px rgba(205, 214, 216, .07);
+  transition: background-color .16s ease, border-color .16s ease, box-shadow .16s ease, color .16s ease;
+}
+.practice-transport .transport-button:hover,
+.practice-transport .feedback-button:hover {
+  border-color: rgba(225, 233, 234, .36);
+  box-shadow: 0 1px 8px rgba(205, 214, 216, .17);
+}
 .transport-position { display: flex; flex-direction: column; gap: 1px; font-size: .78rem; color: var(--text); font-variant-numeric: tabular-nums; }
 .scoring-cue { color: var(--muted); font-size: .67rem; }
 .transport-controls { display: flex; align-items: center; gap: clamp(10px, 2vw, 24px); }

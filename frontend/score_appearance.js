@@ -14,7 +14,7 @@
   }
   apply(color);
   document.addEventListener('DOMContentLoaded', () => {
-    const dialog = document.getElementById('settings-dialog') || document.getElementById('lab-settings-dialog');
+    const dialog = document.getElementById('settings-dialog');
     if (!dialog) return;
     const section = document.createElement('section');
     section.className = 'score-appearance-setting';

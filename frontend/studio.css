@@ -264,3 +264,12 @@ button:disabled{cursor:not-allowed}
 .toolbar-more,.toolbar-more-menu .mode-button{display:block}
 @media(max-width:600px){.toolbar-actions .mode-button{display:inline-flex;align-items:center}.practice-shell:has(#asset-status[hidden]){grid-template-rows:110px var(--score-h) var(--splitter-h) minmax(0,1fr) 74px}.toolbar-actions .mode-button{padding-inline:6px;font-size:11px}.toolbar-more>summary{padding-inline:7px;font-size:11px}.lab-toolbar .lab-guided{display:flex}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
+.lab-conductor{display:none!important}
+.lab-workspace{grid-template-rows:86px minmax(0,1fr) 82px}
+.lab-voice-volume{display:flex;align-items:center;gap:9px;white-space:nowrap;color:#c0cfce;font-size:12px}
+.lab-voice-volume input{width:120px;accent-color:#e4bd78;cursor:pointer}
+.lab-voice-volume output{min-width:38px;color:#e4bd78;text-align:right;font-variant-numeric:tabular-nums}
+.lab-body[data-activity="ear"] .lab-voice-volume,.lab-body[data-activity="draw"] .lab-voice-volume{display:none}
+@media(max-width:1000px){.lab-workspace{grid-template-rows:110px minmax(0,1fr) 74px}.lab-voice-volume input{width:95px}}
+@media(max-width:600px){.lab-workspace{grid-template-rows:146px minmax(0,1fr) 74px}.lab-voice-volume{width:100%;justify-content:flex-start;font-size:11px}.lab-voice-volume input{width:min(160px,38vw)}}
+@media(max-height:520px) and (min-width:601px){.lab-workspace{grid-template-rows:82px minmax(0,1fr) 62px}}

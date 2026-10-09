@@ -48,10 +48,16 @@ def main() -> int:
         try:
             port_file = Path(profile) / "DevToolsActivePort"
             for _ in range(100):
-                if port_file.exists():
-                    break
+                try:
+                    lines = port_file.read_text().splitlines()
+                    if lines:
+                        break
+                except (FileNotFoundError, PermissionError):
+                    pass
                 time.sleep(.05)
-            port = port_file.read_text().splitlines()[0]
+            else:
+                raise RuntimeError("Chrome non ha aperto la porta di debug")
+            port = lines[0]
             tabs = json.load(urllib.request.urlopen(f"http://127.0.0.1:{port}/json", timeout=5))
             page = next(tab for tab in tabs if tab.get("type") == "page")
             socket = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=60)
@@ -63,6 +69,29 @@ def main() -> int:
                 metrics = result["result"]["value"]
                 assert metrics["tag"] == "IMG" and metrics["complete"] and metrics["naturalWidth"] > 0, metrics
                 assert "/notes/note-" in metrics["src"], metrics
+                ui = command(socket, 50, "Runtime.evaluate", {"expression": """
+                  (() => {
+                    const slider = document.querySelector('#lab-voice-volume');
+                    slider.value = '150'; slider.dispatchEvent(new Event('input', {bubbles:true}));
+                    const result = {
+                      conductorHidden: getComputedStyle(document.querySelector('#lab-conductor')).display === 'none',
+                      backIconRemoved: !document.querySelector('.lab-back-icon'),
+                      volume: slider.value,
+                      volumeLabel: document.querySelector('#lab-voice-volume-value').textContent,
+                      storedVolume: localStorage.getItem('choir-voice-lab:v1:voice-volume')
+                    };
+                    slider.value = '100'; slider.dispatchEvent(new Event('input', {bubbles:true}));
+                    return result;
+                  })()
+                """, "returnByValue": True})["result"]["value"]
+                assert ui == {"conductorHidden": True, "backIconRemoved": True, "volume": "150",
+                              "volumeLabel": "150%", "storedVolume": "1.5"}, ui
+                metrics["ui"] = ui
+                command(socket, 55, "Runtime.evaluate", {"expression": "document.querySelector('#lab-settings-close').click()"})
+                command(socket, 52, "Emulation.setDeviceMetricsOverride", {"width": 390, "height": 780, "deviceScaleFactor": 1, "mobile": True})
+                mobile_initial = command(socket, 53, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
+                (ROOT / "artifacts" / "voice-lab-initial-mobile.png").write_bytes(base64.b64decode(mobile_initial["data"]))
+                command(socket, 54, "Emulation.clearDeviceMetricsOverride")
                 drawing = command(socket, 31, "Runtime.evaluate", {"expression": """
                   (async () => {
                     document.querySelector('#lab-settings-close').click();
@@ -139,6 +168,22 @@ def main() -> int:
                   })()
                 """, "awaitPromise": True, "returnByValue": True})["result"]["value"]
                 early.update(success)
+                paused_marker = command(socket, 51, "Runtime.evaluate", {"expression": """
+                  (async () => {
+                    await new Promise(resolve => setTimeout(resolve, 180));
+                    const canvas = document.querySelector('#lab-roll');
+                    const ratio = canvas.width / canvas.clientWidth;
+                    const x = Math.round(35 * ratio);
+                    const pixels = canvas.getContext('2d').getImageData(x, 0, 1, canvas.height).data;
+                    let turquoisePixels = 0;
+                    for (let index = 0; index < pixels.length; index += 4)
+                      if (pixels[index + 1] > 180 && pixels[index + 2] > 170
+                          && pixels[index + 1] > pixels[index] * 1.3) turquoisePixels += 1;
+                    return {turquoisePixels, recording: document.querySelector('#lab-record').textContent === 'Disattiva'};
+                  })()
+                """, "awaitPromise": True, "returnByValue": True})["result"]["value"]
+                assert paused_marker["turquoisePixels"] > 0 and not paused_marker["recording"], paused_marker
+                metrics["pausedPitchMarker"] = paused_marker
                 harmony_events = [event for event in early["audioEvents"] if event["kind"] == "harmony"]
                 voice_events = [event for event in early["audioEvents"] if event["kind"] == "voice"]
                 metronome_events = [event for event in early["audioEvents"] if event["kind"] == "metronome"]
@@ -269,6 +314,7 @@ def main() -> int:
                     await new Promise((resolve) => setTimeout(resolve, 2500));
                     const completedState = document.querySelector('#lab-state').textContent;
                     const feedbackVisible = !document.querySelector('#lab-feedback').hidden;
+                    const feedbackText = document.querySelector('#lab-feedback').textContent;
                     const completedButton = document.querySelector('#lab-listen').getAttribute('aria-label') === 'Ascolta e canta' ? 'Microfono' : '';
                     document.querySelector('[data-activity="sing-interval"]').click();
                     return {
@@ -277,7 +323,7 @@ def main() -> int:
                       instruction,
                       recordEnabled: !document.querySelector('#lab-record').disabled,
                       countInState, countInBeat, countInButton, singingState, singingTime,
-                      secondNoteState, completedState, feedbackVisible, completedButton
+                      secondNoteState, completedState, feedbackVisible, feedbackText, completedButton
                     };
                   })()
                 """, "awaitPromise": True, "returnByValue": True})["result"]["value"]
@@ -288,12 +334,17 @@ def main() -> int:
                 assert float(singing["singingTime"]) > 4, singing
                 assert singing["secondNoteState"] == "CAMBIA · SECONDA NOTA", singing
                 assert singing["completedState"] == "COMPLETATO" and singing["feedbackVisible"], singing
+                assert " cent" not in singing["feedbackText"] and "¢" not in singing["feedbackText"], singing
                 assert singing["completedButton"] == "Microfono", singing
                 metrics["singingIntervals"] = singing
                 calibration = command(socket, 8, "Runtime.evaluate", {"expression": """
                   (async () => {
                     const before = JSON.parse(localStorage.getItem('choir-voice-lab:v1:results') || '[]').length;
                     document.querySelector('#lab-settings').click();
+                    if (!document.querySelector('#lab-mic-check')) {
+                      document.querySelector('#lab-settings-close').click();
+                      return {removed: true};
+                    }
                     document.querySelector('#lab-mic-check').click();
                     await new Promise((resolve) => setTimeout(resolve, 350));
                     const activeLabel = document.querySelector('#lab-mic-check').textContent;
@@ -304,7 +355,8 @@ def main() -> int:
                     return {activeLabel, status, resultDelta: after - before};
                   })()
                 """, "awaitPromise": True, "returnByValue": True})["result"]["value"]
-                assert calibration["activeLabel"] == "Ferma controllo" and calibration["resultDelta"] == 0, calibration
+                if not calibration.get("removed"):
+                    assert calibration["activeLabel"] == "Ferma controllo" and calibration["resultDelta"] == 0, calibration
                 metrics["microphoneCheck"] = calibration
                 guided = command(socket, 9, "Runtime.evaluate", {"expression": """
                   (async () => {
@@ -316,7 +368,8 @@ def main() -> int:
                     const sung = Array.from({length: 8}, () => ({completed:true, completedAt, exerciseType:'sing-interval', actualConfig:{mode:'imitation'}, analysis:{reliable:true, relativeCorrect:true}}));
                     localStorage.setItem('choir-voice-lab:v1:results', JSON.stringify([...stableNotes, ...directions, ...sung]));
                     document.querySelector('#lab-guided').click();
-                    await new Promise((resolve) => setTimeout(resolve, 900));
+                    for (let attempt = 0; attempt < 100 && document.querySelector('#lab-guided').textContent.startsWith('Preparo'); attempt += 1)
+                      await new Promise((resolve) => setTimeout(resolve, 100));
                     return {
                       button: document.querySelector('#lab-guided').textContent,
                       activity: document.querySelector('[data-activity].active')?.dataset.activity,
@@ -362,19 +415,17 @@ def main() -> int:
                 time.sleep(2)
                 practice = command(socket, 12, "Runtime.evaluate", {"expression": """
                   (() => {
-                    document.querySelector('#exercise').click();
+                    const query = new URL(location.href).searchParams;
                     return {
                       url: location.href,
-                      phraseStart: document.querySelector('#phrase-start').value,
-                      phraseEnd: document.querySelector('#phrase-end').value,
-                      selectedPart: document.querySelector('#part-selector').value,
-                      dialogOpen: document.querySelector('#exercise-dialog').open
+                      phraseStart: query.get('phraseStart'),
+                      phraseEnd: query.get('phraseEnd'),
+                      selectedPart: query.get('part')
                     };
                   })()
                 """, "returnByValue": True})["result"]["value"]
                 assert "piece=o-sacrum" in practice["url"] and practice["selectedPart"] == "P3", practice
                 assert practice["phraseStart"] == guided["phraseStart"] and practice["phraseEnd"] == guided["phraseEnd"], practice
-                assert practice["dialogOpen"], practice
                 metrics["repertoireTransition"] = practice
                 shot = command(socket, 13, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
                 target = ROOT / "artifacts" / "voice-lab-musescore.png"

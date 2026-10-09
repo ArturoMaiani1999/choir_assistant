@@ -1206,8 +1206,12 @@ function drawPitchLane(beat) {
   ctx.beginPath(); ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top); ctx.clip();
   if (state.pitchLayers.v1) {
     const v1PlumeSamples = state.pitchSamples.filter((sample) => (inspecting || sample.takeId === state.pitchTakeId) && sample.beat >= visibleStart && sample.beat <= visibleEnd);
-    const xAtVoice = (sample) => inspecting ? timeToX(sample.beat, displayBeat, plot.left, plot.right, historyBeats, futureBeats)
-      : Math.min(melodyHeadX, timeToX(visuallyAdvancedPitchBeat(sample.beat), displayBeat, plot.left, plot.right, historyBeats, futureBeats));
+    const xAtVoice = (sample) => {
+      // Keep the detector-latency correction when switching from the live
+      // ribbon to the paused history view, including after zooming out.
+      const x = timeToX(visuallyAdvancedPitchBeat(sample.beat), displayBeat, plot.left, plot.right, historyBeats, futureBeats);
+      return inspecting ? x : Math.min(melodyHeadX, x);
+    };
     const yAtVoice = (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
     const trailSettings = { ...livePlumeSettings(displayBeat, inspecting, inspecting ? plot.right : melodyHeadX, plot.left),
       ribbonScale: state.plumeSettings.width, intensity: state.plumeSettings.intensity, dpr, width: rect.width, height: rect.height,
@@ -1251,18 +1255,7 @@ function drawPitchLane(beat) {
   if (Number.isFinite(state.displayPitch)) {
     const markerY = Math.max(plot.top + 4, Math.min(plot.bottom - 4,
       pitchToY(state.displayPitch, bounds.min, bounds.max, plot.top, plot.bottom)));
-    ctx.save();
-    ctx.shadowColor = 'rgba(114,224,210,.95)';
-    ctx.shadowBlur = 14;
-    ctx.fillStyle = '#82f2e6';
-    ctx.beginPath();
-    ctx.arc(noteLabelX - 10, markerY, 4.5, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.shadowBlur = 0;
-    ctx.lineWidth = 1;
-    ctx.strokeStyle = 'rgba(225,255,251,.9)';
-    ctx.stroke();
-    ctx.restore();
+    FluidPitchTrail.drawPitchMarker(ctx, noteLabelX - 10, markerY);
   }
   if (Number.isFinite(state.displayPitch) && (state.displayPitch < bounds.min || state.displayPitch > bounds.max)) {
     ctx.fillStyle = '#68d1cb'; ctx.textAlign = 'left';
@@ -3534,7 +3527,14 @@ function bindControls() {
   window.addEventListener('resize', () => { if (!els.benchmarkAnalysis.hidden) drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); });
   window.addEventListener('beforeunload', () => { savePitchHistory(); state.microphoneStream?.getTracks().forEach((track) => track.stop()); });
   document.addEventListener('keydown', (event) => {
-    if (event.code === 'Space' && !['SELECT', 'INPUT', 'BUTTON'].includes(document.activeElement?.tagName)) { event.preventDefault(); togglePlayback(); }
+    const targetTag = event.target?.tagName;
+    const editingText = event.target?.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(targetTag);
+    if (event.code === 'Space' && !editingText) {
+      event.preventDefault();
+      event.stopPropagation();
+      void togglePlayback();
+      return;
+    }
     if (event.code === 'ArrowLeft' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) - 1, false, false);
     if (event.code === 'ArrowRight' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) + 1, false, false);
   });

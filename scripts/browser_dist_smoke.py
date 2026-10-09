@@ -162,6 +162,49 @@ def main() -> int:
             assert visual_delay["changed"]["advance"] == visual_delay["advance"], visual_delay
             assert visual_delay["restored"] == 150, visual_delay
 
+            pitch_history_alignment = evaluate(socket, call_id, """(() => {
+              const previous = { samples: state.pitchSamples, takeId: state.pitchTakeId,
+                inspect: state.gridInspect, viewport: state.pitchViewport, render: fluidTrailRenderer.render };
+              const beat = Math.min(12, totalBeats() - 2);
+              const sample = { beat: beat - 1, displayPitch: 60, trackedPitch: 60,
+                confidence: 1, clarity: 1, takeId: 777 };
+              const canvas = els.pitchLane;
+              const width = canvas.getBoundingClientRect().width;
+              const left = width < 700 ? 48 : 58, right = width - 8;
+              const beatAtX = (x, zoom) => {
+                const history = UI_CONFIG.historyBeats / zoom;
+                const future = UI_CONFIG.futureBeats / zoom;
+                const nowX = timeToX(beat, beat, left, right, history, future);
+                return beat + (x - nowX) * (history + future) / (right - left);
+              };
+              let capturedX = null;
+              try {
+                state.pitchSamples = [sample];
+                state.pitchTakeId = sample.takeId;
+                fluidTrailRenderer.render = (_samples, xAt) => { capturedX = xAt(sample); return true; };
+                state.gridInspect = { ...previous.inspect, active: false };
+                drawPitchLane(beat);
+                const liveBeat = beatAtX(capturedX, 1);
+                state.gridInspect = { ...previous.inspect, active: true, viewBeat: beat,
+                  timeZoom: .55, pitchZoom: 1 };
+                drawPitchLane(beat);
+                const reviewBeat = beatAtX(capturedX, state.gridInspect.timeZoom);
+                return { liveBeat, reviewBeat, expectedBeat: visuallyAdvancedPitchBeat(sample.beat),
+                  timeZoom: state.gridInspect.timeZoom };
+              } finally {
+                state.pitchSamples = previous.samples;
+                state.pitchTakeId = previous.takeId;
+                state.gridInspect = previous.inspect;
+                state.pitchViewport = previous.viewport;
+                fluidTrailRenderer.render = previous.render;
+                render();
+              }
+            })()""")
+            call_id += 1
+            assert pitch_history_alignment["timeZoom"] < 1, pitch_history_alignment
+            assert abs(pitch_history_alignment["liveBeat"] - pitch_history_alignment["reviewBeat"]) < .001, pitch_history_alignment
+            assert abs(pitch_history_alignment["reviewBeat"] - pitch_history_alignment["expectedBeat"]) < .001, pitch_history_alignment
+
             voice_mix = evaluate(socket, call_id, """(async () => {
               const allIds = Object.keys(state.backingManifest?.voice_stems ?? {});
               await state.playbackMixer.resume([els.backingAudio, ...state.voiceStemAudio.values()]);
@@ -374,8 +417,35 @@ def main() -> int:
                 "width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False,
             })
             call_id += 1
-            evaluate(socket, call_id, "document.querySelector('#voice-mixer-dialog').close()")
+            keyboard_mixer_setup = evaluate(socket, call_id, """(() => {
+              state.clock.pause(); state.attemptActive = false; state.attempt = {voicedMs:0, insideMs:0};
+              const opener = document.querySelector('#accompaniment-mode');
+              const dialog = document.querySelector('#voice-mixer-dialog');
+              dialog.close(); opener.focus(); opener.click();
+              document.querySelector('#voice-mixer-close').click();
+              return {dialogClosed: !dialog.open, focusRestored: document.activeElement === opener};
+            })()""")
             call_id += 1
+            assert keyboard_mixer_setup == {"dialogClosed": True, "focusRestored": True}, keyboard_mixer_setup
+            command(socket, call_id, "Input.dispatchKeyEvent", {
+                "type": "keyDown", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
+            })
+            call_id += 1
+            command(socket, call_id, "Input.dispatchKeyEvent", {
+                "type": "keyUp", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
+            })
+            call_id += 1
+            mixer_space = evaluate(socket, call_id, """(async () => {
+              const dialog = document.querySelector('#voice-mixer-dialog');
+              for (let i = 0; i < 60 && !state.clock.running && !dialog.open; i++)
+                await new Promise(resolve => setTimeout(resolve, 50));
+              const result = {running: state.clock.running, dialogOpen: dialog.open};
+              state.clock.pause(); state.attemptActive = false;
+              if (dialog.open) dialog.close();
+              return result;
+            })()""")
+            call_id += 1
+            assert mixer_space["running"] and not mixer_space["dialogOpen"], mixer_space
             seek_probe = evaluate(socket, call_id, """(() => {
               state.clock.pause();
               seekToMeasure(0, false, false);
@@ -522,6 +592,7 @@ def main() -> int:
                   document.querySelectorAll('.viewer-page').length
                   && [...document.querySelectorAll('.viewer-page img')]
                     .every(image => image.complete && image.naturalWidth)
+                  && document.querySelector('#viewer-audio')?.readyState >= 2
                 )""")
                 call_id += 1
                 if viewer_ready:
@@ -543,21 +614,46 @@ def main() -> int:
                 "width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True,
             })
             call_id += 1
-            viewer = evaluate(socket, call_id, r"""(async () => {
+            viewer_setup = evaluate(socket, call_id, r"""(() => {
               const grayPaper = document.querySelector('[data-paper="#e3e8e6"]');
               grayPaper.click();
               const audio = document.querySelector('#viewer-audio');
               const mixerButton = document.querySelector('#viewer-mixer-open');
-              const mixerDialog = document.querySelector('#viewer-mixer');
-              const space = () => mixerButton.dispatchEvent(new KeyboardEvent('keydown', {
-                code: 'Space', key: ' ', bubbles: true, cancelable: true
-              }));
               mixerButton.focus();
-              space();
-              await new Promise(resolve => setTimeout(resolve, 180));
+              return {audioPaused: audio.paused, mixerDialogOpen: document.querySelector('#viewer-mixer').open};
+            })()""")
+            call_id += 1
+            assert viewer_setup == {"audioPaused": True, "mixerDialogOpen": False}, viewer_setup
+            command(socket, call_id, "Input.dispatchKeyEvent", {
+                "type": "keyDown", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
+            })
+            call_id += 1
+            command(socket, call_id, "Input.dispatchKeyEvent", {
+                "type": "keyUp", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
+            })
+            call_id += 1
+            viewer_start = evaluate(socket, call_id, r"""(async () => {
+              const audio = document.querySelector('#viewer-audio');
+              const mixerDialog = document.querySelector('#viewer-mixer');
+              for (let i = 0; i < 30 && audio.paused; i++)
+                await new Promise(resolve => setTimeout(resolve, 50));
               const keyboardStartedPlayback = !audio.paused;
               const spaceDidNotOpenMixer = !mixerDialog.open;
-              space();
+              return {keyboardStartedPlayback, spaceDidNotOpenMixer};
+            })()""")
+            call_id += 1
+            command(socket, call_id, "Input.dispatchKeyEvent", {
+                "type": "keyDown", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
+            })
+            call_id += 1
+            command(socket, call_id, "Input.dispatchKeyEvent", {
+                "type": "keyUp", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
+            })
+            call_id += 1
+            viewer_state = evaluate(socket, call_id, r"""(async () => {
+              const audio = document.querySelector('#viewer-audio');
+              const mixerButton = document.querySelector('#viewer-mixer-open');
+              const mixerDialog = document.querySelector('#viewer-mixer');
               await new Promise(resolve => setTimeout(resolve, 80));
               const keyboardPausedPlayback = audio.paused;
               mixerButton.click();
@@ -569,10 +665,37 @@ def main() -> int:
               }
               const mixerEditsStayPaused = audio.paused && mixerDialog.open;
               document.querySelector('#viewer-mixer-close').click();
-              space();
+              return {keyboardPausedPlayback, mixerOpensPaused, mixerChannels: mixerChannels.length,
+                mixerEditsStayPaused, mixerDialogOpen: mixerDialog.open};
+            })()""")
+            call_id += 1
+            command(socket, call_id, "Input.dispatchKeyEvent", {
+                "type": "keyDown", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
+            })
+            call_id += 1
+            command(socket, call_id, "Input.dispatchKeyEvent", {
+                "type": "keyUp", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
+            })
+            call_id += 1
+            viewer_resume = evaluate(socket, call_id, r"""(async () => {
+              const audio = document.querySelector('#viewer-audio');
               await new Promise(resolve => setTimeout(resolve, 150));
               const keyboardResumesAfterMixer = !audio.paused;
-              space();
+              return {keyboardResumesAfterMixer};
+            })()""")
+            call_id += 1
+            command(socket, call_id, "Input.dispatchKeyEvent", {
+                "type": "keyDown", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
+            })
+            call_id += 1
+            command(socket, call_id, "Input.dispatchKeyEvent", {
+                "type": "keyUp", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
+            })
+            call_id += 1
+            viewer = evaluate(socket, call_id, r"""(async () => {
+              const audio = document.querySelector('#viewer-audio');
+              const mixerDialog = document.querySelector('#viewer-mixer');
+              const grayPaper = document.querySelector('[data-paper="#e3e8e6"]');
               await new Promise(resolve => setTimeout(resolve, 80));
               window.scrollTo(0, 500);
               await new Promise(resolve => setTimeout(resolve, 150));
@@ -581,13 +704,6 @@ def main() -> int:
                 pageCount: document.querySelectorAll('.viewer-page').length,
                 audioTransport: Boolean(audio && document.querySelector('#viewer-play')),
                 playheadCount: document.querySelectorAll('.viewer-playhead').length,
-                keyboardStartedPlayback,
-                spaceDidNotOpenMixer,
-                keyboardPausedPlayback,
-                mixerOpensPaused,
-                mixerChannels: mixerChannels.length,
-                mixerEditsStayPaused,
-                keyboardResumesAfterMixer,
                 getUserMediaCalls: window.__getUserMediaCalls,
                 hasPitchUi: Boolean(document.querySelector(
                   'canvas, #pitch-lane, .pitch-region, #microphone, #microphone-level'
@@ -605,6 +721,9 @@ def main() -> int:
                 resources
               };
             })()""")
+            viewer.update(viewer_start)
+            viewer.update(viewer_state)
+            viewer.update(viewer_resume)
 
             viewer_external = []
             for resource in viewer["resources"]:
@@ -637,6 +756,7 @@ def main() -> int:
                 "part": result["selectedPart"],
                 "defaultPlumeWidth": result["plumeWidthLabel"],
                 "visualDelay": visual_delay,
+                "pitchHistoryAlignment": pitch_history_alignment,
                 "resourceCount": len(result["resources"]),
                 "microphone": microphone,
                 "preliminaryResult": preliminary_result,

@@ -7,7 +7,7 @@
   const $ = (id) => document.getElementById(id);
   const drawBoard = $('lab-draw-board'), drawLeft = $('lab-draw-left'), drawRight = $('lab-draw-right');
   const drawKeys = new Set();
-  const els = Object.fromEntries(['lab-range-label', 'lab-kind', 'lab-title', 'lab-instruction', 'lab-config', 'lab-session-progress', 'lab-conductor', 'lab-conductor-eyebrow', 'lab-conductor-message', 'lab-conductor-beats', 'lab-conductor-detail', 'lab-score', 'lab-score-curtain', 'lab-roll', 'lab-fluid-layer', 'lab-target', 'lab-frequency', 'lab-state', 'lab-countdown', 'lab-level', 'lab-hold-progress', 'lab-hold-time', 'lab-hold-track', 'lab-hold-fill', 'lab-hold-hint', 'lab-pitch-success', 'lab-success-index', 'lab-success-note', 'lab-success-hold', 'lab-success-time', 'lab-success-next', 'lab-new', 'lab-hint', 'lab-listen', 'lab-continue', 'lab-record', 'lab-answer', 'lab-feedback', 'lab-feedback-title', 'lab-feedback-message', 'lab-metrics', 'lab-chart', 'lab-play-take', 'lab-retry', 'lab-next', 'lab-note', 'lab-guided', 'lab-settings', 'lab-settings-dialog', 'lab-role', 'lab-low', 'lab-high', 'lab-mic-check', 'lab-mic-check-level', 'lab-mic-check-status', 'lab-settings-save', 'lab-settings-close'].map((id) => [id.replaceAll('-', '_'), $(id)]));
+  const els = Object.fromEntries(['lab-range-label', 'lab-kind', 'lab-title', 'lab-instruction', 'lab-config', 'lab-session-progress', 'lab-voice-volume', 'lab-voice-volume-value', 'lab-conductor', 'lab-conductor-eyebrow', 'lab-conductor-message', 'lab-conductor-beats', 'lab-conductor-detail', 'lab-score', 'lab-score-curtain', 'lab-roll', 'lab-fluid-layer', 'lab-target', 'lab-frequency', 'lab-state', 'lab-countdown', 'lab-level', 'lab-hold-progress', 'lab-hold-time', 'lab-hold-track', 'lab-hold-fill', 'lab-hold-hint', 'lab-pitch-success', 'lab-success-index', 'lab-success-note', 'lab-success-hold', 'lab-success-time', 'lab-success-next', 'lab-new', 'lab-hint', 'lab-listen', 'lab-continue', 'lab-record', 'lab-answer', 'lab-feedback', 'lab-feedback-title', 'lab-feedback-message', 'lab-metrics', 'lab-chart', 'lab-play-take', 'lab-retry', 'lab-next', 'lab-note', 'lab-guided', 'lab-settings', 'lab-settings-dialog', 'lab-role', 'lab-low', 'lab-high', 'lab-range-keyboard', 'lab-range-preview', 'lab-range-error', 'lab-settings-save', 'lab-settings-close'].map((id) => [id.replaceAll('-', '_'), $(id)]));
   const STORE = 'choir-voice-lab:v1', MAX_RESULTS = 200;
   let soloStartedAt = null, preparing = false, preparationId = 0;
   const phase = document.createElement('div'); phase.className = 'lab-phase'; phase.setAttribute('role', 'status');
@@ -70,7 +70,14 @@
   const FINAL_DIMINUENDO_SECONDS = 4.8;
   const sharedPitch = PitchShared.readPreferences();
   const fluidTrailRenderer = new FluidPitchTrail.Renderer(els.lab_fluid_layer);
-  const state = { activity: 'repeat', role: 'tenor', range: { ...ROLE_RANGES.tenor }, exercise: null, harmony: null, pitchSession: null, earSession: null, singSession: null, drawSession: null, drawFrame: null, drawGuideEnabled: false, guidedSession: null, autoCompleting: false, advanceTimer: null, countInTimers: [], countInFrame: null, countInStartedAt: 0, metronomeSources: [], accompanimentSources: [], countingIn: false, audio: null, voiceBuffers: new Map(), stringBuffers: new Map(), reference: null, referenceTimer: null, stream: null, analyser: null, input: null, recording: false, calibrationActive: false, calibrationGeneration: 0, mediaRecorder: null, chunks: [], generation: 0, frames: [], visualFrames: [], startedAt: 0, elapsedSeconds: 0, audioUrl: null, rollBounds: null, detectorSettings: sharedPitch.detector, plumeSettings: sharedPitch.plume };
+  const state = { activity: 'repeat', role: 'tenor', range: { ...ROLE_RANGES.tenor }, exercise: null, harmony: null, pitchSession: null, earSession: null, singSession: null, drawSession: null, drawFrame: null, drawGuideEnabled: false, guidedSession: null, autoCompleting: false, advanceTimer: null, countInTimers: [], countInFrame: null, countInStartedAt: 0, metronomeSources: [], accompanimentSources: [], countingIn: false, audio: null, voiceOutput: null, voiceVolume: 1, voiceBuffers: new Map(), stringBuffers: new Map(), reference: null, referenceTimer: null, stream: null, analyser: null, input: null, recording: false, monitorFrame: null, monitorBuffer: null, monitorSmoother: null, monitorFilter: new OneEuroFilter(), livePitch: null, mediaRecorder: null, chunks: [], generation: 0, frames: [], visualFrames: [], startedAt: 0, elapsedSeconds: 0, audioUrl: null, rollBounds: null, detectorSettings: sharedPitch.detector, plumeSettings: sharedPitch.plume };
+  try {
+    const savedVolume = localStorage.getItem(`${STORE}:voice-volume`);
+    if (savedVolume !== null && Number.isFinite(Number(savedVolume)))
+      state.voiceVolume = Math.max(0, Math.min(2, Number(savedVolume)));
+  } catch (_) {}
+  els.lab_voice_volume.value = String(Math.round(state.voiceVolume * 100));
+  els.lab_voice_volume_value.textContent = `${els.lab_voice_volume.value}%`;
   function activeRecognitionSettings() { return PitchShared.recognitionSettings(state.detectorSettings); }
   state.repeatTimeline = null; state.takeAudioStart = 0; state.conductorStage = null; state.conductorBeat = -1; state.assisted = false; state.answerRevealed = false;
   let needsRoleSetup = true;
@@ -188,8 +195,10 @@
     const inspecting = !state.recording && !state.countingIn && state.frames.length > 0;
     const advanceSeconds = Math.max(0, Math.min(PitchShared.PLUME_ADVANCE_MAX_MS / 1000,
       Number(state.plumeSettings.timeAdvanceMs) / 1000 || 0));
-    const xAtFrame = (frame) => inspecting ? xAtTime(frame.time)
-      : Math.min(nowX, xAtTime(Math.max(0, frame.time - advanceSeconds)));
+    const xAtFrame = (frame) => {
+      const x = xAtTime(Math.max(0, frame.time - advanceSeconds));
+      return inspecting ? x : Math.min(nowX, x);
+    };
     const plumeSettings = { ...state.plumeSettings, nowX: inspecting ? right : nowX,
       trailStartX: keyboardRight, currentTime: elapsed, timeAt: frame => frame.time,
       minConfidence: recognition.minConfidence,
@@ -202,13 +211,20 @@
         animationTime: state.recording ? performance.now() / 1000 : elapsed };
       if (!fluidTrailRenderer.render(ribbonFrames, xAtFrame, yAt, fluidSettings))
         FluidPitchTrail.drawFallback(ctx, ribbonFrames, xAtFrame, yAt, fluidSettings);
+      else if (!inspecting)
+        FluidPitchTrail.drawLiveHead(ctx, ribbonFrames, xAtFrame, yAt, fluidSettings);
+      if (inspecting && voiced.length) {
+        const last = voiced.at(-1);
+        const x = xAtFrame(last);
+        if (x >= keyboardRight && x <= right) FluidPitchTrail.drawPitchMarker(ctx, x, yAt(last.displayPitch));
+      }
     } else PitchShared.drawConfidencePlume(ctx, ribbonFrames, xAtFrame, yAt, minMidi, maxMidi, plumeSettings);
     const countInDuration = Core.INTERVAL_TIMING.countInBeats * 60 / Core.INTERVAL_TIMING.bpm;
     const countInFraction = state.countingIn ? Math.min(1, Math.max(0, (audioContext().currentTime - state.countInStartedAt) / countInDuration)) : 0;
     const cursorX = state.countingIn ? keyboardRight + historyWidth * countInFraction : state.recording || state.frames.length ? nowX : keyboardRight;
     ctx.strokeStyle = '#8ee0d8'; ctx.lineWidth = 2; ctx.beginPath(); ctx.moveTo(cursorX, 0); ctx.lineTo(cursorX, height); ctx.stroke();
-    const latest = voiced.at(-1);
-    if (latest && elapsed - latest.time < .2) { const midi = latest.displayPitch, y = yAt(midi), target = targets[0], cents = Math.round((midi - target) * 100); ctx.fillStyle = '#72e0d2'; ctx.font = '700 12px system-ui'; ctx.fillText(`${Core.midiToName(Math.round(midi))}  ${cents > 0 ? '+' : ''}${cents}¢`, nowX + 12, Math.max(28, Math.min(height - 10, y + 4))); }
+    if (Number.isFinite(state.livePitch))
+      FluidPitchTrail.drawPitchMarker(ctx, keyboardRight - 10, Math.max(20, Math.min(height - 20, yAt(state.livePitch))));
   }
   function drawDrawingBoard() {
     if (!state.drawSession || drawBoard.hidden) return;
@@ -326,6 +342,14 @@
     state.drawFrame = requestAnimationFrame(tick);
   }
   function audioContext() { return state.audio ??= new (window.AudioContext || window.webkitAudioContext)(); }
+  function voiceOutput() {
+    if (!state.voiceOutput) {
+      state.voiceOutput = audioContext().createGain();
+      state.voiceOutput.gain.value = state.voiceVolume;
+      state.voiceOutput.connect(audioContext().destination);
+    }
+    return state.voiceOutput;
+  }
   function reportAudioEvent(kind, at, details = {}) {
     window.dispatchEvent(new CustomEvent('voice-lab-audio-event', { detail: { kind, at, ...details } }));
   }
@@ -426,7 +450,7 @@
     const fadeStart = Math.max(at + .08, at + duration - diminuendoSeconds);
     gain.gain.setValueAtTime(.0001, at); gain.gain.exponentialRampToValueAtTime(gainValue, at + .12);
     gain.gain.setValueAtTime(gainValue, fadeStart); gain.gain.exponentialRampToValueAtTime(.0001, at + duration);
-    source.connect(gain).connect(context.destination); source.start(at); source.stop(at + duration + .03);
+    source.connect(gain).connect(voiceOutput()); source.start(at); source.stop(at + duration + .03);
     reportAudioEvent('voice', at, { end: at + duration, diminuendoStart: fadeStart, midi: note.midi, anchor,
       role: state.role, gain: gainValue, sampleRms: asset.rms, sourceDuration: asset.buffer.duration }); return { source, gain };
   }
@@ -446,7 +470,7 @@
     gain.gain.exponentialRampToValueAtTime(.035, transitionEnd);
     gain.gain.setValueAtTime(.035, Math.max(transitionEnd, endAt - .45));
     gain.gain.exponentialRampToValueAtTime(.0001, endAt);
-    source.connect(gain).connect(context.destination); source.start(at); source.stop(endAt + .03);
+    source.connect(gain).connect(voiceOutput()); source.start(at); source.stop(endAt + .03);
     reportAudioEvent('voice', at, { end: endAt, scoringAt, transitionEnd, sustainedGain: .035, midi: note.midi,
       anchor, role: state.role, gain: .18, sampleRms: asset.rms, sourceDuration: asset.buffer.duration });
     return source;
@@ -547,7 +571,7 @@
     cancelPendingAdvance();
     hideHoldProgress();
     document.body.dataset.activity = state.activity;
-    els.lab_conductor.hidden = !['repeat', 'sing-interval'].includes(state.activity);
+    els.lab_conductor.hidden = true;
     els.lab_hint.hidden = true;
     setConductor('ready');
     drawLeft.hidden = drawRight.hidden = state.activity !== 'draw';
@@ -809,32 +833,39 @@
     }));
   }
   async function ensureMicrophone() {
-    if (state.stream?.active) return;
+    if (state.stream?.active) { startPitchMonitor(); return; }
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) throw new Error('Il microfono richiede una connessione sicura.');
     state.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 }, video: false });
     const context = audioContext(); await context.resume(); state.input = context.createMediaStreamSource(state.stream); state.analyser = context.createAnalyser(); state.analyser.fftSize = 2048; state.input.connect(state.analyser);
+    startPitchMonitor();
   }
-  function stopMicrophoneCheck() {
-    if (!state.calibrationActive) return;
-    state.calibrationActive = false; state.calibrationGeneration += 1; els.lab_mic_check_level.value = 0;
-    els.lab_mic_check.textContent = 'Avvia controllo'; els.lab_mic_check_status.textContent = 'Prova libera, non valutata';
-  }
-  async function toggleMicrophoneCheck() {
-    if (state.calibrationActive) { stopMicrophoneCheck(); return; }
-    try { await ensureMicrophone(); } catch (error) { els.lab_mic_check_status.textContent = error.message; return; }
-    const generation = ++state.calibrationGeneration, buffer = new Float32Array(state.analyser.fftSize), smoother = new PitchSmoother();
-    const recognition = activeRecognitionSettings();
-    smoother.configure({ ...state.detectorSettings, ...recognition }); state.calibrationActive = true; els.lab_mic_check.textContent = 'Ferma controllo';
-    const tick = () => {
-      if (!state.calibrationActive || generation !== state.calibrationGeneration || !els.lab_settings_dialog.open) { stopMicrophoneCheck(); return; }
-      state.analyser.getFloatTimeDomainData(buffer); const raw = detectPitch(buffer, audioContext().sampleRate, recognition);
-      const estimate = smoother.update(raw, performance.now()); els.lab_mic_check_level.value = raw.rms || 0;
-      els.lab_mic_check_status.textContent = Number.isFinite(estimate.displayHz) && (estimate.confidence ?? 0) >= recognition.minConfidence
-        ? `${Core.midiToName(Math.round(69 + 12 * Math.log2(estimate.displayHz / 440)))} rilevata · il controllo non viene salvato`
-        : (raw.rms || 0) > .004 ? 'Segnale presente · canta una nota comoda' : 'Parla o canta liberamente';
-      requestAnimationFrame(tick);
+  function startPitchMonitor() {
+    if (state.monitorFrame) return;
+    state.monitorBuffer = new Float32Array(state.analyser.fftSize);
+    state.monitorSmoother = new PitchSmoother();
+    state.monitorSmoother.configure({ ...state.detectorSettings, ...activeRecognitionSettings() });
+    let lastSampleAt = 0;
+    const tick = (now) => {
+      if (!state.stream?.active) { state.monitorFrame = null; state.livePitch = null; return; }
+      state.monitorFrame = requestAnimationFrame(tick);
+      if (state.recording && !state.countingIn || now - lastSampleAt < 50) return;
+      lastSampleAt = now;
+      state.analyser.getFloatTimeDomainData(state.monitorBuffer);
+      const raw = detectPitch(state.monitorBuffer, audioContext().sampleRate, activeRecognitionSettings());
+      const estimate = state.monitorSmoother.update(raw, now);
+      const provisional = ['octave-transition', 'large-jump-transition'].includes(estimate.rejectionReason);
+      const hz = provisional ? estimate.rawHz : estimate.stable && estimate.accepted ? estimate.hz : null;
+      if (Number.isFinite(hz) && hz > 0) {
+        const pitch = 69 + 12 * Math.log2(hz / 440);
+        state.livePitch = provisional ? pitch : state.monitorFilter.filter(pitch, now / 1000);
+      } else {
+        state.livePitch = null;
+        state.monitorFilter.reset();
+      }
+      els.lab_level.value = raw.rms || 0;
+      if (state.activity !== 'draw' && state.activity !== 'ear') drawRoll(true);
     };
-    requestAnimationFrame(tick);
+    state.monitorFrame = requestAnimationFrame(tick);
   }
   function metronomeClick(at, accented = false) {
     const context = audioContext(), oscillator = context.createOscillator(), gain = context.createGain();
@@ -929,6 +960,7 @@
         const confirmationState = provisional ? 'provisional' : trackedPitch != null ? 'confirmed' : null;
         const frame = { time: elapsed, hz: estimate.hz, displayPitch, confidence: estimate.confidence ?? 0,
           clarity: estimate.clarity ?? 0, confirmationState };
+        state.livePitch = displayPitch;
         state.frames.push(frame);
         const previousVisual = state.visualFrames.at(-1);
         if (!previousVisual || elapsed - previousVisual.time >= .025) state.visualFrames.push(frame);
@@ -1017,10 +1049,13 @@
       els.lab_feedback.hidden = true; offerPitchAdvance(completionReason, analysis.incrementalProgress);
     } else showFeedback(analysis);
   }
-  const number = (value) => Number.isFinite(value) ? `${value > 0 ? '+' : ''}${value.toFixed(0)} ¢` : '—';
+  const describeOffset = (value) => !Number.isFinite(value) ? '—'
+    : Math.abs(value) <= 30 ? 'Centrata' : value > 0 ? 'Crescente' : 'Calante';
   function showFeedback(analysis) {
     els.lab_retry.hidden = false; els.lab_play_take.hidden = false;
     els.lab_feedback.hidden = false; els.lab_chart.hidden = false; els.lab_feedback_title.textContent = analysis.reliable === false || analysis.category === 'uncertain' ? 'Misura incerta' : 'Prova analizzata'; els.lab_feedback_message.textContent = analysis.message;
+    if (!analysis.relativeCorrect && Number.isFinite(analysis.relativeErrorCents))
+      els.lab_feedback_message.textContent = `La distanza cantata è ${analysis.relativeErrorCents < 0 ? 'più stretta' : 'più ampia'} del riferimento.`;
     if (analysis.completionReason === 'reached' || analysis.completionReason === 'reached-with-correction') {
       els.lab_feedback_title.textContent = analysis.completionReason === 'reached-with-correction' ? 'Nota raggiunta dopo la correzione' : 'Nota raggiunta';
       els.lab_feedback_message.textContent = analysis.completionReason === 'reached-with-correction' ? 'Hai trovato e stabilizzato la nota: non serve continuare fino al timeout.' : 'La nota è stabile: la prova si è conclusa in anticipo.';
@@ -1029,15 +1064,15 @@
     const lastSingTrial = state.activity === 'sing-interval' && state.singSession?.index === state.singSession?.trials.length - 1;
     const repeatOutcome = state.activity === 'repeat' ? state.pitchSession?.outcomes[state.pitchSession.index] : null;
     els.lab_next.textContent = repeatOutcome && !repeatOutcome.reliable ? 'Riprova la stessa nota' : lastPitchTrial || lastSingTrial ? 'Concludi blocco' : 'Continua';
-    const metrics = analysis.metrics ? [['Scarto mediano', number(analysis.metrics.medianCents)], ['Deriva', number(analysis.metrics.driftCents)], ['Copertura affidabile', `${Math.round(analysis.metrics.coverage * 100)}%`], ['Affidabilità', analysis.metrics.reliable ? 'Buona' : 'Insufficiente']]
-      : [['Prima nota', number(analysis.firstErrorCents)], ['Seconda nota', number(analysis.secondErrorCents)], ['Errore relativo', number(analysis.relativeErrorCents)], ['Intervallo', analysis.relativeCorrect ? 'Corretto' : 'Da affinare'], ['Transizione', Number.isFinite(analysis.transitionSeconds) ? `${analysis.transitionSeconds.toFixed(2)} s` : '—']];
+    const metrics = analysis.metrics ? [['Intonazione', describeOffset(analysis.metrics.medianCents)], ['Stabilità', !Number.isFinite(analysis.metrics.driftCents) ? '—' : Math.abs(analysis.metrics.driftCents) <= 30 ? 'Stabile' : 'Da stabilizzare'], ['Copertura affidabile', `${Math.round(analysis.metrics.coverage * 100)}%`], ['Affidabilità', analysis.metrics.reliable ? 'Buona' : 'Insufficiente']]
+      : [['Prima nota', describeOffset(analysis.firstErrorCents)], ['Seconda nota', describeOffset(analysis.secondErrorCents)], ['Intervallo', analysis.relativeCorrect ? 'Corretto' : 'Da affinare'], ['Transizione', Number.isFinite(analysis.transitionSeconds) ? `${analysis.transitionSeconds.toFixed(2)} s` : '—']];
     if (state.activity === 'sing-interval') metrics.push(['Aiuto', analysis.assisted ? 'Seconda nota mostrata' : 'Senza aiuto']);
     els.lab_metrics.classList.toggle('lab-interval-metrics', state.activity === 'sing-interval');
     els.lab_metrics.innerHTML = metrics.map(([key, value]) => `<div><dt>${key}</dt><dd>${value}</dd></div>`).join(''); drawChart(analysis);
   }
   function drawChart(analysis) {
     const canvas = els.lab_chart, ratio = devicePixelRatio || 1, width = canvas.clientWidth || 640, height = 210; canvas.width = width * ratio; canvas.height = height * ratio; const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio); ctx.clearRect(0, 0, width, height);
-    ctx.strokeStyle = '#29454c'; ctx.lineWidth = 1; [-100, -50, 0, 50, 100].forEach((cent) => { const y = height / 2 - cent * (height - 32) / 240; ctx.beginPath(); ctx.moveTo(38, y); ctx.lineTo(width - 12, y); ctx.stroke(); ctx.fillStyle = '#8ca4aa'; ctx.fillText(`${cent}¢`, 2, y + 4); });
+    ctx.strokeStyle = '#29454c'; ctx.lineWidth = 1; [-100, -50, 0, 50, 100].forEach((cent) => { const y = height / 2 - cent * (height - 32) / 240; ctx.beginPath(); ctx.moveTo(38, y); ctx.lineTo(width - 12, y); ctx.stroke(); });
     const targetHzAt = (time) => state.exercise.type === 'sing-interval' ? (time < state.exercise.durationSeconds / 2 ? state.exercise.music.interval.first.frequencyHz : state.exercise.music.interval.second.frequencyHz) : state.exercise.music.note.frequencyHz;
     const plume = state.frames.map((frame) => ({ ...frame, displayPitch: Number.isFinite(frame.hz) ? Core.centsBetween(frame.hz, targetHzAt(frame.time)) / 100 : null }));
     const plottedDuration = Math.max(.5, state.elapsedSeconds, plume.at(-1)?.time || 0);
@@ -1045,6 +1080,36 @@
   }
   function saveResult(item) { try { const items = JSON.parse(localStorage.getItem(`${STORE}:results`)) || []; items.push(item); localStorage.setItem(`${STORE}:results`, JSON.stringify(items.slice(-MAX_RESULTS))); } catch (_) {} }
   function renderRange() { els.lab_range_label.textContent = `Estensione: ${Core.midiToName(state.range.lowMidi)}–${Core.midiToName(state.range.highMidi)}`; }
+  function renderRangeKeyboard() {
+    const low = Number(els.lab_low.value), high = Number(els.lab_high.value);
+    const valid = Core.validateRange({ lowMidi: low, highMidi: high });
+    const whitePitchClasses = new Set([0, 2, 4, 5, 7, 9, 11]);
+    const whiteMidis = Array.from({ length: 49 }, (_, index) => 36 + index).filter((midi) => whitePitchClasses.has(midi % 12));
+    const whites = document.createElement('div'); whites.className = 'lab-piano-white-keys';
+    const blackKeys = [];
+    for (let midi = 36; midi <= 84; midi += 1) {
+      const key = document.createElement('span'), isWhite = whitePitchClasses.has(midi % 12);
+      key.className = `lab-piano-key ${isWhite ? 'white' : 'black'}`;
+      const selected = valid && midi >= low && midi <= high;
+      key.classList.toggle('is-selected', selected);
+      if (selected && (midi === low || midi === high)) { key.classList.add('is-boundary'); key.dataset.note = Core.midiToName(midi); }
+      key.setAttribute('aria-hidden', 'true');
+      if (isWhite) whites.append(key);
+      else {
+        const precedingWhites = whiteMidis.filter((whiteMidi) => whiteMidi < midi).length;
+        key.style.setProperty('--key-position', precedingWhites);
+        blackKeys.push(key);
+      }
+    }
+    els.lab_range_keyboard.replaceChildren(whites, ...blackKeys);
+    els.lab_range_keyboard.style.setProperty('--white-key-count', whiteMidis.length);
+    els.lab_range_keyboard.setAttribute('aria-label', valid
+      ? `Pianoforte con estensione selezionata da ${Core.midiToName(low)} a ${Core.midiToName(high)}`
+      : 'Pianoforte: estensione selezionata non valida');
+    els.lab_range_preview.textContent = valid ? `${Core.midiToName(low)} — ${Core.midiToName(high)} · ${high - low + 1} tasti` : 'Intervallo non valido';
+    els.lab_range_error.hidden = valid;
+    els.lab_settings_save.disabled = !valid;
+  }
   document.querySelectorAll('[data-activity]').forEach((button) => button.addEventListener('click', () => { stopDrawing(true); stopCapture(true); state.guidedSession = null; els.lab_guided.textContent = 'Allenamento di oggi'; document.querySelectorAll('[data-activity]').forEach((b) => b.classList.toggle('active', b === button)); state.activity = button.dataset.activity; renderActivity(); newExercise(false); }));
   window.addEventListener('keydown', (event) => {
     if (state.activity !== 'draw' || !state.recording || !['ArrowLeft', 'ArrowRight'].includes(event.key) || /^(INPUT|SELECT|TEXTAREA)$/.test(event.target?.tagName || '')) return;
@@ -1059,6 +1124,12 @@
     button.addEventListener('lostpointercapture', () => drawKeys.delete(key));
   }
   els.lab_guided.addEventListener('click', () => { stopDrawing(true); stopCapture(true); startGuidedSession().catch((error) => { els.lab_guided.disabled = false; els.lab_guided.textContent = 'Allenamento di oggi'; els.lab_note.textContent = error.message; }); });
+  els.lab_voice_volume.addEventListener('input', () => {
+    state.voiceVolume = Number(els.lab_voice_volume.value) / 100;
+    els.lab_voice_volume_value.textContent = `${els.lab_voice_volume.value}%`;
+    if (state.voiceOutput) state.voiceOutput.gain.setTargetAtTime(state.voiceVolume, audioContext().currentTime, .015);
+    try { localStorage.setItem(`${STORE}:voice-volume`, String(state.voiceVolume)); } catch (_) {}
+  });
   els.lab_new.addEventListener('click', () => { newExercise(false); void startExercise(); });
   els.lab_listen.addEventListener('click', startExercise);
   els.lab_hint.addEventListener('click', () => {
@@ -1071,13 +1142,14 @@
   els.lab_continue.addEventListener('click', () => { cancelPendingAdvance(); advancePitchSession(); }); els.lab_retry.addEventListener('click', () => { els.lab_feedback.hidden = true; startExercise(); }); els.lab_next.addEventListener('click', advanceCurrentSession);
   els.lab_play_take.addEventListener('click', () => { if (state.audioUrl) new Audio(state.audioUrl).play(); });
   for (let midi = 36; midi <= 84; midi += 1) { els.lab_low.add(new Option(Core.midiToName(midi), midi)); els.lab_high.add(new Option(Core.midiToName(midi), midi)); }
-  els.lab_settings.addEventListener('click', () => { els.lab_role.value = state.role; els.lab_low.value = state.range.lowMidi; els.lab_high.value = state.range.highMidi; els.lab_settings_dialog.showModal(); });
-  els.lab_mic_check.addEventListener('click', toggleMicrophoneCheck);
-  els.lab_settings_close.addEventListener('click', () => { stopMicrophoneCheck(); els.lab_settings_dialog.close(); });
-  els.lab_role.addEventListener('change', () => { const preset = ROLE_RANGES[els.lab_role.value]; els.lab_low.value = preset.lowMidi; els.lab_high.value = preset.highMidi; });
-  els.lab_settings_save.addEventListener('click', () => { const next = { lowMidi: Number(els.lab_low.value), highMidi: Number(els.lab_high.value) }; if (!Core.validateRange(next)) { els.lab_note.textContent = 'La nota più alta deve essere uguale o superiore a quella più bassa.'; return; } stopMicrophoneCheck(); state.role = els.lab_role.value; state.range = next; state.pitchSession = null; state.earSession = null; state.singSession = null; localStorage.setItem(`${STORE}:role`, state.role); localStorage.setItem(`${STORE}:range`, JSON.stringify(next)); renderRange(); els.lab_settings_dialog.close(); state.exercise = null; renderActivity(); newExercise(false); });
-  window.addEventListener('beforeunload', () => { stopMicrophoneCheck(); stopReference(); stopReplay(); stopCapture(true); state.stream?.getTracks().forEach((track) => track.stop()); });
+  els.lab_settings.addEventListener('click', () => { els.lab_role.value = state.role; els.lab_low.value = state.range.lowMidi; els.lab_high.value = state.range.highMidi; renderRangeKeyboard(); els.lab_settings_dialog.showModal(); });
+  els.lab_settings_close.addEventListener('click', () => els.lab_settings_dialog.close());
+  els.lab_role.addEventListener('change', () => { const preset = ROLE_RANGES[els.lab_role.value]; els.lab_low.value = preset.lowMidi; els.lab_high.value = preset.highMidi; renderRangeKeyboard(); });
+  els.lab_low.addEventListener('change', renderRangeKeyboard);
+  els.lab_high.addEventListener('change', renderRangeKeyboard);
+  els.lab_settings_save.addEventListener('click', () => { const next = { lowMidi: Number(els.lab_low.value), highMidi: Number(els.lab_high.value) }; if (!Core.validateRange(next)) { renderRangeKeyboard(); return; } state.role = els.lab_role.value; state.range = next; state.pitchSession = null; state.earSession = null; state.singSession = null; localStorage.setItem(`${STORE}:role`, state.role); localStorage.setItem(`${STORE}:range`, JSON.stringify(next)); renderRange(); els.lab_settings_dialog.close(); state.exercise = null; renderActivity(); newExercise(false); });
+  window.addEventListener('beforeunload', () => { stopReference(); stopReplay(); stopCapture(true); state.stream?.getTracks().forEach((track) => track.stop()); });
   window.addEventListener('resize', () => drawMusicViews(state.activity !== 'ear' || Boolean(els.lab_answer.dataset.answered)));
   renderRange(); renderActivity(); newExercise(false);
-  if (needsRoleSetup) { els.lab_role.value = state.role; els.lab_low.value = state.range.lowMidi; els.lab_high.value = state.range.highMidi; els.lab_settings_dialog.showModal(); }
+  if (needsRoleSetup) { els.lab_role.value = state.role; els.lab_low.value = state.range.lowMidi; els.lab_high.value = state.range.highMidi; renderRangeKeyboard(); els.lab_settings_dialog.showModal(); }
 })();
