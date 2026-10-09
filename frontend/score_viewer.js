@@ -129,6 +129,14 @@
     els.play.textContent = 'Ⅱ Pausa'; els.play.setAttribute('aria-pressed','true'); cancelAnimationFrame(raf); raf = requestAnimationFrame(updateCursor);
   }
   function pausePlayback() { activeElements.forEach((audio) => audio.pause()); els.play.textContent = '▶ Play'; els.play.setAttribute('aria-pressed','false'); cancelAnimationFrame(raf); updateCursor(); }
+  function handlePlaybackError(error) {
+    // A rapid play/pause gesture can reject an older play() promise after the
+    // audio has already been paused. It is expected and must not replace the score.
+    if (error?.name === 'AbortError' || /interrupted by a call to pause/i.test(error?.message ?? '')) return;
+    pausePlayback();
+    els.play.title = `Riproduzione non avviata: ${error?.message || 'errore audio'}`;
+    console.warn('Riproduzione non avviata', error);
+  }
   function synchronizeStems() {
     if (els.audio.paused) return;
     for (const audio of activeElements.slice(1)) {
@@ -184,7 +192,7 @@
     await openPiece(selected,{updateHistory:requested!==selected});
     els.piece.addEventListener('change',()=>openPiece(els.piece.value).catch((error)=>setStatus(error.message,true)));
     els.zoomOut.addEventListener('click',()=>setZoom(zoom-120)); els.zoomIn.addEventListener('click',()=>setZoom(zoom+120)); els.zoomFit.addEventListener('click',()=>{document.body.dataset.zoom='fit';});
-    els.play.addEventListener('click',()=>els.audio.paused?startPlayback().catch((error)=>setStatus(`Riproduzione non avviata: ${error.message}`,true)):pausePlayback());
+    els.play.addEventListener('click',()=>els.audio.paused?startPlayback().catch(handlePlaybackError):pausePlayback());
     els.mixerOpen.addEventListener('click',()=>{ pausePlayback(); els.mixer.showModal(); });
     els.mixerClose.addEventListener('click',()=>els.mixer.close());
     els.audio.addEventListener('ended',pausePlayback);
@@ -193,7 +201,7 @@
       if (event.code === 'Space') {
         event.preventDefault();
         event.stopPropagation();
-        if (els.audio.paused) startPlayback().catch((error)=>setStatus(`Riproduzione non avviata: ${error.message}`,true));
+        if (els.audio.paused) startPlayback().catch(handlePlaybackError);
         else pausePlayback();
         return;
       }
