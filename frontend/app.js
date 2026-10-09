@@ -40,11 +40,11 @@ const els = Object.fromEntries([
   'settings-dialog', 'settings-metronome-offset', 'settings-metronome-offset-value', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
   'result-dialog', 'result-heading', 'result-text', 'result-progress', 'retry', 'result-resume', 'result-close',
   'note-names',
-  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-title', 'library-title-save', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-viewer-link', 'settings',
+  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-viewer-link', 'settings',
   'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
   'score-loading', 'score-pitch-divider', 'pitch-lane', 'pitch-fluid-layer', 'intonation-readout', 'live-note', 'live-cents', 'live-state', 'pitch-layer-v1', 'pitch-layer-crepe',
   'feedback-analyse', 'feedback-status', 'feedback-priorities', 'feedback-priority-list', 'feedback-score-image', 'feedback-note-card', 'feedback-note-name', 'feedback-note-meta', 'feedback-cent-chart', 'feedback-note-metrics', 'feedback-message', 'feedback-previous', 'feedback-next', 'feedback-original', 'feedback-corrected', 'feedback-strength', 'feedback-strength-value', 'feedback-playback-kind',
-  'measure-counter', 'scoring-cue', 'previous-measure', 'toggle-playback', 'next-measure', 'volume', 'metronome-toggle', 'metronome-volume', 'backing-audio', 'toast', 'asset-status',
+  'measure-counter', 'scoring-cue', 'previous-measure', 'toggle-playback', 'next-measure', 'show-feedback', 'volume', 'metronome-toggle', 'metronome-volume', 'backing-audio', 'toast', 'asset-status',
 ].map((id) => [id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]));
 
 const state = {
@@ -1248,6 +1248,22 @@ function drawPitchLane(beat) {
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.fillText(noteLabel(pitch, displayBeat), noteLabelX, y);
   }
+  if (Number.isFinite(state.displayPitch)) {
+    const markerY = Math.max(plot.top + 4, Math.min(plot.bottom - 4,
+      pitchToY(state.displayPitch, bounds.min, bounds.max, plot.top, plot.bottom)));
+    ctx.save();
+    ctx.shadowColor = 'rgba(114,224,210,.95)';
+    ctx.shadowBlur = 14;
+    ctx.fillStyle = '#82f2e6';
+    ctx.beginPath();
+    ctx.arc(noteLabelX - 10, markerY, 4.5, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.lineWidth = 1;
+    ctx.strokeStyle = 'rgba(225,255,251,.9)';
+    ctx.stroke();
+    ctx.restore();
+  }
   if (Number.isFinite(state.displayPitch) && (state.displayPitch < bounds.min || state.displayPitch > bounds.max)) {
     ctx.fillStyle = '#68d1cb'; ctx.textAlign = 'left';
     ctx.fillText(`${state.displayPitch < bounds.min ? '↓' : '↑'} ${noteLabel(state.displayPitch)} fuori scala`, nowX + 10,
@@ -1403,6 +1419,7 @@ function updatePlaybackButton() {
   els.togglePlayback.querySelector('span').textContent = running ? 'Ⅱ' : '▶';
   els.togglePlayback.setAttribute('aria-label', running ? 'Metti in pausa' : 'Avvia la prova');
   els.togglePlayback.setAttribute('aria-pressed', String(running));
+  els.showFeedback.hidden = running;
 }
 
 function updateTransposeControl() {
@@ -1436,7 +1453,6 @@ async function togglePlayback() {
   if (state.clock.running) {
     state.clock.pause();
     savePitchHistory();
-    showAttemptResult({ preliminary: true });
   } else {
     state.gridInspect.active = false;
     try {
@@ -3233,9 +3249,6 @@ function bindControls() {
   bindGridInspection();
   bindScorePitchDivider();
   bindBenchmarkAnalysisCanvas();
-  document.querySelector('.toolbar-more').addEventListener('click', (event) => {
-    if (event.target.closest('button')) event.currentTarget.removeAttribute('open');
-  });
   els.accompanimentMode.addEventListener('click', () => {
     // Opening the mixer is an intentional pause point.  Keep this flag so
     // applying a new routing resumes the same musical instant afterwards.
@@ -3313,7 +3326,8 @@ function bindControls() {
     });
   });
   els.togglePlayback.addEventListener('click', togglePlayback);
-  els.restartPractice.addEventListener('click', restartPractice);
+  els.showFeedback.addEventListener('click', () => showAttemptResult({ preliminary: true }));
+  els.restartPractice?.addEventListener('click', restartPractice);
   els.restartTransport.addEventListener('click', restartPractice);
   els.groundTruth.addEventListener('click', openGroundTruthDialog);
   els.groundTruthStart.addEventListener('click', startGroundTruthCapture);
@@ -3566,7 +3580,6 @@ function openLibraryPicker() {
 
 async function updateLibraryParts() {
   const piece = state.library.find((item) => item.piece_id === els.libraryPiece.value);
-  els.libraryTitle.value = piece ? pieceDisplayTitle(piece) : '';
   if (piece && !piece.parts?.length && !piece.loading) {
     piece.loading = true;
     els.libraryOpen.disabled = true;
@@ -3599,21 +3612,8 @@ async function updateLibraryParts() {
 
 function bindLibraryPicker() {
   els.piecePicker.addEventListener('click', openLibraryPicker);
-  els.library.addEventListener('click', openLibraryPicker);
+  els.library?.addEventListener('click', openLibraryPicker);
   els.libraryPiece.addEventListener('change', updateLibraryParts);
-  els.libraryTitleSave.addEventListener('click', () => {
-    const piece = state.library.find((item) => item.piece_id === els.libraryPiece.value);
-    if (!piece) return;
-    const title = els.libraryTitle.value.trim();
-    try {
-      if (title) localStorage.setItem(pieceTitleKey(piece.piece_id), title);
-      else localStorage.removeItem(pieceTitleKey(piece.piece_id));
-    } catch (_) { showToast('Il browser non può salvare il nome del brano.'); return; }
-    populateLibraryPieces(piece.piece_id);
-    els.libraryTitle.value = pieceDisplayTitle(piece);
-    if (state.bundleManifest?.piece_id === piece.piece_id) els.pieceTitle.textContent = pieceDisplayTitle(piece);
-    showToast(title ? 'Nome del brano salvato.' : 'Nome del brano ripristinato.');
-  });
   els.libraryOpen.addEventListener('click', () => {
     const query = new URLSearchParams({ piece: els.libraryPiece.value });
     if (els.libraryPart.value) query.set('part', els.libraryPart.value);
@@ -3685,8 +3685,7 @@ async function loadPracticePiece(pieceId) {
   const transposeValues = RUNTIME_CONFIG.features?.transpose === false
     ? [0] : Array.from({ length: 25 }, (_, index) => index - 12);
   els.transpose.replaceChildren(...transposeValues.map((offset) => {
-    const label = offset === 0 ? 'Originale' : Math.abs(offset) === 12
-      ? `${offset > 0 ? '+' : '−'}1 ottava` : `${offset > 0 ? '+' : ''}${offset} semitoni`;
+    const label = offset === 0 ? '0' : `${offset > 0 ? '+' : '−'}${Math.abs(offset)}`;
     return new Option(label, String(offset));
   }));
   restorePreferences();

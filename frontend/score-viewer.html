@@ -7,13 +7,15 @@
     <title>Partitura completa · Choir Assistant</title>
     <link rel="stylesheet" href="score_viewer.css?v=1" />
     <script src="runtime-config.js" defer></script>
+    <script src="score_runtime.js" defer></script>
+    <script src="media_mixer.js" defer></script>
     <script src="score_viewer.js?v=1" defer></script>
   </head>
   <body data-zoom="fit">
     <header class="viewer-toolbar">
-      <a class="viewer-back" id="viewer-back" href="index.html">← Canta brano</a>
+      <a class="viewer-back" id="viewer-back" href="index.html">Canta brano</a>
       <div class="viewer-identity">
-        <span>Partitura completa</span>
+        <span>Mostra partitura</span>
         <h1 id="viewer-title">Caricamento…</h1>
       </div>
       <label class="viewer-piece-control"><span>Brano</span><select id="viewer-piece" aria-label="Scegli il brano"></select></label>
@@ -35,5 +37,16 @@
       </section>
     </main>
     <output class="viewer-page-position" id="viewer-page-position" aria-live="polite" hidden></output>
+    <div class="viewer-transport" role="group" aria-label="Riproduzione partitura">
+      <button id="viewer-play" type="button" aria-pressed="false">▶ Play</button>
+      <button id="viewer-mixer-open" type="button">Mixer</button>
+      <output id="viewer-time" aria-live="off">0:00</output>
+    </div>
+    <dialog class="viewer-mixer-dialog" id="viewer-mixer" aria-labelledby="viewer-mixer-title">
+      <h2 id="viewer-mixer-title">Mixer partitura</h2>
+      <div id="viewer-mixer-options"></div>
+      <button id="viewer-mixer-close" type="button">Chiudi</button>
+    </dialog>
+    <audio id="viewer-audio" preload="auto"></audio>
   </body>
 </html>

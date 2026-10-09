@@ -24,6 +24,7 @@
   <body>
     <main class="practice-shell" aria-label="Strumento di prova">
       <header class="practice-toolbar">
+        <a class="mode-button voice-lab-link" href="voice-lab.html">Allena la voce</a>
         <button class="mode-button change-piece-button" id="exit-practice" type="button">Cambia brano</button>
         <div class="piece-identity" aria-live="polite">
           <button class="piece-picker-button" id="piece-picker" type="button" aria-label="Scegli un brano"><strong id="piece-title">Caricamento…</strong></button>
@@ -33,17 +34,9 @@
           <label class="compact-select transpose-control"><span>Transpose</span><select id="transpose" aria-label="Trasposizione"></select><output id="transpose-value" aria-live="polite">±0</output></label>
           <label class="compact-select"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
           <button class="mode-button accompaniment-select" id="accompaniment-mode" type="button">Voci</button>
-          <a class="mode-button score-viewer-link" id="score-viewer-link" href="score-viewer.html">Partitura</a>
-          <a class="mode-button voice-lab-link" href="voice-lab.html">Allena la voce</a>
-          <details class="toolbar-more">
-            <summary aria-label="Altri strumenti">Altro</summary>
-            <div class="toolbar-more-menu">
-              <button class="mode-button library-button" id="library" type="button">Scegli un brano</button>
-              <button class="mode-button" id="restart-practice" type="button">Ricomincia</button>
-              <button class="mode-button" id="benchmark" type="button">Le mie registrazioni</button>
-              <button class="mode-button" id="settings" type="button">Impostazioni</button>
-            </div>
-          </details>
+          <a class="mode-button score-viewer-link" id="score-viewer-link" href="score-viewer.html">Mostra partitura</a>
+          <button class="mode-button" id="benchmark" type="button" hidden>Le mie registrazioni</button>
+          <button class="mode-button" id="settings" type="button">Impostazioni</button>
           <div hidden aria-hidden="true"><button id="ground-truth" type="button"></button><button id="neural-live" type="button"></button><button id="admin-review" type="button"></button></div>
         </div>
       </header>
@@ -79,6 +72,7 @@
       <footer class="practice-transport">
         <div class="transport-position"><span id="measure-counter">Battuta 1 / 12</span><span class="scoring-cue" id="scoring-cue">Ingresso da 1</span><small id="build-version" hidden></small></div>
         <div class="transport-controls" role="group" aria-label="Trasporto"><button class="transport-button restart-transport" id="restart-transport" type="button" aria-label="Ricomincia il brano dalla battuta uno" title="Ricomincia il brano">↺</button><button class="transport-button" id="previous-measure" type="button" aria-label="Battuta precedente" title="Battuta precedente">|‹</button><button class="play-button" id="toggle-playback" type="button" aria-label="Avvia la prova" aria-pressed="false"><span aria-hidden="true">▶</span></button><button class="transport-button" id="next-measure" type="button" aria-label="Battuta successiva" title="Battuta successiva">›|</button></div>
+        <div class="transport-controls" aria-label="Feedback"><button class="mode-button feedback-button" id="show-feedback" type="button" hidden>Mostra feedback</button></div>
         <div class="mixer-controls">
           <label class="volume-control"><span aria-hidden="true">◖</span><span class="sr-only">Volume accompagnamento</span><input id="volume" type="range" min="0" max="100" value="62" aria-label="Volume accompagnamento" /></label>
           <label class="volume-control metronome-control"><button id="metronome-toggle" type="button" aria-label="Attiva metronomo" aria-pressed="false" title="Metronomo">♩</button><span class="sr-only">Volume metronomo</span><input id="metronome-volume" type="range" min="0" max="100" value="0" aria-label="Volume metronomo" /></label>
@@ -184,18 +178,13 @@
       <div class="studio-welcome"><span class="studio-wordmark">CHOIR ASSISTANT</span><h2 id="piece-picker-heading">La tua voce.<br>Il tuo prossimo passo.</h2><p>Ritrova la tua parte, <span class="studio-phrase">una frase alla volta.</span></p><div class="studio-staff" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div></div>
       <div class="studio-library-form"><p class="studio-section-label">IL TUO REPERTORIO</p>
       <label>Brano <select id="library-piece" aria-label="Brano"></select></label>
-      <details class="studio-advanced"><summary>Personalizza il nome</summary>
-      <label>Nome nel mio elenco <input id="library-title" type="text" maxlength="80" autocomplete="off" aria-describedby="library-title-help" /></label>
-      <small id="library-title-help">Puoi usare un nome più riconoscibile. Lascia vuoto e salva per ripristinare il nome proposto.</small>
-      <button id="library-title-save" type="button">Salva nome</button></details>
-      <label>Parte da cantare <select id="library-part" aria-label="Parte da cantare"></select></label>
-      <small class="studio-part-note">La parte selezionata viene usata solo in “Canta brano”.</small>
+      <label>La tua sezione <select id="library-part" aria-label="La tua sezione"></select></label>
       <p id="library-note" class="library-note" hidden></p>
       <p class="studio-mode-heading">SCEGLI LA MODALITÀ</p>
       <div class="studio-mode-picker" aria-label="Modalità">
-        <button class="studio-mode-entry is-primary" id="library-open" type="button"><span class="studio-mode-icon" aria-hidden="true">●</span><span class="studio-mode-copy"><strong>Canta brano</strong><small>La tua parte, piano roll e ascolto della voce.</small></span><span class="studio-mode-action">Apri</span></button>
-        <button class="studio-mode-entry" id="library-score" type="button"><span class="studio-mode-icon" aria-hidden="true">▤</span><span class="studio-mode-copy"><strong>Partitura</strong><small>Partitura completa da scorrere. Senza piano roll né microfono.</small></span><span class="studio-mode-action">Apri</span></button>
-        <a class="studio-mode-entry" href="voice-lab.html"><span class="studio-mode-icon" aria-hidden="true">♪</span><span class="studio-mode-copy"><strong>Allena la voce</strong><small>Note, intervalli e controllo vocale.</small></span><span class="studio-mode-action">Apri</span></a>
+        <button class="studio-mode-entry is-primary" id="library-open" type="button"><span class="studio-mode-icon" aria-hidden="true">●</span><span class="studio-mode-copy"><strong>Canta brano</strong></span><span class="studio-mode-action">Apri</span></button>
+        <button class="studio-mode-entry" id="library-score" type="button"><span class="studio-mode-icon" aria-hidden="true">▤</span><span class="studio-mode-copy"><strong>Mostra partitura</strong></span><span class="studio-mode-action">Apri</span></button>
+        <a class="studio-mode-entry" href="voice-lab.html"><span class="studio-mode-icon" aria-hidden="true">♪</span><span class="studio-mode-copy"><strong>Allena la voce</strong></span><span class="studio-mode-action">Apri</span></a>
       </div>
       <button class="studio-return" type="button" onclick="this.closest('dialog').close()">Torna alla prova</button></div>
     </dialog>

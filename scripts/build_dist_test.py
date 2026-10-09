@@ -53,20 +53,41 @@ class BuildDistTest(unittest.TestCase):
             self.assertIn("score_viewer.js", names)
             self.assertIn("score_viewer.css", names)
 
+    def test_practice_toolbar_exposes_settings_without_redundant_menu_actions(self) -> None:
+        html = (build_dist.FRONTEND / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn('id="settings" type="button">Impostazioni</button>', html)
+        self.assertNotIn("toolbar-more", html)
+        self.assertNotIn('id="library"', html)
+        self.assertNotIn('id="restart-practice"', html)
+
+    def test_piece_picker_uses_compact_mode_and_section_labels(self) -> None:
+        html = (build_dist.FRONTEND / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn('aria-label="La tua sezione"', html)
+        self.assertNotIn("Personalizza il nome", html)
+        self.assertNotIn("La parte selezionata viene usata solo", html)
+        self.assertNotIn("Note, intervalli e controllo vocale", html)
+        self.assertNotIn("La tua parte, piano roll e ascolto della voce", html)
+
     def test_score_viewer_is_isolated_from_pitch_and_microphone_runtime(self) -> None:
         html = (build_dist.FRONTEND / "score-viewer.html").read_text(encoding="utf-8")
         javascript = (build_dist.FRONTEND / "score_viewer.js").read_text(encoding="utf-8")
 
         self.assertIn("score_viewer.js", html)
+        self.assertIn('id="viewer-audio"', html)
+        self.assertIn("media_mixer.js", html)
         for label in ("Carta", "Grigio chiaro", "Bianco"):
             self.assertIn(label, html)
-        for forbidden_markup in ("<canvas", "<audio", "pitch-lane", "microphone"):
+        for forbidden_markup in ("<canvas", "pitch-lane", "microphone"):
             self.assertNotIn(forbidden_markup, html.lower())
         for forbidden_runtime in (
             "getUserMedia", "mediaDevices", "AudioContext", "pitch_detector",
             "pitch_shared", "fluid_pitch_trail", "vocal_feedback", "app.js",
         ):
             self.assertNotIn(forbidden_runtime, html + javascript)
+        self.assertIn("applyMix({ resume:false })", javascript)
+        self.assertIn("event.code === 'Space'", javascript)
 
 
 if __name__ == "__main__":
