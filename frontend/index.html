@@ -6,24 +6,24 @@
     <meta name="theme-color" content="#081419" />
     <title>Choir Assistant · Il tuo studio</title>
     <script src="ui_preferences.js?v=2-lyrics-only"></script>
-    <link rel="stylesheet" href="styles.css?v=20261008-settings-refresh" />
-    <link rel="stylesheet" href="studio.css?v=20261008-vertical-mixer" />
+    <link rel="stylesheet" href="styles.css?v=20261010-mobile-practice" />
+    <link rel="stylesheet" href="studio.css?v=20261010-mobile-practice" />
     <script src="score_appearance.js?v=2"></script>
     <script src="runtime-config.js" defer></script>
     <script src="practice_math.js?v=20261003-interval-arrows" defer></script>
     <script src="score_runtime.js?v=20260927-pickup-timing" defer></script>
     <script src="pitch_detector.js?v=20261003-weak-voice" defer></script>
     <script src="pitch_shared.js?v=20261004-plume-advance-400" defer></script>
-    <script src="fluid_pitch_trail.js?v=20261004-plume-head" defer></script>
+    <script src="fluid_pitch_trail.js?v=20261010-clean-plume-head" defer></script>
     <script src="vocal_feedback.js?v=20260928-feedback-v1" defer></script>
     <script src="one_euro_filter.js?v=20260927-phase2" defer></script>
     <script src="media_mixer.js?v=20261008-mixer-transpose" defer></script>
     <script src="pitch_test_harness.js?v=20260927-phase0" defer></script>
-    <script src="app.js?v=20261008-vertical-mixer" defer></script>
+    <script src="app.js?v=20261010-mobile-practice" defer></script>
   </head>
   <body>
-    <main class="practice-shell" aria-label="Strumento di prova">
-      <header class="practice-toolbar">
+    <main class="practice-shell" id="practice-shell" aria-label="Strumento di prova">
+      <header class="practice-toolbar" id="practice-toolbar">
         <a class="mode-button voice-lab-link" href="voice-lab.html">Allena la voce</a>
         <button class="mode-button change-piece-button" id="exit-practice" type="button">Cambia brano</button>
         <div class="piece-identity" aria-live="polite">
@@ -40,6 +40,8 @@
           <div hidden aria-hidden="true"><button id="ground-truth" type="button"></button><button id="neural-live" type="button"></button><button id="admin-review" type="button"></button></div>
         </div>
       </header>
+
+      <button class="mobile-chrome-toggle mobile-toolbar-toggle" id="mobile-toolbar-toggle" type="button" aria-controls="practice-toolbar" aria-expanded="true" aria-label="Nascondi i comandi superiori" title="Nascondi i comandi superiori"><span aria-hidden="true">⌃</span></button>
 
       <aside class="asset-status" id="asset-status" role="alert" hidden></aside>
 
@@ -69,7 +71,7 @@
         <meter id="microphone-level" min="0" max="0.08" value="0" aria-label="Livello del microfono" title="Livello del microfono"></meter>
       </section>
 
-      <footer class="practice-transport">
+      <footer class="practice-transport" id="practice-transport">
         <div class="transport-position"><span id="measure-counter">Battuta 1 / 12</span><span class="scoring-cue" id="scoring-cue">Ingresso da 1</span><small id="build-version" hidden></small></div>
         <div class="transport-controls" role="group" aria-label="Trasporto"><button class="transport-button restart-transport" id="restart-transport" type="button" aria-label="Ricomincia il brano dalla battuta uno" title="Ricomincia il brano">↺</button><button class="transport-button" id="previous-measure" type="button" aria-label="Battuta precedente" title="Battuta precedente">|‹</button><button class="play-button" id="toggle-playback" type="button" aria-label="Avvia la prova" aria-pressed="false"><span aria-hidden="true">▶</span></button><button class="transport-button" id="next-measure" type="button" aria-label="Battuta successiva" title="Battuta successiva">›|</button></div>
         <div class="transport-controls" aria-label="Feedback"><button class="mode-button feedback-button" id="show-feedback" type="button" hidden>Mostra feedback</button></div>
@@ -78,6 +80,7 @@
           <label class="volume-control metronome-control"><button id="metronome-toggle" type="button" aria-label="Attiva metronomo" aria-pressed="false" title="Metronomo">♩</button><span class="sr-only">Volume metronomo</span><input id="metronome-volume" type="range" min="0" max="100" value="0" aria-label="Volume metronomo" /></label>
         </div>
       </footer>
+      <button class="mobile-chrome-toggle mobile-transport-toggle" id="mobile-transport-toggle" type="button" aria-controls="practice-transport" aria-expanded="true" aria-label="Nascondi i controlli di riproduzione" title="Nascondi i controlli di riproduzione"><span aria-hidden="true">⌄</span></button>
       <audio id="backing-audio" preload="auto"></audio>
       <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
       <aside class="benchmark-recording" id="benchmark-recording" aria-live="assertive" hidden><span><b>● Registrazione benchmark</b><small id="benchmark-live-scenario"></small></span><button id="benchmark-stop-live" type="button" onclick="window.ChoirBenchmarkStop?.()">Interrompi take</button></aside>

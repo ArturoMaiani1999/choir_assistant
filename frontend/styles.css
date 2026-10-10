@@ -30,13 +30,17 @@ button, select { color: inherit; }
 button { -webkit-tap-highlight-color: transparent; }
 
 .practice-shell {
+  --practice-toolbar-row: var(--toolbar-h);
+  --practice-transport-row: var(--transport-h);
   height: 100dvh;
   width: 100%;
   overflow: hidden;
   display: grid;
-  grid-template-rows: var(--toolbar-h) auto var(--score-h) var(--splitter-h) minmax(0, 1fr) var(--transport-h);
+  grid-template-rows: var(--practice-toolbar-row) auto var(--score-h) var(--splitter-h) minmax(0, 1fr) var(--practice-transport-row);
   background: linear-gradient(155deg, #0d2027 0%, #071319 55%, #061015 100%);
 }
+
+.mobile-chrome-toggle { display: none; }
 
 .practice-toolbar {
   display: grid;

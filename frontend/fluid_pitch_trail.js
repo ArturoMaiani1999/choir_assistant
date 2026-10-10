@@ -287,7 +287,7 @@
       const scale = Math.max(.4, Math.min(3, options.ribbonScale ?? 1));
       context.strokeStyle = coreGradient; context.lineWidth = config.coreWidth * scale;
       context.stroke();
-      if (!review && currentTime - points.at(-1).time < config.headSeconds * 1.5) {
+      if (options.showHeadMarker !== false && !review && currentTime - points.at(-1).time < config.headSeconds * 1.5) {
         const last = points.at(-1);
         paintHeadMarker(context, { x: last.x, y: yAt(last.pitch), radius: config.coreWidth * scale });
       }

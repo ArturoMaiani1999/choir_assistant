@@ -23,7 +23,7 @@ button:disabled{cursor:not-allowed}
 .mode-button:hover,.toolbar-more>summary:hover{background:#ffffff09}
 .toolbar-more-menu{background:#1c2a2f;min-width:230px;padding:10px;border-radius:14px;box-shadow:0 16px 56px #0007}
 .compact-select select{border-color:var(--line);border-radius:9px;font-size:13px}
-.practice-shell:has(#asset-status[hidden]){grid-template-rows:var(--toolbar-h) var(--score-h) var(--splitter-h) minmax(0,1fr) var(--transport-h)}
+.practice-shell:has(#asset-status[hidden]){grid-template-rows:var(--practice-toolbar-row) var(--score-h) var(--splitter-h) minmax(0,1fr) var(--practice-transport-row)}
 .asset-status{font-size:12px;font-weight:400;letter-spacing:0}
 .score-region{background:#fff}
 .score-pitch-divider{background:#1c2a2e;border:0}
@@ -262,7 +262,7 @@ button:disabled{cursor:not-allowed}
 .orientation-hint{display:none}
 .lab-toolbar .mode-button{display:inline-flex;align-items:center;justify-content:center}
 .toolbar-more,.toolbar-more-menu .mode-button{display:block}
-@media(max-width:600px){.toolbar-actions .mode-button{display:inline-flex;align-items:center}.practice-shell:has(#asset-status[hidden]){grid-template-rows:110px var(--score-h) var(--splitter-h) minmax(0,1fr) 74px}.toolbar-actions .mode-button{padding-inline:6px;font-size:11px}.toolbar-more>summary{padding-inline:7px;font-size:11px}.lab-toolbar .lab-guided{display:flex}}
+@media(max-width:600px){.toolbar-actions .mode-button{display:inline-flex;align-items:center}.practice-shell:has(#asset-status[hidden]){grid-template-rows:var(--practice-toolbar-row) var(--score-h) var(--splitter-h) minmax(0,1fr) var(--practice-transport-row)}.toolbar-actions .mode-button{padding-inline:6px;font-size:11px}.toolbar-more>summary{padding-inline:7px;font-size:11px}.lab-toolbar .lab-guided{display:flex}}
 @media(prefers-reduced-motion:reduce){*,*:before,*:after{transition:none!important;animation:none!important;scroll-behavior:auto!important}}
 .lab-conductor{display:none!important}
 .lab-workspace{grid-template-rows:86px minmax(0,1fr) 82px}
@@ -273,3 +273,35 @@ button:disabled{cursor:not-allowed}
 @media(max-width:1000px){.lab-workspace{grid-template-rows:110px minmax(0,1fr) 74px}.lab-voice-volume input{width:95px}}
 @media(max-width:600px){.lab-workspace{grid-template-rows:146px minmax(0,1fr) 74px}.lab-voice-volume{width:100%;justify-content:flex-start;font-size:11px}.lab-voice-volume input{width:min(160px,38vw)}}
 @media(max-height:520px) and (min-width:601px){.lab-workspace{grid-template-rows:82px minmax(0,1fr) 62px}}
+
+/* Mobile practice chrome: keep the score and, above all, the piano roll usable. */
+@media(max-width:960px){
+  .mobile-chrome-toggle{
+    position:fixed;z-index:18;display:grid;width:40px;height:40px;padding:0;place-items:center;
+    border:1px solid #ffffff2a;border-radius:50%;background:#14252be8;color:#f1d49a;
+    box-shadow:0 5px 18px #0007;backdrop-filter:blur(8px);font-size:20px;line-height:1;cursor:pointer
+  }
+  .mobile-toolbar-toggle{top:max(7px,env(safe-area-inset-top));right:max(7px,env(safe-area-inset-right))}
+  .mobile-transport-toggle{display:none}
+  .practice-toolbar{padding-right:max(58px,calc(env(safe-area-inset-right) + 50px))}
+  .practice-shell.mobile-top-collapsed{--practice-toolbar-row:0px}
+  .practice-shell.mobile-top-collapsed .practice-toolbar,
+  .practice-shell.mobile-bottom-collapsed .practice-transport{
+    min-height:0;height:0;visibility:hidden;opacity:0;overflow:hidden;padding:0;border:0;pointer-events:none
+  }
+  .practice-shell.mobile-top-collapsed .practice-toolbar>*,
+  .practice-shell.mobile-bottom-collapsed .practice-transport>*{display:none}
+  .intonation-readout,#build-version{display:none!important}
+}
+
+@media(max-width:960px) and (orientation:landscape){
+  :root{--toolbar-h:54px;--transport-h:58px;--score-h:clamp(105px,30dvh,128px)}
+  .mobile-transport-toggle{display:grid;right:max(7px,env(safe-area-inset-right));bottom:max(7px,env(safe-area-inset-bottom))}
+  .practice-transport{padding-right:max(58px,calc(env(safe-area-inset-right) + 50px))}
+  .practice-shell.mobile-bottom-collapsed{--practice-transport-row:0px}
+}
+
+@media(max-width:600px) and (orientation:portrait){
+  .practice-shell{grid-template-rows:var(--practice-toolbar-row) auto var(--score-h) var(--splitter-h) minmax(0,1fr) var(--practice-transport-row)}
+  .practice-shell:has(#asset-status[hidden]){grid-template-rows:var(--practice-toolbar-row) var(--score-h) var(--splitter-h) minmax(0,1fr) var(--practice-transport-row)}
+}

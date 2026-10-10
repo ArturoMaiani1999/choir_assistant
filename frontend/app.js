@@ -23,6 +23,8 @@ function displayPitchFromTracked(trackedPitch) { return trackedPitch; }
 const UI_CONFIG = Object.freeze({
   historyBeats: 4.5,
   futureBeats: 7.5,
+  mobileHistoryBeats: 3,
+  mobileFutureBeats: 5,
   centeredCents: 12,
   acceptableCents: 30,
   targetToleranceCents: 25,
@@ -45,6 +47,7 @@ const els = Object.fromEntries([
   'score-loading', 'score-pitch-divider', 'pitch-lane', 'pitch-fluid-layer', 'intonation-readout', 'live-note', 'live-cents', 'live-state', 'pitch-layer-v1', 'pitch-layer-crepe',
   'feedback-analyse', 'feedback-status', 'feedback-priorities', 'feedback-priority-list', 'feedback-score-image', 'feedback-note-card', 'feedback-note-name', 'feedback-note-meta', 'feedback-cent-chart', 'feedback-note-metrics', 'feedback-message', 'feedback-previous', 'feedback-next', 'feedback-original', 'feedback-corrected', 'feedback-strength', 'feedback-strength-value', 'feedback-playback-kind',
   'measure-counter', 'scoring-cue', 'previous-measure', 'toggle-playback', 'next-measure', 'show-feedback', 'volume', 'metronome-toggle', 'metronome-volume', 'backing-audio', 'toast', 'asset-status',
+  'practice-shell', 'practice-toolbar', 'practice-transport', 'mobile-toolbar-toggle', 'mobile-transport-toggle',
 ].map((id) => [id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]));
 
 const state = {
@@ -123,6 +126,40 @@ const state = {
 const V1_RMS_THRESHOLD = Object.freeze({ default: .001, min: .000001, max: .01 });
 const V1_TRACKER_DEFAULTS = Object.freeze({ fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 });
 const fluidTrailRenderer = new FluidPitchTrail.Renderer(els.pitchFluidLayer);
+const mobileChrome = { mode: null, topCollapsed: false, bottomCollapsed: false };
+
+function mobilePracticeMode() {
+  if (!window.matchMedia('(max-width: 960px)').matches) return 'desktop';
+  return window.matchMedia('(orientation: landscape)').matches ? 'landscape' : 'portrait';
+}
+
+function updateMobileChrome() {
+  const mode = mobilePracticeMode();
+  if (mode !== mobileChrome.mode) {
+    mobileChrome.mode = mode;
+    mobileChrome.topCollapsed = mode !== 'desktop';
+    mobileChrome.bottomCollapsed = mode === 'landscape';
+  }
+  els.practiceShell.classList.toggle('mobile-top-collapsed', mobileChrome.topCollapsed);
+  els.practiceShell.classList.toggle('mobile-bottom-collapsed', mobileChrome.bottomCollapsed);
+  els.mobileToolbarToggle.hidden = mode === 'desktop';
+  els.mobileTransportToggle.hidden = mode !== 'landscape';
+  els.mobileToolbarToggle.setAttribute('aria-expanded', String(!mobileChrome.topCollapsed));
+  els.mobileTransportToggle.setAttribute('aria-expanded', String(!mobileChrome.bottomCollapsed));
+  els.mobileToolbarToggle.setAttribute('aria-label', mobileChrome.topCollapsed ? 'Mostra i comandi superiori' : 'Nascondi i comandi superiori');
+  els.mobileTransportToggle.setAttribute('aria-label', mobileChrome.bottomCollapsed ? 'Mostra i controlli di riproduzione' : 'Nascondi i controlli di riproduzione');
+  els.mobileToolbarToggle.title = els.mobileToolbarToggle.getAttribute('aria-label');
+  els.mobileTransportToggle.title = els.mobileTransportToggle.getAttribute('aria-label');
+  els.mobileToolbarToggle.firstElementChild.textContent = mobileChrome.topCollapsed ? '⌄' : '⌃';
+  els.mobileTransportToggle.firstElementChild.textContent = mobileChrome.bottomCollapsed ? '⌃' : '⌄';
+}
+
+function redrawAfterChromeChange() {
+  state.activeScoreSegment = null;
+  requestAnimationFrame(() => {
+    if (state.runtime) render();
+  });
+}
 
 function rmsThresholdFromSlider(value) {
   const ratio = Math.max(0, Math.min(1, Number(value) / 100));
@@ -1122,12 +1159,18 @@ function drawPitchLane(beat) {
   const baseSpan = baseBounds.max - baseBounds.min;
   const pitchSpan = baseSpan / (inspecting ? inspect.pitchZoom : 1);
   const bounds = { min: baseCenter - pitchSpan / 2, max: baseCenter + pitchSpan / 2 };
-  const historyBeats = UI_CONFIG.historyBeats / (inspecting ? inspect.timeZoom : 1);
-  const futureBeats = UI_CONFIG.futureBeats / (inspecting ? inspect.timeZoom : 1);
+  const compactLayout = window.matchMedia('(max-width: 960px)').matches;
+  const baseHistoryBeats = compactLayout ? UI_CONFIG.mobileHistoryBeats : UI_CONFIG.historyBeats;
+  const baseFutureBeats = compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats;
+  const historyBeats = baseHistoryBeats / (inspecting ? inspect.timeZoom : 1);
+  const futureBeats = baseFutureBeats / (inspecting ? inspect.timeZoom : 1);
   const rowHeight = (plot.bottom - plot.top) / (bounds.max - bounds.min);
   const nowX = timeToX(displayBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
-  const noteLabelX = nowX - UI_CONFIG.pitchNoteLabelOffsetPx;
-  const melodyHeadX = noteLabelX - UI_CONFIG.pitchHeadGapPx;
+  const noteLabelX = compactLayout ? 6 : nowX - UI_CONFIG.pitchNoteLabelOffsetPx;
+  const melodyHeadX = compactLayout ? nowX - UI_CONFIG.pitchHeadGapPx : noteLabelX - UI_CONFIG.pitchHeadGapPx;
+  const noteStripLeft = compactLayout ? 0 : noteLabelX - 4;
+  const noteStripRight = compactLayout ? plot.left - 4 : nowX - 1;
+  const voiceClipRight = compactLayout ? nowX - 2 : noteLabelX - 2;
   els.intonationReadout.style.left = `${nowX + 12}px`;
   els.intonationReadout.style.right = 'auto';
 
@@ -1220,13 +1263,12 @@ function drawPitchLane(beat) {
     const yAtVoice = (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
     const trailSettings = { ...livePlumeSettings(displayBeat, inspecting, inspecting ? plot.right : melodyHeadX, plot.left),
       ribbonScale: state.plumeSettings.width, intensity: state.plumeSettings.intensity, dpr, width: rect.width, height: rect.height,
-      clip: { left: plot.left, top: plot.top, right: inspecting ? plot.right : noteLabelX - 2, bottom: plot.bottom },
+      clip: { left: plot.left, top: plot.top, right: inspecting ? plot.right : voiceClipRight, bottom: plot.bottom },
+      showHeadMarker: false,
       animationTime: state.clock.running ? performance.now() / 1000 : state.runtime.secondsAtBeat(displayBeat) };
     fluidLayerDrawn = fluidTrailRenderer.render(v1PlumeSamples, xAtVoice, yAtVoice, trailSettings);
     if (!fluidLayerDrawn)
       FluidPitchTrail.drawFallback(ctx, v1PlumeSamples, xAtVoice, yAtVoice, trailSettings);
-    else if (!inspecting)
-      FluidPitchTrail.drawLiveHead(ctx, v1PlumeSamples, xAtVoice, yAtVoice, trailSettings);
   }
   if (state.pitchLayers.crepe && (state.neuralLive.enabled || state.neuralLive.samples.length)) {
     // CREPE salience is not a calibrated posterior. Keep its F0 trace separate
@@ -1248,7 +1290,7 @@ function drawPitchLane(beat) {
   ctx.restore(); ctx.shadowBlur = 0;
 
   const currentTarget = state.runtime.targetAt(displayBeat);
-  ctx.fillStyle = '#0a181e'; ctx.fillRect(noteLabelX - 4, plot.top - 8, nowX - noteLabelX - 1, plot.bottom - plot.top + 16);
+  ctx.fillStyle = '#0a181e'; ctx.fillRect(noteStripLeft, plot.top - 8, Math.max(0, noteStripRight - noteStripLeft), plot.bottom - plot.top + 16);
   for (let pitch = Math.ceil(bounds.min); pitch <= Math.floor(bounds.max); pitch += 1) {
     const y = pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
     const active = currentTarget && pitch === currentTarget.midiPitch + state.transpose;
@@ -1260,7 +1302,7 @@ function drawPitchLane(beat) {
   if (Number.isFinite(state.displayPitch)) {
     const markerY = Math.max(plot.top + 4, Math.min(plot.bottom - 4,
       pitchToY(state.displayPitch, bounds.min, bounds.max, plot.top, plot.bottom)));
-    FluidPitchTrail.drawPitchMarker(ctx, noteLabelX - 10, markerY);
+    FluidPitchTrail.drawPitchMarker(ctx, nowX, markerY);
   }
   if (Number.isFinite(state.displayPitch) && (state.displayPitch < bounds.min || state.displayPitch > bounds.max)) {
     ctx.fillStyle = '#68d1cb'; ctx.textAlign = 'left';
@@ -3331,6 +3373,15 @@ function changePart(partId) {
 }
 
 function bindControls() {
+  updateMobileChrome();
+  els.mobileToolbarToggle.addEventListener('click', () => {
+    mobileChrome.topCollapsed = !mobileChrome.topCollapsed;
+    updateMobileChrome(); redrawAfterChromeChange();
+  });
+  els.mobileTransportToggle.addEventListener('click', () => {
+    mobileChrome.bottomCollapsed = !mobileChrome.bottomCollapsed;
+    updateMobileChrome(); redrawAfterChromeChange();
+  });
   bindGridInspection();
   bindScorePitchDivider();
   bindBenchmarkAnalysisCanvas();
@@ -3615,7 +3666,7 @@ function bindControls() {
   els.settingsDialog.addEventListener('click', closeSettingsFromBackdrop);
   document.getElementById('admin-review').addEventListener('click', () => window.open('admin-review.html', 'choir-admin-review'));
   document.getElementById('exit-practice').addEventListener('click', openLibraryPicker);
-  window.addEventListener('resize', () => { state.activeScoreSegment = null; render(); });
+  window.addEventListener('resize', () => { updateMobileChrome(); state.activeScoreSegment = null; render(); });
   window.addEventListener('resize', () => { if (!els.benchmarkAnalysis.hidden) drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); });
   window.addEventListener('beforeunload', () => { savePitchHistory(); state.microphoneStream?.getTracks().forEach((track) => track.stop()); });
   document.addEventListener('keydown', (event) => {
