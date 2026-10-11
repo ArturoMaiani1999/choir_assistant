@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-05
+**Last reviewed:** 2026-10-11
 
 This directory separates current contracts and procedures from historical
 investigation. If two documents disagree, the canonical documents listed here
@@ -40,6 +40,11 @@ take precedence over anything under `archive/`.
   alternative for a 500-user commercial service.
 
 ## Operations
+
+- [Consumer authentication deployment](operations/consumer-auth-deployment.md) —
+  staged Clerk/D1 provisioning, member synchronization, cutover and rollback.
+- [Consumer authentication security review](operations/consumer-auth-security-review.md) —
+  controls, threat model, adversarial test scope and residual risk.
 
 - [Development workflow](operations/development-workflow.md) — local setup,
   checks, change flow and release-candidate discipline.

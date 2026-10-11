@@ -17,6 +17,15 @@ frontend/library-assets/
 frontend/voice-lab-assets/
 
 .wrangler/
+node_modules/
+.dev.vars
+.dev.vars.*
+.env
+.env.*
+
+# Authorization source lists contain personal data and must never be committed.
+authorized-members*.csv
+authorized-members*.txt
 
 # Rebuildable Voice Lab authoring cache. The browser-ready SVG files under
 # frontend/voice-lab-assets remain versioned so a static build needs no

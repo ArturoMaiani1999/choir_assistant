@@ -10,6 +10,11 @@ is deployed to Cloudflare Workers for a restricted group of singers. The
 production build is intentionally fail-closed: no repertoire is included until
 it is explicitly authorized in `deploy/repertoire.json`.
 
+The live Worker is still protected by Cloudflare Access. This branch implements
+the independently reviewed replacement: Clerk verifies consumer identity and
+the Worker requires an active D1 authorization digest before serving any file.
+Do not remove Access until the staged cutover gates pass.
+
 Pitch analysis, preferences and locally recorded benchmark takes remain in the
 browser. The local administration and score-generation server must never be
 exposed to the Internet.
@@ -29,6 +34,8 @@ detection.
 ## Validate
 
 ```powershell
+npm ci
+npm run check
 node frontend/practice_math.test.js
 node frontend/score_runtime.test.js
 node frontend/pitch_detector.test.js
@@ -40,6 +47,7 @@ python -m unittest scripts.check_voice_lab_artifacts_test
 python scripts/build_dist_test.py
 python scripts/check_voice_lab_artifacts.py
 python scripts/check_docs.py
+python -m unittest scripts.check_deploy_config_test scripts.sync_authorized_members_test
 ```
 
 The static release also has a real-browser check. Serve `dist/` with Wrangler,
@@ -52,8 +60,9 @@ Browser smoke tests require the local server to be running. See the
 
 Changing `deploy/repertoire.json` does not update Cloudflare automatically.
 Generate a new immutable `dist/`, test it, then deploy that same directory to
-the existing Worker. Cloudflare Access, the email allowlist and PIN settings
-remain attached to the Worker across deployments.
+the intended Worker. Before the ADR-0004 cutover, Cloudflare Access remains
+attached to the live Worker. After cutover, the Worker middleware and D1 member
+authorization remain attached through `wrangler.jsonc` and its bindings.
 
 For every new or changed piece, first generate its reviewed browser bundle:
 
@@ -124,6 +133,8 @@ points are:
 - [Choir beta operations](docs/operations/choir-beta-operations.md)
 - [Private deployment runbook](docs/operations/private-deployment.md)
 - [Email allowlist and PIN access](docs/operations/cloudflare-access-email-pin.md)
+- [Consumer authentication deployment](docs/operations/consumer-auth-deployment.md)
+- [Consumer authentication security review](docs/operations/consumer-auth-security-review.md)
 - [Architecture decisions](docs/decisions/README.md)
 
 Historical audits and superseded plans live under `docs/archive/` and are not

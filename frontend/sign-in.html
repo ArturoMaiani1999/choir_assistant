@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex,nofollow,noarchive">
+    <title>Accesso · Choir Assistant</title>
+    <style>
+      :root { color-scheme: light; font-family: system-ui, sans-serif; background: #f4f0e8; color: #25211d; }
+      body { min-height: 100vh; margin: 0; display: grid; place-items: center; }
+      main { width: min(92vw, 30rem); padding: 2rem; background: #fff; border: 1px solid #d8d0c4; border-radius: 1rem; box-shadow: 0 1rem 3rem #3c31251a; }
+      h1 { margin-top: 0; font-family: Georgia, serif; }
+      p { line-height: 1.55; }
+      #auth-status { min-height: 1.5rem; color: #5c5148; }
+      .error { color: #8b1e1e; }
+      button, a.continue { display: inline-block; border: 0; border-radius: .55rem; padding: .75rem 1rem; background: #59412d; color: white; font: inherit; text-decoration: none; cursor: pointer; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Accedi a Choir Assistant</h1>
+      <p>Usa l’indirizzo email registrato nella lista dei coristi autorizzati.</p>
+      <p id="auth-status" role="status">Caricamento accesso…</p>
+      <div id="clerk-sign-in"></div>
+      <div id="signed-in-actions" hidden></div>
+      <noscript>Per effettuare l’accesso è necessario JavaScript.</noscript>
+    </main>
+    <script type="module" src="/auth-client.js"></script>
+  </body>
+</html>

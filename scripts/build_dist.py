@@ -140,6 +140,24 @@ def build_core_assets(destination: Path) -> dict[str, str]:
     return names
 
 
+def build_auth_client(destination: Path) -> None:
+    """Bundle ClerkJS locally so production does not execute a third-party script."""
+    npx = shutil.which("npx")
+    if not npx:
+        raise ValueError("Node/npm non trovato; eseguire npm install prima della build")
+    command = [
+        npx, "--no-install", "esbuild", str(FRONTEND / "auth-client.ts"),
+        "--bundle", "--minify", "--platform=browser", "--target=es2022",
+        f"--outfile={destination / 'auth-client.js'}",
+    ]
+    try:
+        subprocess.run(command, cwd=ROOT, check=True)
+    except FileNotFoundError as error:
+        raise ValueError("Node/npm non trovato; eseguire npm install prima della build") from error
+    except subprocess.CalledProcessError as error:
+        raise ValueError("Build del client di autenticazione fallita") from error
+
+
 def audit_local_references(destination: Path) -> None:
     """Fail the release when generated HTML or worker entry points return 404."""
     patterns = {
@@ -234,6 +252,15 @@ def write_headers(destination: Path) -> None:
 /index.html
   Cache-Control: no-cache
 
+/sign-in.html
+  Cache-Control: no-store
+
+/not-authorized.html
+  Cache-Control: no-store
+
+/auth-client.js
+  Cache-Control: no-store
+
 /*.js
   Cache-Control: public, max-age=31536000, immutable
 
@@ -260,7 +287,15 @@ def audit(destination: Path) -> dict[str, str]:
             raise ValueError(f"Runtime neurale vietato nella build: {relative}")
         if path.suffix.lower() in {".html", ".js", ".css", ".json", ""}:
             text = path.read_text(encoding="utf-8")
-            for marker in FORBIDDEN_TEXT:
+            # ClerkJS contains provider API and dormant development-origin
+            # strings. CSP prevents connections to localhost in production;
+            # CDN and test-hook markers remain forbidden in the pinned bundle.
+            forbidden = (
+                tuple(marker for marker in FORBIDDEN_TEXT if marker not in {"/api/", "localhost"})
+                if relative == "auth-client.js"
+                else FORBIDDEN_TEXT
+            )
+            for marker in forbidden:
                 if marker in text:
                     raise ValueError(f"Riferimento vietato {marker!r} in {relative}")
         hashes[relative] = sha256(path)
@@ -286,6 +321,7 @@ def main() -> int:
         )
     destination = args.output.resolve()
     safe_clean(destination)
+    build_auth_client(destination)
     version = current_version(dirty=dirty)
     names = build_core_assets(destination)
     index = (FRONTEND / "index.html").read_text(encoding="utf-8")
@@ -315,6 +351,8 @@ def main() -> int:
         viewer_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, viewer_index)
     viewer_index = viewer_index.replace("runtime-config.js", runtime_name)
     (destination / "score-viewer.html").write_text(viewer_index, encoding="utf-8")
+    shutil.copy2(FRONTEND / "sign-in.html", destination / "sign-in.html")
+    shutil.copy2(FRONTEND / "not-authorized.html", destination / "not-authorized.html")
     lab_assets = destination / "voice-lab-assets"
     lab_assets.mkdir()
     for source in (FRONTEND / "voice-lab-assets").iterdir():

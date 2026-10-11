@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-03
+**Last reviewed:** 2026-10-11
 
 ## Purpose
 
@@ -23,10 +23,13 @@ Maintainer workstation
            |
            | immutable upload
            v
-Cloudflare Access -> Workers Static Assets -> singer browser
-                                         |-- Web Audio pitch analysis
-                                         |-- localStorage preferences
-                                         `-- IndexedDB local takes
+Clerk identity -> Worker authorization -> D1 email-digest allowlist
+                         |
+                         v
+              Workers Static Assets -> singer browser
+                                    |-- Web Audio pitch analysis
+                                    |-- localStorage preferences
+                                    `-- IndexedDB local takes
 ```
 
 The workstation is an authoring boundary, not a production server. Only the
@@ -67,9 +70,11 @@ generates security headers and records hashes in `deployment-manifest.json`.
 
 ## Trust and privacy boundaries
 
-- Cloudflare Access authenticates exact allowlisted email addresses before any
-  production asset is served.
-- The Worker serves static files only; local admin endpoints are absent.
+- Clerk authenticates the singer and issues a signed session. The Worker then
+  requires an active HMAC email digest in D1 before serving any production
+  asset. Production cutover remains gated by ADR-0004 and security review.
+- The Worker exposes authentication middleware and static files only; local
+  admin endpoints are absent.
 - Microphone samples and pitch estimates are processed in the browser.
 - Preferences and recordings remain in browser storage unless a future,
   explicit export feature is introduced.
@@ -84,7 +89,8 @@ generates security headers and records hashes in `deployment-manifest.json`.
 | Interchange notation | Approved MusicXML |
 | Playback order and targets | Normalized score/performance timeline |
 | Release contents | `deploy/repertoire.json` plus `deployment-manifest.json` |
-| Singer identity | Cloudflare Access policy |
+| Singer identity | Clerk verified session |
+| Singer authorization | D1 active email digest |
 | Live sung pitch | Browser-local detector output |
 
 ## Known constraints
@@ -93,11 +99,12 @@ generates security headers and records hashes in `deployment-manifest.json`.
   on the local server. Pre-rendered transposed audio may be added later.
 - Pitch scoring is monophonic and expects headphones to avoid backing leakage.
 - The real-vocal corpus is still too small for broad estimator claims.
-- Access is attached to the Worker and covers production, custom domains and
-  any previews; version preview URLs are disabled by configuration.
+- Every static request is mediated by the Worker; preview URLs remain disabled
+  and alternate hostnames must be included in the security assessment.
 
 ## Related decisions
 
 - [ADR-0001: private static delivery](../decisions/0001-private-static-delivery.md)
 - [ADR-0002: neural pitch models remain diagnostic](../decisions/0002-neural-pitch-diagnostics-only.md)
 - [ADR-0003: Workers static delivery](../decisions/0003-workers-static-delivery.md)
+- [ADR-0004: consumer authentication](../decisions/0004-consumer-authentication.md)

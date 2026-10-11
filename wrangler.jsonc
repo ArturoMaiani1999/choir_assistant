@@ -1,10 +1,27 @@
 {
-  "name": "choir-assistant",
-  "compatibility_date": "2026-10-03",
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "choir-assistant-auth-staging",
+  "main": "./src/worker.ts",
+  "compatibility_date": "2026-10-11",
   "workers_dev": true,
   "preview_urls": false,
+  "vars": {
+    "APP_ORIGIN": "https://REPLACE_WITH_STAGING_HOSTNAME",
+    "CLERK_FRONTEND_API_ORIGIN": "https://REPLACE_WITH_CLERK_FRONTEND_API",
+    "CLERK_PUBLISHABLE_KEY": "REPLACE_WITH_CLERK_PUBLISHABLE_KEY"
+  },
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "choir-assistant-auth-staging",
+      "database_id": "REPLACE_WITH_D1_DATABASE_ID",
+      "migrations_dir": "migrations"
+    }
+  ],
   "assets": {
     "directory": "./dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
     "not_found_handling": "none"
   }
 }

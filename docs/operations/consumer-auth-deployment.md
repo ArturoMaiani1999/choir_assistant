@@ -1,0 +1,138 @@
+# Consumer authentication deployment
+
+**Status:** canonical for `feature/consumer-auth`; not yet the live production procedure
+**Owner:** project maintainer
+**Last reviewed:** 2026-10-11
+
+This runbook provisions the Clerk + D1 authorization path without weakening
+the currently deployed Cloudflare Access application. Perform the first deploy
+under a distinct Worker name and hostname.
+
+## 1. Local prerequisites
+
+```powershell
+npm ci
+npm run check
+python -m unittest scripts.check_deploy_config_test scripts.sync_authorized_members_test
+```
+
+`npm audit --audit-level=moderate` must report zero known vulnerabilities at
+release time. Review lockfile changes explicitly; do not use an unattended
+forced audit upgrade.
+
+## 2. Clerk production instance
+
+1. Create a production Clerk application using email verification code or
+   magic-link authentication.
+2. Disable changes to the primary email identifier by end users.
+3. Enable Clerk attack/bot protection.
+4. Restrict allowed application origins and redirects to the staging hostname.
+5. Configure the session-token custom claim:
+
+```json
+{
+  "primaryEmail": "{{user.primary_email_address}}"
+}
+```
+
+6. Record the publishable key, public JWT verification key and exact HTTPS
+   Frontend API origin. The Worker does not need a Clerk Backend API secret.
+
+Clerk's own allowlist is deliberately not the authorization authority. Users
+outside the D1 list may be able to create an identity, but the Worker returns
+`403` and never serves repertoire assets.
+
+## 3. Create staging D1
+
+```powershell
+npx wrangler d1 create choir-assistant-auth-staging
+```
+
+Copy the returned database ID into the staging `wrangler.jsonc`. Replace the
+three `REPLACE_WITH_...` values with the real staging origin, Clerk Frontend API
+origin and publishable key. Then apply migrations:
+
+```powershell
+npx wrangler d1 migrations apply choir-assistant-auth-staging --remote
+```
+
+## 4. Secrets
+
+Generate one random HMAC key and place the same value in the Worker secret and
+in the operator's password manager. Loss of this key requires generating a new
+one and re-synchronizing the complete mailing list.
+
+```powershell
+$bytes = New-Object byte[] 32
+[Security.Cryptography.RandomNumberGenerator]::Fill($bytes)
+$hmacKey = [Convert]::ToBase64String($bytes)
+$hmacKey | npx wrangler secret put AUTH_EMAIL_HMAC_KEY
+npx wrangler secret put CLERK_JWT_KEY
+Remove-Variable hmacKey,bytes
+```
+
+Do not pass secrets as command-line arguments. Confirm that PowerShell
+transcription/history and CI logs do not capture piped secret values.
+
+## 5. Synchronize authorized members
+
+The input file is private and must live outside the repository. It may be a
+CSV with an `email` column or one address per line.
+
+```powershell
+$env:CHOIR_AUTH_EMAIL_HMAC_KEY = '<retrieve from password manager>'
+python scripts/sync_authorized_members.py C:\private\coristi.csv --dry-run
+python scripts/sync_authorized_members.py C:\private\coristi.csv
+Remove-Item Env:\CHOIR_AUTH_EMAIL_HMAC_KEY
+```
+
+The default operation only adds/reactivates entries. After reviewing the
+source list, `--replace` also revokes active digests absent from that list.
+Never use `--replace` with a partial export.
+
+## 6. Build and stage
+
+The repository must be clean because the release builder rejects dirty builds.
+
+```powershell
+npm ci
+npm run check
+npm run build
+npm run deploy
+```
+
+Do not rename this Worker to `choir-assistant` during staging. The current
+Access-protected production Worker is the rollback target.
+
+## 7. Acceptance gates
+
+Test in a new browser profile, not merely an incognito tab with shared browser
+state:
+
+1. Anonymous `/` redirects to `/sign-in`.
+2. Anonymous `library.json`, a `bundle.json`, SVG and MP3 return `401`, never
+   `200` and never the sign-in HTML body.
+3. A valid Clerk user absent from D1 receives `403` for root and direct assets.
+4. An authorized member can load notation and seek audio using byte ranges.
+5. Setting the member inactive blocks the next request.
+6. An invalid `return_url=https://attacker.example` cannot redirect off-site.
+7. Disconnecting or misbinding D1 returns `503`; no asset is served.
+8. CSP has no unexpected report-only violations during login or rehearsal.
+9. Browser storage and network traces contain no mailing list or secret key.
+
+Complete the independent procedure in
+[consumer-auth-security-review.md](consumer-auth-security-review.md).
+
+## 8. Production cutover and rollback
+
+Only after review approval:
+
+1. Create the production D1 database and repeat migration and member sync.
+2. Create production-scoped Clerk keys/origins; never reuse development keys.
+3. Deploy the reviewed commit as a new Worker version.
+4. Move the custom production hostname to the reviewed Worker.
+5. Verify root and direct assets anonymously before inviting users.
+6. Remove the singer-facing Access application only after successful checks.
+
+Rollback means restoring the hostname to the old Access-protected Worker. Do
+not make the new Worker public to "debug" an authentication failure.

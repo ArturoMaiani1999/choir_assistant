@@ -1,0 +1,24 @@
+{
+  "name": "choir-assistant-edge",
+  "private": true,
+  "scripts": {
+    "build": "python scripts/build_dist.py",
+    "build:auth-client": "esbuild frontend/auth-client.ts --bundle --minify --platform=browser --target=es2022 --outfile=dist/auth-client.js",
+    "check": "npm run typecheck && npm test",
+    "predeploy": "python scripts/check_deploy_config.py",
+    "deploy": "npm run build && wrangler deploy",
+    "test": "vitest run tests",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "@clerk/backend": "3.23.2",
+    "@clerk/clerk-js": "6.39.0"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261011.1",
+    "esbuild": "0.28.2",
+    "typescript": "5.9.3",
+    "vitest": "4.1.11",
+    "wrangler": "4.149.0"
+  }
+}
