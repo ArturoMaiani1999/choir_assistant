@@ -153,6 +153,17 @@ presenza di un test come prova che il deployment reale sia sicuro.
 | 2026-10-11 | `d9160ea` | dependency audit | 0 vulnerabilità note moderate+ |
 | 2026-10-11 | `d9160ea` | Wrangler dry-run | bundle Worker valido |
 | 2026-10-11 | `d9160ea` | predeploy con placeholder | deploy correttamente bloccato |
+| 2026-10-13 | `f37f1a3` | typecheck + Vitest | 22 test passati |
+| 2026-10-13 | `f37f1a3` | test script operativi | 10 test passati |
+| 2026-10-13 | `f37f1a3` | `npm audit --audit-level=moderate` | 0 vulnerabilità note |
+| 2026-10-13 | `f37f1a3` | Wrangler dry-run | Worker compilato; nessun deploy |
+| 2026-10-13 | `f37f1a3` | predeploy con placeholder | deploy correttamente bloccato |
+| 2026-10-13 | `f37f1a3` | build completa sito | bloccata: manca il bundle generato di `qui-credit-in-me-non-sitiet` |
+
+Il blocco dell'ultima riga precede il cutover e non riguarda il middleware di
+autenticazione: `deploy/repertoire.json` pubblica il brano, ma in questo
+worktree manca `frontend/library-assets/qui-credit-in-me-non-sitiet/metadata.json`.
+Rigenerare il bundle del brano e ripetere la build prima dello staging.
 
 ## Azioni manuali del maintainer
 
