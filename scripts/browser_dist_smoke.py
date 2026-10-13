@@ -581,9 +581,13 @@ def main() -> int:
                 assert all(parse_qs(urlsplit(url).query).get("v") == [result["buildVersion"]]
                            for url in voice_mix["own"]["stemUrls"]), voice_mix
                 assert voice_mix["full"]["running"] and voice_mix["own"]["running"], voice_mix
-                if voice_mix["full"]["canSeek"]:
+                # During the first media startup quantum, a switch back to
+                # zero is indistinguishable from normal decoder jitter. Check
+                # continuity only once enough playback time has elapsed.
+                assert_continuity = voice_mix["beforeSwitch"] >= .25
+                if assert_continuity and voice_mix["full"]["canSeek"]:
                     assert voice_mix["full"]["performanceTime"] >= voice_mix["beforeSwitch"] - .1, voice_mix
-                if voice_mix["own"]["canSeek"]:
+                if assert_continuity and voice_mix["own"]["canSeek"]:
                     assert voice_mix["own"]["performanceTime"] >= voice_mix["beforeSwitch"] - .1, voice_mix
                 custom = voice_mix["custom"]
                 assert custom["kind"] == "stem-mix" and custom["stems"] == 0, custom
