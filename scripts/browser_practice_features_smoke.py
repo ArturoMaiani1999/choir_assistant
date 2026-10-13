@@ -46,11 +46,20 @@ def main():
             result = evaluate(socket, 1, """(async () => {
               const assert = (value, message) => { if (!value) throw Error(message); };
               assert(state.runtime, 'runtime initialized');
-              assert(state.plumeSettings.timeAdvanceMs === 200, 'global default visual advance');
+              assert(state.detectorSettings.rmsThreshold === .000002, 'global default RMS threshold');
+              assert(state.detectorSettings.fastAlpha === .65, 'global default attack responsiveness');
+              assert(state.detectorSettings.slowAlpha === .65, 'global default stable responsiveness');
+              assert(state.detectorSettings.medianWindowFrames === 3, 'global default median window');
+              assert(state.plumeSettings.timeAdvanceMs === 270, 'global default visual advance');
               assert(state.plumeSettings.width === 2.5, 'global default plume width is 250%');
+              assert(state.plumeSettings.intensity === 1.75, 'global default plume intensity is 175%');
+              assert(state.pianoRollDelayMs === 270, 'global default piano roll delay');
+              assert(getComputedStyle(els.intonationReadout).display === 'none', 'intonation readout is hidden on desktop');
               assert(els.transpose.options.length === 25, 'semitone and octave options');
               // Approval is stubbed in this isolated test profile, never persisted.
               state.bundleApproved = true;
+              els.settingsAudioOutputStandard.checked = true;
+              els.settingsAudioOutputStandard.dispatchEvent(new Event('change'));
               const ready = new Promise((resolve, reject) => {
                 const timer = setTimeout(() => reject(Error('transposed audio timeout')), 12000);
                 els.backingAudio.addEventListener('loadedmetadata', () => {clearTimeout(timer); resolve();}, {once:true});
@@ -87,12 +96,28 @@ def main():
               assert(els.resultText.textContent.includes('insufficienti'), 'silence not scored');
               els.resultClose.click();
               els.settings.click();
+              assert(!els.settingsMenu.hidden, 'settings level menu opens');
+              els.settingsMenuAdvanced.click();
               assert(els.settingsDialog.open, 'settings dialog opens');
+              assert(els.settingsBasicPanel.hidden && !els.settingsAdvancedPanel.hidden, 'advanced settings selected');
               assert(!document.querySelector('#settings-close'), 'settings dialog has no close button');
-                assert(els.settingsV1PlumeAdvance.max === '400', 'visual pitch advance supports high-latency headphones');
-                els.settingsV1PlumeAdvance.value = '400';
-                els.settingsV1PlumeAdvance.dispatchEvent(new Event('input'));
-                assert(state.plumeSettings.timeAdvanceMs === 400, 'visual pitch advance accepts 400 ms');
+              assert(els.settingsPianoRollDelay.max === '600', 'piano roll delay supports up to 600 ms latency');
+              assert(els.settingsV1PlumeAdvance.max === '600', 'visual pitch advance supports Bluetooth latency');
+              els.settingsAudioOutputBluetooth.checked = true;
+              els.settingsAudioOutputBluetooth.dispatchEvent(new Event('change'));
+              assert(state.audioOutputType === 'bluetooth' && state.pianoRollDelayMs === 270
+                && state.plumeSettings.timeAdvanceMs === 550,
+                'Bluetooth applies 550 ms only to the vocal trace advance');
+              els.settingsAudioOutputStandard.checked = true;
+              els.settingsAudioOutputStandard.dispatchEvent(new Event('change'));
+              assert(state.pianoRollDelayMs === 270 && state.plumeSettings.timeAdvanceMs === 270,
+                'standard output applies 270 ms to the vocal trace advance');
+              els.settingsPianoRollDelay.value = '150';
+              els.settingsPianoRollDelay.dispatchEvent(new Event('input'));
+              els.settingsPianoRollDelay.dispatchEvent(new Event('change'));
+              els.settingsV1PlumeAdvance.value = '600';
+              els.settingsV1PlumeAdvance.dispatchEvent(new Event('input'));
+              assert(state.plumeSettings.timeAdvanceMs === 600, 'visual pitch advance accepts 600 ms');
               els.settingsV1PlumeAdvance.value = '120';
               els.settingsV1PlumeAdvance.dispatchEvent(new Event('input'));
               els.settingsV1PlumeAdvance.dispatchEvent(new Event('change'));

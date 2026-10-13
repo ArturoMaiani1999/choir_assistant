@@ -39,6 +39,16 @@ The obsolete single-colour input is hidden because it would misleadingly claim
 to control this temporal palette; its persisted legacy preference is retained
 for compatibility.
 
+The fluid overlay has the same single-valued rendering contract. After bounded
+corner cutting, its centreline is resampled exactly once per physical pixel
+column, so it is a graph `y = f(x)` by construction. Both mesh edges retain the
+centreline's x coordinate and apply width vertically. This prevents steep
+transitions from folding a normal-offset ribbon backwards or producing multiple
+centre pitches at one screen coordinate. Live observations beyond the melody
+head are clipped during resampling; they are not collapsed onto a shared x.
+Short dropout reconciliation additionally requires strictly increasing time and
+x, and therefore cannot undo a nonmonotonic segment boundary.
+
 ## Musical boundaries and lifecycle
 
 - Invalid pitch/confidence, confidence below 0.3, and provisional transitions
@@ -57,12 +67,14 @@ for compatibility.
   timing-offset preference is respected; it does not change stored F0/timestamps.
 - Live Practice filters to the current take. Existing seek/start/reset/piece
   boundaries remain authoritative. Future observations are rejected after seek.
+  While singing, every observed segment still inside the visible piano-roll
+  window is retained at stable intensity instead of fading with age. Silence
+  and other genuine segment boundaries remain visible as gaps.
 - Voice Lab uses elapsed recording time. During recording the recent plume
   is brighter, but the whole visible trail remains present. After stopping,
   the roll and feedback chart use explicit review
   mode: the entire observed trajectory remains visible without live decay.
-- Practice's paused inspection also uses review mode. Historical data are not
-  deleted by the live fade. Historical sample storage retains its existing
+- Practice's paused inspection also uses review mode. Historical sample storage retains its existing
   12,000-frame limit; this work does not expand storage policy.
 
 Ordered timelines are cropped to the viewport with binary search before segmentation;
@@ -78,6 +90,7 @@ Run:
 
 ```powershell
 node frontend/pitch_shared.test.js
+node frontend/fluid_pitch_trail.test.js
 node frontend/vocal_feedback.test.js
 node frontend/voice_lab_core.test.js
 python scripts/browser_aurora_smoke.py
@@ -90,6 +103,9 @@ boundaries, temporal gaps, suspected octave jump, provisional transitions,
 low confidence, separate takes, pause determinism, seek/future clipping, reset,
 full-history review, a 10-minute synthetic take, DPR/resize and buffer reuse.
 Moderate downsampling preserves the stable trajectory at pixel-quantized alpha.
+Fluid-geometry coverage also asserts one strictly increasing centre value per
+physical pixel column, vertically aligned mesh edges and rejection of duplicate
+live-head coordinates.
 
 The headless Chrome fixture tests real Canvas pixels at widths 1280/720 and DPR
 1/2, downsampling, reset/future rejection, and render timings. Captured screenshots
@@ -115,7 +131,7 @@ still require a hardware listening test. At low vertical zoom the visual width
 has a 1.25 CSS-pixel readability floor. Analytical benchmark charts retain their
 existing scientific presentation rather than acquiring the live temporal fade.
 
-Implementation files: `frontend/pitch_shared.js`, `frontend/app.js`,
+Implementation files: `frontend/pitch_shared.js`, `frontend/fluid_pitch_trail.js`, `frontend/app.js`,
 `frontend/voice_lab.js`, plus cache references/settings text in the two HTML
-entrypoints. Tests: `frontend/pitch_shared.test.js`,
+entrypoints. Tests: `frontend/pitch_shared.test.js`, `frontend/fluid_pitch_trail.test.js`,
 `scripts/aurora_render_fixture.html`, `scripts/browser_aurora_smoke.py`.

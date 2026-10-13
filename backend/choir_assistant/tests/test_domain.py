@@ -69,6 +69,8 @@ class RuntimeScoreTests(unittest.TestCase):
         self.assertEqual(score.tempo_map[0].bpm, 60)
         self.assertEqual(score.measures[0].key_fifths, 0)
         self.assertEqual(score.measures[1].key_fifths, -1)
+        self.assertEqual(score.measures[0].key_mode, "major")
+        self.assertEqual(score.measures[1].key_mode, "minor")
 
     def test_musicxml_preserves_a_six_four_pickup_as_beat_six(self) -> None:
         fixture = Path(__file__).parent / "fixtures" / "six_four_pickup.musicxml"

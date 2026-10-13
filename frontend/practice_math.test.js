@@ -65,6 +65,17 @@ const pickupGrid = math.rhythmGridLines([
   { number: 1, startBeat: 0, endBeat: 1, timeSignatureDenominator: 4, beatOffset: 5 },
 ], 0, 1);
 assert.equal(pickupGrid.find((line) => line.kind === 'measure').label, 'B. 1 · 6');
+const shortMeasures = Array.from({ length: 8 }, (_, index) => ({
+  startBeat: index * 2, endBeat: (index + 1) * 2,
+}));
+const limitedWindow = math.limitTimelineWindowToMeasures(shortMeasures, 6, 6, 10, 4);
+const limitedStart = 6 - limitedWindow.historyBeats;
+const limitedEnd = 6 + limitedWindow.futureBeats;
+assert.equal(shortMeasures.filter((measure) => measure.endBeat > limitedStart + 1e-7
+  && measure.startBeat < limitedEnd - 1e-7).length, 4,
+  'the mobile timeline can be constrained to at most four measures');
+assert.deepEqual(math.limitTimelineWindowToMeasures(shortMeasures, 6, 1, 2, 4),
+  { historyBeats: 1, futureBeats: 2 }, 'an already compact timeline is left unchanged');
 const smooth = math.smoothPitchBounds({ min: 50, max: 60 }, { min: 60, max: 70 }, 90, 180);
 assert.ok(smooth.bounds.min > 50 && smooth.bounds.min < 60 && smooth.animating, 'pitch viewport interpolates without jumping');
 

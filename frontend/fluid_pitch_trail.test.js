@@ -33,6 +33,11 @@ assert.equal(fluid.liveHeadPoint(samples, sample => sample.time * 200, pitch => 
   'stale pitch history has no live marker');
 const corner = fluid.smoothPoints([{x:0,y:0,time:0,confidence:1},{x:10,y:10,time:1,confidence:1},{x:20,y:0,time:2,confidence:1}], 1);
 assert.ok(corner.every(point => point.y >= 0 && point.y <= 10), 'smoothing cannot overshoot detected pitch geometry');
+const columns = fluid.sampleGraphColumns(corner, 2);
+assert.ok(columns.every((point, index) => !index || point.x > columns[index - 1].x),
+  'the centreline has exactly one value per physical pixel column');
+assert.ok(columns.every(point => point.y >= 0 && point.y <= 10),
+  'column resampling preserves the bounded smoothing hull');
 const rightAngle = [{x:0,y:20},{x:20,y:20},{x:20,y:0}];
 const join = fluid.joinOffset(rightAngle, 1, 7, 1.5);
 assert.ok(Math.hypot(join.x, join.y) <= 7 * 1.5 + 1e-9, 'acute joins obey the miter limit');
@@ -48,7 +53,22 @@ const abrupt = fluid.trailGeometry(abruptSamples, sample => sample.time * 300, p
 for (let index = 0; index < abrupt.vertices.length; index += 16) {
   const width = Math.hypot(abrupt.vertices[index] - abrupt.vertices[index + 8], abrupt.vertices[index + 1] - abrupt.vertices[index + 9]);
   assert.ok(width <= fluid.CONFIG.ribbonWidth * fluid.CONFIG.joinLimit + .01, 'sharp transition cannot create a ribbon spike');
+  assert.equal(abrupt.vertices[index], abrupt.vertices[index + 8],
+    'both ribbon edges share one x coordinate at every pitch column');
 }
+
+const cappedSamples = [
+  {time:0,displayPitch:60,confidence:.9,takeId:1},
+  {time:.05,displayPitch:60.1,confidence:.9,takeId:1},
+  {time:.1,displayPitch:60.2,confidence:.9,takeId:1},
+  {time:.15,displayPitch:60.3,confidence:.9,takeId:1},
+];
+const capped = fluid.trailGeometry(cappedSamples, sample => Math.min(20, sample.time * 400), pitch => 200 - pitch * 2,
+  { currentTime: .15, nowX: 20, trailStartX: 0, sortedTimeline: true, dpr: 2 });
+const cappedCenterX = [];
+for (let index = 0; index < capped.vertices.length; index += 16) cappedCenterX.push(capped.vertices[index]);
+assert.ok(cappedCenterX.every((x, index) => !index || x > cappedCenterX[index - 1]),
+  'duplicate live-head coordinates can never re-enter one ribbon strip');
 
 const glitch = [
   {time:0,displayPitch:60,confidence:.9,takeId:1},
@@ -85,6 +105,11 @@ assert.equal(split.strips, 2, 'silence is never bridged by ribbon geometry');
 const stale = fluid.trailGeometry(samples, sample => sample.time * 200, pitch => pitch,
   { currentTime: 20, nowX: 600, trailStartX: 0, sortedTimeline: true });
 assert.equal(stale.vertexCount, 0, 'live history is bounded');
+const retained = fluid.trailGeometry(samples, sample => sample.time * 200, pitch => pitch,
+  { currentTime: 20, nowX: 600, trailStartX: 0, sortedTimeline: true, retainHistory: true });
+assert.ok(retained.vertexCount > 100, 'retained live history remains rendered while it is in the viewport');
+assert.ok(Math.abs(retained.vertices[4] - retained.vertices.at(-4)) < 1e-6,
+  'retained live history does not lose energy as it ages');
 assert.equal(fluid.CONFIG.enabled, true);
 assert.equal(fluid.CONFIG.filamentCount, 3);
 console.log('fluid pitch trail: geometry, local coordinates, fade and gaps passed');

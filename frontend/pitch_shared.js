@@ -5,7 +5,10 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
   const PREFERENCE_KEY = 'choir-detector-settings:v1';
-  const DETECTOR_DEFAULTS = Object.freeze({ rmsThreshold: .001, weakVoiceMode: false, fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 });
+  const SETTINGS_DEFAULTS_VERSION = 4;
+  const DETECTOR_DEFAULTS = Object.freeze({ rmsThreshold: .000002, weakVoiceMode: false, fastAlpha: .65, slowAlpha: .65, medianWindowFrames: 3 });
+  const LEGACY_DETECTOR_DEFAULTS = Object.freeze({ rmsThreshold: .001, fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 });
+  const VERSION_1_DETECTOR_DEFAULTS = Object.freeze({ rmsThreshold: .0001, fastAlpha: .6, slowAlpha: .65, medianWindowFrames: 3 });
   const RECOGNITION_MODES = Object.freeze({
     normal: Object.freeze({ minClarity: .45, minConfidence: .30, yinThreshold: .42, weakSignalHoldFrames: 0 }),
     // Weak voice deliberately makes RMS the only amplitude gate. Periodicity
@@ -14,9 +17,12 @@
       levelConfidenceFloor: .68, rmsThresholdCeiling: .00003, weakSignalHoldFrames: 6,
       candidateConsistencyCents: 220 }),
   });
-  const PLUME_ADVANCE_MAX_MS = 400;
+  const PLUME_ADVANCE_MAX_MS = 600;
   const PLUME_WIDTH_PREFERENCE_VERSION = 2;
-  const PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1, color: '#72e0d2', timeAdvanceMs: 200 });
+  const PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1.75, color: '#72e0d2', timeAdvanceMs: 270 });
+  const LEGACY_PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1, timeAdvanceMs: 200 });
+  const VERSION_1_PLUME_DEFAULTS = Object.freeze({ width: 2.05, intensity: 1.75, timeAdvanceMs: 310 });
+  const VERSION_2_3_PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1.75, timeAdvanceMs: 280 });
   // Visual density, NOT a calibrated F0 posterior or confidence interval.
   const AURORA = Object.freeze({ trailSeconds: 2.8, historyOpacity: .08, sigmaSemitones: .16,
     palette: Object.freeze([[114,224,210], [114,224,210], [114,224,210]]) });
@@ -25,23 +31,35 @@
   function readPreferences(storage = globalThis.localStorage) {
     let saved = {};
     try { saved = JSON.parse(storage?.getItem(PREFERENCE_KEY)) || {}; } catch (_) {}
+    const currentDefaults = saved.settingsDefaultsVersion === SETTINGS_DEFAULTS_VERSION;
+    const previousDetectorDefaults = saved.settingsDefaultsVersion === 1
+      ? VERSION_1_DETECTOR_DEFAULTS : LEGACY_DETECTOR_DEFAULTS;
+    const previousPlumeDefaults = saved.settingsDefaultsVersion === 1
+      ? VERSION_1_PLUME_DEFAULTS : saved.settingsDefaultsVersion === 2 || saved.settingsDefaultsVersion === 3
+        ? VERSION_2_3_PLUME_DEFAULTS : LEGACY_PLUME_DEFAULTS;
+    const migratedNumber = (key, legacyDefault, currentDefault) => {
+      const value = Number(saved[key]);
+      if (!Number.isFinite(value)) return currentDefault;
+      return !currentDefaults && Math.abs(value - legacyDefault) < 1e-9 ? currentDefault : value;
+    };
     const savedPlumeWidth = Number(saved.v1PlumeWidth);
-    const hasCurrentPlumeWidth = Number.isFinite(savedPlumeWidth)
-      && (saved.plumeWidthPreferenceVersion === PLUME_WIDTH_PREFERENCE_VERSION || Math.abs(savedPlumeWidth - 1) > 1e-9);
+    const legacyInitialPlumeWidth = saved.plumeWidthPreferenceVersion !== PLUME_WIDTH_PREFERENCE_VERSION
+      && Math.abs(savedPlumeWidth - 1) < 1e-9;
     return {
       detector: {
-        rmsThreshold: Number.isFinite(Number(saved.v1RmsThreshold)) ? Number(saved.v1RmsThreshold) : DETECTOR_DEFAULTS.rmsThreshold,
+        rmsThreshold: migratedNumber('v1RmsThreshold', previousDetectorDefaults.rmsThreshold, DETECTOR_DEFAULTS.rmsThreshold),
         weakVoiceMode: saved.v1WeakVoiceMode === true,
-        fastAlpha: Number.isFinite(Number(saved.v1FastAlpha)) ? Number(saved.v1FastAlpha) : DETECTOR_DEFAULTS.fastAlpha,
-        slowAlpha: Number.isFinite(Number(saved.v1SlowAlpha)) ? Number(saved.v1SlowAlpha) : DETECTOR_DEFAULTS.slowAlpha,
-        medianWindowFrames: Number.isFinite(Number(saved.v1MedianWindowFrames)) ? Number(saved.v1MedianWindowFrames) : DETECTOR_DEFAULTS.medianWindowFrames,
+        fastAlpha: migratedNumber('v1FastAlpha', previousDetectorDefaults.fastAlpha, DETECTOR_DEFAULTS.fastAlpha),
+        slowAlpha: migratedNumber('v1SlowAlpha', previousDetectorDefaults.slowAlpha, DETECTOR_DEFAULTS.slowAlpha),
+        medianWindowFrames: migratedNumber('v1MedianWindowFrames', previousDetectorDefaults.medianWindowFrames, DETECTOR_DEFAULTS.medianWindowFrames),
       },
       plume: {
-        width: hasCurrentPlumeWidth ? savedPlumeWidth : PLUME_DEFAULTS.width,
-        intensity: Number.isFinite(Number(saved.v1PlumeIntensity)) ? Number(saved.v1PlumeIntensity) : PLUME_DEFAULTS.intensity,
+        width: legacyInitialPlumeWidth ? PLUME_DEFAULTS.width
+          : migratedNumber('v1PlumeWidth', previousPlumeDefaults.width, PLUME_DEFAULTS.width),
+        intensity: migratedNumber('v1PlumeIntensity', previousPlumeDefaults.intensity, PLUME_DEFAULTS.intensity),
         color: '#72e0d2',
-        timeAdvanceMs: Number.isFinite(Number(saved.v1PlumeAdvanceMs))
-          ? Math.max(0, Math.min(PLUME_ADVANCE_MAX_MS, Number(saved.v1PlumeAdvanceMs))) : PLUME_DEFAULTS.timeAdvanceMs,
+        timeAdvanceMs: Math.max(0, Math.min(PLUME_ADVANCE_MAX_MS,
+          migratedNumber('v1PlumeAdvanceMs', previousPlumeDefaults.timeAdvanceMs, PLUME_DEFAULTS.timeAdvanceMs))),
       },
     };
   }
@@ -96,12 +114,13 @@
     return { segments, now, cadence, gap, inspectedSamples: end-start };
   }
   function auroraStyle(age, confidence, settings = {}) {
-    const review = settings.mode === 'review', trail = settings.trailSeconds ?? AURORA.trailSeconds;
-    const fraction = review ? .5 : Math.max(0, Math.min(1, age / trail));
+    const review = settings.mode === 'review', retainHistory = settings.retainHistory === true;
+    const trail = settings.trailSeconds ?? AURORA.trailSeconds;
+    const fraction = review || retainHistory ? .5 : Math.max(0, Math.min(1, age / trail));
     const palette = settings.palette || AURORA.palette, phase = Math.min(1.999999, fraction * 2);
     const index = Math.floor(phase), mix = smoothstep(phase - index);
     return { color: palette[index].map((v,i) => Math.round(v + (palette[index+1][i]-v)*mix)),
-      alpha: Math.min(1, confidence * (settings.intensity ?? 1)) * (review ? 1
+      alpha: Math.min(1, confidence * (settings.intensity ?? 1)) * (review || retainHistory ? 1
         : 1 - (1 - (settings.historyOpacity ?? AURORA.historyOpacity)) * smoothstep(fraction)) };
   }
   // Linear interpolation per physical pixel column: no overshoot, no DSP smoothing.
@@ -155,7 +174,7 @@
     context.save(); context.globalCompositeOperation = 'source-over';
     context.drawImage(surface.canvas, left, top, width/ratio, height/ratio); context.restore();
   }
-  return { PREFERENCE_KEY, DETECTOR_DEFAULTS, RECOGNITION_MODES, PLUME_ADVANCE_MAX_MS, PLUME_WIDTH_PREFERENCE_VERSION,
+  return { PREFERENCE_KEY, SETTINGS_DEFAULTS_VERSION, DETECTOR_DEFAULTS, RECOGNITION_MODES, PLUME_ADVANCE_MAX_MS, PLUME_WIDTH_PREFERENCE_VERSION,
     PLUME_DEFAULTS, AURORA, readPreferences, recognitionSettings,
     plumeSegments, auroraStyle, visitPlumeColumns, drawConfidencePlume };
 });

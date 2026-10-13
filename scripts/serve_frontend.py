@@ -38,9 +38,14 @@ MUSESCORE_CANDIDATES = (
     Path(r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe"),
 )
 _library_lock = threading.Lock()
-LIBRARY_ASSET_LAYOUT_VERSION = 13
+_musicxml_sync_lock = threading.Lock()
+LIBRARY_ASSET_LAYOUT_VERSION = 15
+MUSICXML_SYNC_VERSION = 1
 DEFAULT_SCORE_TEMPO_BPM = 80.0
-SOURCE_FINGERPRINT_VERSION = 1
+SOURCE_FINGERPRINT_VERSION = 2
+CONTINUOUS_PAGE_HEIGHT_TENTHS = 520.0
+CONTINUOUS_PAGE_MARGIN_TENTHS = 40.0
+CONTINUOUS_HORIZONTAL_PADDING_TENTHS = 900.0
 _IGNORED_MSCZ_MEMBERS = frozenset({"META-INF/container.xml", "viewsettings.json"})
 _IGNORED_MSCX_SCORE_TAGS = frozenset({"showInvisible", "showUnprintable", "showFrames", "showMargins", "open"})
 _IGNORED_MSCX_META_TAGS = frozenset({"audioComUrl", "platform", "sourceRevisionId"})
@@ -65,11 +70,101 @@ def _is_accompaniment(name: str) -> bool:
 
 
 def _library_sources() -> list[Path]:
-    return sorted(path for path in SHEETS_ROOT.glob("*/*.mscz") if path.is_file())
+    return sorted(
+        path for path in SHEETS_ROOT.glob("*/*.mscz")
+        if path.is_file() and path.parent.name != "voice-lab"
+    )
 
 
 def _piece_id(value: str) -> str:
     return value.lower().replace("_", "-")
+
+
+def _xml_local_name(tag: str) -> str:
+    return tag.rsplit("}", 1)[-1]
+
+
+def _adjacent_musicxml_source(source: Path) -> Path | None:
+    """Find the editorial MusicXML beside an MSCZ when one is available."""
+
+    exact = [source.with_suffix(".xml"), source.with_suffix(".musicxml")]
+    for candidate in exact:
+        if candidate.is_file():
+            return candidate
+    candidates = sorted((*source.parent.glob("*.xml"), *source.parent.glob("*.musicxml")))
+    return candidates[0] if len(candidates) == 1 else None
+
+
+def _key_declarations(root: ET.Element) -> list[tuple[int, str | None, ET.Element]]:
+    declarations: list[tuple[int, str | None, ET.Element]] = []
+    for key in root.iter():
+        if _xml_local_name(key.tag) != "key":
+            continue
+        fifths_element = next(
+            (child for child in key if _xml_local_name(child.tag) == "fifths"), None
+        )
+        if fifths_element is None or not fifths_element.text:
+            continue
+        mode_element = next(
+            (child for child in key if _xml_local_name(child.tag) == "mode"), None
+        )
+        mode = (mode_element.text or "").strip().lower() if mode_element is not None else None
+        declarations.append((int(float(fifths_element.text)), mode or None, key))
+    return declarations
+
+
+def _source_key_modes(source: Path) -> list[tuple[int, str | None]]:
+    musicxml = _adjacent_musicxml_source(source)
+    if musicxml is None:
+        return []
+    try:
+        root = ET.parse(musicxml).getroot()
+    except (OSError, ET.ParseError):
+        return []
+    return [(fifths, mode) for fifths, mode, _ in _key_declarations(root)]
+
+
+def _restore_explicit_key_modes(root: ET.Element, source: Path) -> bool:
+    """Restore editorial modes that MuseScore may omit from its XML export."""
+
+    source_declarations = _source_key_modes(source)
+    target_declarations = _key_declarations(root)
+    if not source_declarations or not target_declarations:
+        return False
+
+    if (len(source_declarations) == len(target_declarations)
+            and [item[0] for item in source_declarations]
+            == [item[0] for item in target_declarations]):
+        desired_modes = [mode for _, mode in source_declarations]
+    else:
+        modes_by_fifths: dict[int, set[str]] = {}
+        for fifths, mode in source_declarations:
+            if mode:
+                modes_by_fifths.setdefault(fifths, set()).add(mode)
+        unique_modes = {
+            fifths: next(iter(modes)) for fifths, modes in modes_by_fifths.items()
+            if len(modes) == 1
+        }
+        desired_modes = [unique_modes.get(fifths) for fifths, _, _ in target_declarations]
+
+    changed = False
+    for (_, current_mode, key), desired_mode in zip(target_declarations, desired_modes):
+        if not desired_mode or current_mode == desired_mode:
+            continue
+        mode_element = next(
+            (child for child in key if _xml_local_name(child.tag) == "mode"), None
+        )
+        if mode_element is None:
+            namespace = key.tag[:-3] if key.tag.endswith("key") else ""
+            mode_element = ET.Element(f"{namespace}mode")
+            fifths_index = next(
+                index for index, child in enumerate(key)
+                if _xml_local_name(child.tag) == "fifths"
+            )
+            key.insert(fifths_index + 1, mode_element)
+        mode_element.text = desired_mode
+        changed = True
+    return changed
 
 
 def _strip_xml_indentation(element: ET.Element) -> None:
@@ -131,6 +226,10 @@ def _source_hashes(source: Path) -> tuple[str, str]:
                 digest.update(encoded_name)
                 digest.update(len(member).to_bytes(8, "big"))
                 digest.update(member)
+        key_modes = _source_key_modes(source)
+        if key_modes:
+            digest.update(b"adjacent-musicxml-key-modes\0")
+            digest.update(json.dumps(key_modes, separators=(",", ":")).encode("utf-8"))
         return raw_hash, digest.hexdigest()
     except (OSError, ValueError, zipfile.BadZipFile, ET.ParseError):
         return raw_hash, raw_hash
@@ -146,6 +245,92 @@ def _write_json_atomic(path: Path, payload: dict) -> None:
     finally:
         if os.path.exists(temporary_name):
             os.unlink(temporary_name)
+
+
+def _musicxml_sync_state_path(source: Path) -> Path:
+    return LIBRARY_ASSETS_ROOT / _piece_id(source.parent.name) / "source-sync.json"
+
+
+def _read_musicxml_sync_state(source: Path) -> dict:
+    path = _musicxml_sync_state_path(source)
+    try:
+        value = json.loads(path.read_text(encoding="utf-8"))
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def _sha256_path(path: Path) -> str:
+    return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def _sync_musicxml_from_mscz(source: Path, *, force: bool = False) -> tuple[Path, bool]:
+    """Keep the adjacent MusicXML as an atomic derivative of the edited MSCZ.
+
+    MuseScore may omit MusicXML ``key/mode`` while exporting. Explicit modes in
+    the previous sidecar are therefore merged into the temporary export before
+    replacement; the existing XML remains untouched if conversion fails.
+    """
+
+    target = _adjacent_musicxml_source(source)
+    if target is None:
+        target = source.with_suffix(".xml")
+    source_hash = _sha256_path(source)
+    state = _read_musicxml_sync_state(source)
+    target_hash = _sha256_path(target) if target.is_file() else None
+    if not force and state.get("version") == MUSICXML_SYNC_VERSION:
+        if state.get("mscz_sha256") == source_hash and target_hash is not None:
+            if target_hash != state.get("musicxml_sha256") and target_hash is not None:
+                # A deliberate sidecar-only metadata edit (notably key mode) is
+                # preserved and becomes the baseline for the next MSCZ export.
+                _write_json_atomic(_musicxml_sync_state_path(source), {
+                    "version": MUSICXML_SYNC_VERSION,
+                    "mscz_sha256": source_hash,
+                    "musicxml_sha256": target_hash,
+                })
+            return target, False
+
+    with _musicxml_sync_lock:
+        # Re-read after waiting: the server watcher and a bundle build may have
+        # observed the same save concurrently.
+        source_hash = _sha256_path(source)
+        state = _read_musicxml_sync_state(source)
+        if not force and state.get("version") == MUSICXML_SYNC_VERSION \
+                and state.get("mscz_sha256") == source_hash and target.is_file():
+            return target, False
+
+        target.parent.mkdir(parents=True, exist_ok=True)
+        handle, temporary_name = tempfile.mkstemp(
+            prefix=f".{target.stem}-export-", suffix=target.suffix, dir=target.parent,
+        )
+        os.close(handle)
+        temporary = Path(temporary_name)
+        temporary.unlink(missing_ok=True)
+        try:
+            result = subprocess.run(
+                [_musescore(), "-f", "-o", str(temporary), str(source)],
+                capture_output=True, text=True, timeout=180, check=False,
+            )
+            if result.returncode:
+                raise RuntimeError(
+                    (result.stderr or result.stdout or "MuseScore MusicXML export failed").strip()[-600:]
+                )
+            _wait_for_file(temporary)
+            tree = ET.parse(temporary)
+            if _restore_explicit_key_modes(tree.getroot(), source):
+                tree.write(temporary, encoding="utf-8", xml_declaration=True)
+            # Parse the final payload once more before replacing editorial data.
+            ET.parse(temporary)
+            os.replace(temporary, target)
+            target_hash = _sha256_path(target)
+            _write_json_atomic(_musicxml_sync_state_path(source), {
+                "version": MUSICXML_SYNC_VERSION,
+                "mscz_sha256": source_hash,
+                "musicxml_sha256": target_hash,
+            })
+            return target, True
+        finally:
+            temporary.unlink(missing_ok=True)
 
 
 def _cached_library_metadata(metadata_path: Path, raw_hash: str, semantic_hash: str) -> dict | None:
@@ -362,6 +547,96 @@ def _export_part_svg(musicxml: Path, destination: Path, part_id: str, executable
     return [path.name for path in sorted(destination.glob(f"part-{part_id}-*.svg"))]
 
 
+def _prepare_continuous_part_musicxml(root: ET.Element) -> None:
+    """Turn a one-staff MusicXML document into one wide, unbroken system.
+
+    MuseScore's batch converter deliberately renders exports in page mode even
+    when the source was last saved in horizontal continuous view.  A temporary
+    wide page gives the browser the same unbroken musical line without changing
+    the reviewed MSCZ or the page-formatted full-score export.
+    """
+    defaults = root.find("defaults")
+    if defaults is None:
+        defaults = ET.Element("defaults")
+        root.insert(0, defaults)
+    page_layout = defaults.find("page-layout")
+    if page_layout is None:
+        page_layout = ET.SubElement(defaults, "page-layout")
+
+    def number(element: ET.Element | None, fallback: float) -> float:
+        try:
+            return float(element.text) if element is not None and element.text else fallback
+        except ValueError:
+            return fallback
+
+    def set_text(tag: str, value: float) -> None:
+        element = page_layout.find(tag)
+        if element is None:
+            element = ET.SubElement(page_layout, tag)
+        element.text = f"{value:g}"
+
+    original_width = number(page_layout.find("page-width"), 1200.0)
+    explicit_breaks = len(root.findall('.//print[@new-page="yes"]')) + len(
+        root.findall('.//print[@new-system="yes"]')
+    )
+    measure_widths = []
+    for measure in root.findall("./part/measure"):
+        try:
+            width = float(measure.get("width", ""))
+        except ValueError:
+            continue
+        if width > 0:
+            measure_widths.append(width)
+    if measure_widths:
+        content_width = sum(measure_widths)
+    else:
+        content_width = max(1, explicit_breaks + 1) * max(800.0, original_width - 170.0)
+    continuous_width = max(
+        original_width,
+        content_width + CONTINUOUS_HORIZONTAL_PADDING_TENTHS,
+    )
+    set_text("page-width", continuous_width)
+    set_text("page-height", CONTINUOUS_PAGE_HEIGHT_TENTHS)
+
+    margins = page_layout.findall("page-margins")
+    if not margins:
+        margins = [ET.SubElement(page_layout, "page-margins", {"type": kind})
+                   for kind in ("even", "odd")]
+    for page_margins in margins:
+        for tag in ("left-margin", "right-margin", "top-margin", "bottom-margin"):
+            element = page_margins.find(tag)
+            if element is None:
+                element = ET.SubElement(page_margins, tag)
+            element.text = f"{CONTINUOUS_PAGE_MARGIN_TENTHS:g}"
+
+    for credit in list(root.findall("credit")):
+        root.remove(credit)
+    for measure in root.findall("./part/measure"):
+        for print_element in list(measure.findall("print")):
+            measure.remove(print_element)
+
+
+def _export_continuous_part_svg(part_musicxml: Path, destination: Path, part_id: str,
+                                executable: str) -> str:
+    tree = ET.parse(part_musicxml)
+    _prepare_continuous_part_musicxml(tree.getroot())
+    source = destination / f"part-{part_id}-continuous.musicxml"
+    tree.write(source, encoding="utf-8", xml_declaration=True)
+    output = destination / f"part-{part_id}-continuous.svg"
+    for old in destination.glob(f"part-{part_id}-continuous*.svg"):
+        old.unlink(missing_ok=True)
+    result = subprocess.run([executable, "-f", "-o", str(output), str(source)],
+                            capture_output=True, text=True, timeout=180, check=False)
+    if result.returncode:
+        raise RuntimeError((result.stderr or result.stdout or "MuseScore continuous export failed").strip()[-600:])
+    first_page = destination / f"part-{part_id}-continuous-1.svg"
+    _wait_for_file(first_page)
+    pages = sorted(destination.glob(f"part-{part_id}-continuous-*.svg"))
+    if len(pages) != 1:
+        raise RuntimeError(f"{part_id}: la vista continua ha prodotto {len(pages)} pagine")
+    return pages[0].name
+
+
 def _export_audio_stem(source: Path, output: Path, executable: str) -> None:
     output.unlink(missing_ok=True)
     result = subprocess.run([executable, "-f", "-o", str(output), str(source)],
@@ -429,21 +704,38 @@ def _export_source_audio_subset(source: Path, output: Path, executable: str,
         temporary.unlink(missing_ok=True)
 
 
+def _browser_assets_ready(destination: Path, metadata: dict) -> bool:
+    required = {"score.json", "score.mp3"}
+    required.update(metadata.get("score_pages", []))
+    for pages in metadata.get("part_pages", {}).values():
+        required.update(pages)
+    required.update(metadata.get("continuous_part_scores", {}).values())
+    required.update(metadata.get("voice_stems", {}).values())
+    if metadata.get("accompaniment_file"):
+        required.add(metadata["accompaniment_file"])
+    return all(
+        isinstance(name, str)
+        and (destination / name).is_file()
+        and (destination / name).resolve().parent == destination.resolve()
+        for name in required
+    )
+
+
 def _build_library_piece(source: Path) -> dict:
-    """Build browser-only derivatives of a user-owned MSCZ source on demand."""
+    """Build browser-only derivatives of a user-owned MSCZ source."""
     piece_id = _piece_id(source.parent.name)
     destination = LIBRARY_ASSETS_ROOT / piece_id
     metadata_path = destination / "metadata.json"
     raw_source_hash, semantic_source_hash = _source_hashes(source)
     cached = _cached_library_metadata(metadata_path, raw_source_hash, semantic_source_hash)
-    if cached is not None:
+    if cached is not None and _browser_assets_ready(destination, cached):
         return cached
     with _library_lock:
         # Another request may have completed this piece while we waited. Also
         # re-read the source in case MuseScore saved it during that interval.
         raw_source_hash, semantic_source_hash = _source_hashes(source)
         cached = _cached_library_metadata(metadata_path, raw_source_hash, semantic_source_hash)
-        if cached is not None:
+        if cached is not None and _browser_assets_ready(destination, cached):
             return cached
         destination.mkdir(parents=True, exist_ok=True)
         musicxml = destination / "score.musicxml"
@@ -466,7 +758,10 @@ def _build_library_piece(source: Path) -> dict:
             raise RuntimeError((result.stderr or result.stdout or "MuseScore export failed").strip()[-600:])
         _wait_for_file(musicxml)
         musicxml_tree = ET.parse(musicxml)
-        if _ensure_explicit_tempo(musicxml_tree.getroot()):
+        musicxml_root = musicxml_tree.getroot()
+        score_metadata_changed = _restore_explicit_key_modes(musicxml_root, source)
+        score_metadata_changed = _ensure_explicit_tempo(musicxml_root) or score_metadata_changed
+        if score_metadata_changed:
             musicxml_tree.write(musicxml, encoding="utf-8", xml_declaration=True)
 
         for output, export_source in ((score_svg, source),):
@@ -492,6 +787,12 @@ def _build_library_piece(source: Path) -> dict:
         tempo_directions = _tempo_directions(complete_root)
         part_pages = {
             part["id"]: _export_part_svg(musicxml, destination, part["id"], executable, tempo_directions)
+            for part in vocal_parts
+        }
+        continuous_part_scores = {
+            part["id"]: _export_continuous_part_svg(
+                destination / f"part-{part['id']}.musicxml", destination, part["id"], executable,
+            )
             for part in vocal_parts
         }
         voice_stems = {}
@@ -529,12 +830,101 @@ def _build_library_piece(source: Path) -> dict:
             "monodic": len(vocal_parts) == 1,
             "score_pages": [path.name for path in sorted(destination.glob("score-*.svg"))],
             "part_pages": part_pages,
+            "continuous_part_scores": continuous_part_scores,
             "voice_stems": voice_stems,
             "accompaniment_file": accompaniment_file,
             "source_playback_sounds_preserved": False,
         }
         _write_json_atomic(metadata_path, metadata)
         return metadata
+
+
+def _write_library_runtime_bundle(metadata: dict) -> dict:
+    """Write the small manifests consumed by the local browser application."""
+    piece_id = metadata["piece_id"]
+    destination = LIBRARY_ASSETS_ROOT / piece_id
+    timeline_hash = hashlib.sha256((destination / "score.json").read_bytes()).hexdigest()
+    part_ids = (["mono-soprano", "mono-contralto", "mono-tenore", "mono-basso"]
+                if metadata["monodic"] else [part["id"] for part in metadata["parts"]])
+    practice_parts = ([
+        {"id": "mono-soprano", "name": "Soprano"},
+        {"id": "mono-contralto", "name": "Contralto"},
+        {"id": "mono-tenore", "name": "Tenore"},
+        {"id": "mono-basso", "name": "Basso"},
+    ] if metadata["monodic"] else metadata["parts"])
+    root = f"library-assets/{piece_id}"
+    part_pages = {
+        part_id: [f"{root}/{name}" for name in pages]
+        for part_id, pages in metadata["part_pages"].items()
+    }
+    continuous_scores = {
+        part_id: f"{root}/{name}"
+        for part_id, name in metadata.get("continuous_part_scores", {}).items()
+    }
+    if metadata["monodic"]:
+        written_pages = next(iter(part_pages.values()))
+        part_pages = {part_id: written_pages for part_id in part_ids}
+        if continuous_scores:
+            written_continuous_score = next(iter(continuous_scores.values()))
+            continuous_scores = {part_id: written_continuous_score for part_id in part_ids}
+
+    _write_json_atomic(destination / "glyph-map.json", {})
+    _write_json_atomic(destination / "audio-manifest.json", {
+        "score_version_id": metadata["score_version_id"],
+        "timeline_hash": timeline_hash,
+        "mixes": {part_id: {"file": "score.mp3", "files_by_speed": {}} for part_id in part_ids},
+        "full_mix_file": "score.mp3",
+        "accompaniment_file": metadata.get("accompaniment_file"),
+        "voice_stems": metadata.get("voice_stems", {}),
+    })
+    bundle = {
+        "piece_id": piece_id,
+        "score_version_id": metadata["score_version_id"],
+        "local_source": True,
+        "monodic": metadata["monodic"],
+        "parts": practice_parts,
+        "integrity": {"consistent": True, "hashes": {"timeline": timeline_hash}},
+        "checks": [],
+        "assets": {
+            "score": f"{root}/score.json",
+            "glyph_map": f"{root}/glyph-map.json",
+            "audio_manifest": f"{root}/audio-manifest.json",
+            "audio_root": root,
+            "full_score_pages": [f"{root}/{name}" for name in metadata["score_pages"]],
+            "score_pages": part_pages,
+            "continuous_scores": continuous_scores,
+        },
+    }
+    _write_json_atomic(destination / "bundle.json", bundle)
+    return bundle
+
+
+def _prepare_library_source(source: Path) -> tuple[dict, dict]:
+    _sync_musicxml_from_mscz(source)
+    metadata = _build_library_piece(source)
+    return metadata, _write_library_runtime_bundle(metadata)
+
+
+def _prepare_local_library(report=None) -> list[Path]:
+    sources = _library_sources()
+    destinations = []
+    for index, source in enumerate(sources, start=1):
+        if report:
+            report(index, len(sources), _piece_id(source.parent.name))
+        metadata, _ = _prepare_library_source(source)
+        destinations.append(LIBRARY_ASSETS_ROOT / metadata["piece_id"])
+    return destinations
+
+
+def _sync_local_musicxml(report=None) -> list[Path]:
+    targets = []
+    sources = _library_sources()
+    for index, source in enumerate(sources, start=1):
+        target, changed = _sync_musicxml_from_mscz(source)
+        if changed and report:
+            report(index, len(sources), _piece_id(source.parent.name), target)
+        targets.append(target)
+    return targets
 
 
 def _library_listing() -> list[dict]:
@@ -544,13 +934,14 @@ def _library_listing() -> list[dict]:
         cached = LIBRARY_ASSETS_ROOT / piece_id / "metadata.json"
         raw_hash, semantic_hash = _source_hashes(source)
         metadata = _cached_library_metadata(cached, raw_hash, semantic_hash)
-        if metadata is not None:
+        if metadata is not None and _browser_assets_ready(cached.parent, metadata):
             try:
                 items.append({key: metadata[key] for key in ("piece_id", "title", "parts", "monodic")})
                 continue
             except KeyError:
                 pass
-        # The full build happens only after the singer chooses the piece.
+        # This can only occur with --skip-library-prebuild or after a source is
+        # edited while the server is already running.
         items.append({"piece_id": piece_id, "title": source.stem.replace("-", " ").title(), "parts": [], "monodic": False})
     return items
 
@@ -612,50 +1003,21 @@ class RangeRequestHandler(SimpleHTTPRequestHandler):
             self._send_json({"error": "Brano non trovato"}, HTTPStatus.NOT_FOUND)
             return
         try:
-            metadata = _build_library_piece(source)
-            root = f"library-assets/{piece_id}"
-            timeline_hash = hashlib.sha256((LIBRARY_ASSETS_ROOT / piece_id / "score.json").read_bytes()).hexdigest()
-            part_ids = (["mono-soprano", "mono-contralto", "mono-tenore", "mono-basso"]
-                        if metadata["monodic"] else [part["id"] for part in metadata["parts"]])
-            practice_parts = ([
-                {"id": "mono-soprano", "name": "Soprano"}, {"id": "mono-contralto", "name": "Contralto"},
-                {"id": "mono-tenore", "name": "Tenore"}, {"id": "mono-basso", "name": "Basso"},
-            ] if metadata["monodic"] else metadata["parts"])
-            score_pages = [f"{root}/{name}" for name in metadata["score_pages"]]
-            part_pages = {
-                part_id: [f"{root}/{name}" for name in metadata["part_pages"][part_id]]
-                for part_id in metadata["part_pages"]
-            }
-            if metadata["monodic"]:
-                written_pages = next(iter(part_pages.values()))
-                part_pages = {part_id: written_pages for part_id in part_ids}
-            asset_root = LIBRARY_ASSETS_ROOT / piece_id
-            (asset_root / "glyph-map.json").write_text("{}", encoding="utf-8")
-            (asset_root / "audio-manifest.json").write_text(json.dumps({
-                "score_version_id": metadata["score_version_id"], "timeline_hash": timeline_hash,
-                "mixes": {part_id: {"file": "score.mp3", "files_by_speed": {}} for part_id in part_ids},
-                "full_mix_file": "score.mp3",
-                "accompaniment_file": metadata.get("accompaniment_file"),
-                "voice_stems": metadata.get("voice_stems", {}),
-            }), encoding="utf-8")
-            self._send_json({
-                "piece_id": piece_id,
-                "score_version_id": metadata["score_version_id"],
-                "local_source": True,
-                "monodic": metadata["monodic"],
-                "parts": practice_parts,
-                "integrity": {"consistent": True, "hashes": {"timeline": timeline_hash}},
-                "checks": [],
-                "assets": {
-                    "score": f"{root}/score.json",
-                    "glyph_map": f"{root}/glyph-map.json",
-                    "audio_manifest": f"{root}/audio-manifest.json",
-                    "audio_root": root,
-                    "full_score_pages": score_pages,
-                    "score_pages": part_pages,
-                },
-            })
-        except (OSError, RuntimeError, ValueError, subprocess.SubprocessError) as error:
+            destination = LIBRARY_ASSETS_ROOT / piece_id
+            raw_hash, semantic_hash = _source_hashes(source)
+            metadata = _cached_library_metadata(destination / "metadata.json", raw_hash, semantic_hash)
+            bundle_path = destination / "bundle.json"
+            if (metadata is None or not _browser_assets_ready(destination, metadata)
+                    or not bundle_path.is_file()):
+                self._send_json({
+                    "error": (
+                        "Bundle locale non pronto o obsoleto. Riavvia il server oppure esegui "
+                        f"python scripts/build_library_bundle.py {piece_id}"
+                    )
+                }, HTTPStatus.SERVICE_UNAVAILABLE)
+                return
+            self._send_json(json.loads(bundle_path.read_text(encoding="utf-8")))
+        except (OSError, ValueError, json.JSONDecodeError) as error:
             self._send_json({"error": str(error)}, HTTPStatus.UNPROCESSABLE_ENTITY)
 
     def _transpose_audio(self):
@@ -903,7 +1265,22 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=5173)
+    parser.add_argument(
+        "--skip-library-prebuild",
+        action="store_true",
+        help="Avvia subito il server senza verificare o rigenerare i bundle locali",
+    )
     args = parser.parse_args()
+    _sync_local_musicxml(
+        lambda index, total, piece_id, target: print(
+            f"MusicXML aggiornato [{index}/{total}] {piece_id}: {target.name}", flush=True,
+        )
+    )
+    if not args.skip_library_prebuild:
+        print("Verifica dei bundle locali prima dell'avvio...")
+        _prepare_local_library(
+            lambda index, total, piece_id: print(f"  [{index}/{total}] {piece_id}", flush=True)
+        )
     frontend = Path(__file__).resolve().parents[1] / "frontend"
     handler = lambda *handler_args, **kwargs: RangeRequestHandler(*handler_args, directory=str(frontend), **kwargs)
     print(f"Practice frontend: http://{args.host}:{args.port}")

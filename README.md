@@ -28,6 +28,27 @@ for local audio transposition.
 python scripts/serve_frontend.py
 ```
 
+Before opening port 5173, the local server verifies every repertoire bundle and
+regenerates only missing or obsolete artifacts. This keeps MuseScore work out
+of the song-selection request. At every server start, changed MSCZ files are
+exported atomically to the adjacent MusicXML before bundle verification. Explicit
+`key/mode` declarations such as `major` and `minor` are retained when MuseScore
+omits them from its export. The MSCZ is therefore the editable source and the
+MusicXML is its synchronized textual derivative.
+
+The synchronization can also be run independently without starting the web app:
+
+```powershell
+python scripts/sync_score_sources.py
+```
+
+After changing one or more scores, the same bundle
+preparation can be run explicitly without starting the server:
+
+```powershell
+python scripts/build_library_bundle.py --all
+```
+
 Open `http://127.0.0.1:5173` and use headphones when testing microphone pitch
 detection.
 

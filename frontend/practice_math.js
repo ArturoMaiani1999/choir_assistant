@@ -87,11 +87,33 @@
     });
     return lines.filter((line) => line.beat >= visibleStart && line.beat <= visibleEnd);
   }
+
+  function limitTimelineWindowToMeasures(measures, centerBeat, historyBeats, futureBeats, maximumMeasures) {
+    const validMeasures = (measures ?? []).filter((measure) => Number.isFinite(measure.startBeat)
+      && Number.isFinite(measure.endBeat) && measure.endBeat > measure.startBeat);
+    const limit = Math.max(1, Math.floor(Number(maximumMeasures) || 1));
+    const countVisible = (scale) => {
+      const start = centerBeat - historyBeats * scale;
+      const end = centerBeat + futureBeats * scale;
+      const epsilon = 1e-7;
+      return validMeasures.filter((measure) => measure.endBeat > start + epsilon
+        && measure.startBeat < end - epsilon).length;
+    };
+    if (!validMeasures.length || countVisible(1) <= limit) return { historyBeats, futureBeats };
+    let lower = 0;
+    let upper = 1;
+    for (let iteration = 0; iteration < 32; iteration += 1) {
+      const scale = (lower + upper) / 2;
+      if (countVisible(scale) <= limit) lower = scale;
+      else upper = scale;
+    }
+    return { historyBeats: historyBeats * lower, futureBeats: futureBeats * lower };
+  }
   function smoothPitchBounds(current, target, elapsedMs, responseMs = 180) {
     const alpha = 1 - Math.exp(-Math.max(0, elapsedMs) / responseMs);
     const bounds = { min: current.min + (target.min - current.min) * alpha, max: current.max + (target.max - current.max) * alpha };
     const animating = Math.abs(target.min - bounds.min) > .01 || Math.abs(target.max - bounds.max) > .01;
     return { bounds: animating ? bounds : { ...target }, animating };
   }
-  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, attemptResumeState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, smoothPitchBounds };
+  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, attemptResumeState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, limitTimelineWindowToMeasures, smoothPitchBounds };
 });

@@ -15,12 +15,13 @@
   apply(color);
   document.addEventListener('DOMContentLoaded', () => {
     const dialog = document.getElementById('settings-dialog');
-    if (!dialog) return;
+    const basicPanel = document.getElementById('settings-basic-panel');
+    if (!dialog || !basicPanel) return;
     const section = document.createElement('section');
-    section.className = 'score-appearance-setting';
-    section.innerHTML = '<h3>Colore della carta</h3><label for="score-paper-color">Sfondo dello spartito <input id="score-paper-color" type="color" /></label><div class="score-paper-presets"><button type="button" data-paper="#c3c0b6">Carta</button><button type="button" data-paper="#e3e8e6">Grigio chiaro</button><button type="button" data-paper="#ffffff">Bianco</button></div><small>Salvato automaticamente per brani e allenamento.</small>';
-    // Keep the everyday appearance choice before the always-visible fine tuning.
-    dialog.insertBefore(section, dialog.querySelector('.settings-advanced') || dialog.querySelector('.dialog-actions'));
+    section.className = 'detector-setting score-appearance-setting';
+    section.setAttribute('aria-labelledby', 'score-paper-heading');
+    section.innerHTML = '<div><h3 id="score-paper-heading">Colore della carta <button class="setting-info" type="button" aria-label="Informazioni sul colore della carta" data-tooltip="Cambia lo sfondo dello spartito. La scelta viene salvata automaticamente per brani e allenamento.">i</button></h3></div><label class="score-paper-color-row" for="score-paper-color">Colore personalizzato <input id="score-paper-color" type="color" /></label><div class="score-paper-presets"><button type="button" data-paper="#c3c0b6">Carta</button><button type="button" data-paper="#e3e8e6">Grigio chiaro</button><button type="button" data-paper="#ffffff">Bianco</button></div>';
+    basicPanel.appendChild(section);
     section.querySelector('input').value = color;
     section.querySelector('input').addEventListener('input', (event) => apply(event.target.value, true));
     section.querySelectorAll('[data-paper]').forEach(button => button.addEventListener('click', () => apply(button.dataset.paper, true)));

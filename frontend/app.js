@@ -1,5 +1,5 @@
 const { NormalizedScoreRuntime, MediaPlaybackClock } = window.ChoirScore;
-const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, adjacentMelodicIntervals, measureSeekState, attemptResumeState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
+const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, adjacentMelodicIntervals, measureSeekState, attemptResumeState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, limitTimelineWindowToMeasures, smoothPitchBounds } = window.PracticeMath;
 const { detectPitch, PitchSmoother, OctaveAwarePitchTracker, yinCandidates, decodeYinCandidatePath, mpmCandidates, decodeCrepeProbabilities } = window.ChoirPitch;
 const PitchShared = window.ChoirPitchShared;
 const FluidPitchTrail = window.ChoirFluidPitchTrail;
@@ -15,16 +15,11 @@ function libraryBundleUrl(pieceId) {
   return template.replace('{pieceId}', encodeURIComponent(pieceId));
 }
 
-/** @typedef {number|null} TrackedPitch MIDI pitch consumed only by scoring. */
-/** @typedef {number|null} DisplayPitch MIDI pitch consumed only by presentation. */
-/** @param {TrackedPitch} trackedPitch @returns {DisplayPitch} */
-function displayPitchFromTracked(trackedPitch) { return trackedPitch; }
-
 const UI_CONFIG = Object.freeze({
   historyBeats: 4.5,
   futureBeats: 7.5,
-  mobileHistoryBeats: 3,
-  mobileFutureBeats: 5,
+  mobileHistoryBeats: 1.5,
+  mobileFutureBeats: 2.5,
   centeredCents: 12,
   acceptableCents: 30,
   targetToleranceCents: 25,
@@ -36,10 +31,19 @@ const UI_CONFIG = Object.freeze({
   pitchAnalysisIntervalMs: 1000 / 60,
 });
 
+const AUDIO_OUTPUT_SESSION_KEY = 'choir-audio-output:v1';
+const AUDIO_OUTPUT_CONFIRMATION_TTL_MS = 30 * 60 * 1000;
+const PIANO_ROLL_DELAY_MAX_MS = 600;
+const PIANO_ROLL_DELAY_DEFAULT_MS = 270;
+const STANDARD_PLUME_ADVANCE_MS = 270;
+const BLUETOOTH_PLUME_ADVANCE_MS = 550;
+const METRONOME_OFFSET_MS = 50;
+let audioOutputExpiryTimer = null;
+
 const els = Object.fromEntries([
-  'transpose', 'transpose-value', 'settings-display-pitch-algorithm', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
+  'transpose', 'transpose-value', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
   'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-accompaniment', 'voice-mixer-accompaniment-enabled', 'voice-mixer-accompaniment-level', 'voice-mixer-accompaniment-value', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
-  'settings-dialog', 'settings-metronome-offset', 'settings-metronome-offset-value', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
+  'settings-menu-wrap', 'settings-menu', 'settings-menu-basic', 'settings-menu-advanced', 'settings-dialog', 'settings-heading', 'settings-basic-panel', 'settings-advanced-panel', 'settings-audio-output-standard', 'settings-audio-output-bluetooth', 'settings-audio-output-status', 'settings-audio-output-description', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
   'result-dialog', 'result-heading', 'result-text', 'result-progress', 'retry', 'result-resume', 'result-close',
   'note-names',
   'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-viewer-link', 'settings',
@@ -83,16 +87,19 @@ const state = {
   bundleApproved: false,
   scoreGeometry: new Map(),
   fallbackScoreSlots: [],
+  scoreLayout: 'paged',
   activeScoreSegment: null,
   pitchViewport: null,
   lastSnapshot: null,
   metronomeContext: null,
   lastMetronomeBeat: null,
-  metronomeOffsetMs: 30,
-  pianoRollDelayMs: 150,
+  metronomeOffsetMs: METRONOME_OFFSET_MS,
+  pianoRollDelayMs: PIANO_ROLL_DELAY_DEFAULT_MS,
+  audioOutputType: null,
   rememberedMetronomeVolume: 34,
   syncDebug: new URLSearchParams(window.location.search).has('syncDebug'),
   microphoneStatus: 'idle',
+  ignoreAudioDeviceChangesUntil: 0,
   microphoneStream: null,
   microphoneContext: null,
   microphoneSource: null,
@@ -107,7 +114,6 @@ const state = {
   microphoneRms: 0,
   pitchSmoother: new PitchSmoother(),
   displayPitchFilter: new OneEuroFilter(),
-  displayPitchAlgorithm: 'v1+display-filter',
   detectorSettings: { ...PitchShared.DETECTOR_DEFAULTS },
   plumeSettings: { ...PitchShared.PLUME_DEFAULTS },
   pitchLayers: { v1: true, crepe: true },
@@ -123,8 +129,8 @@ const state = {
   gridInspect: { active: false, viewBeat: 0, pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null },
 };
 
-const V1_RMS_THRESHOLD = Object.freeze({ default: .001, min: .000001, max: .01 });
-const V1_TRACKER_DEFAULTS = Object.freeze({ fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 });
+const V1_RMS_THRESHOLD = Object.freeze({ default: .000002, min: .000001, max: .01 });
+const V1_TRACKER_DEFAULTS = Object.freeze({ fastAlpha: .65, slowAlpha: .65, medianWindowFrames: 3 });
 const fluidTrailRenderer = new FluidPitchTrail.Renderer(els.pitchFluidLayer);
 const mobileChrome = { mode: null, topCollapsed: false, bottomCollapsed: false };
 
@@ -150,8 +156,8 @@ function updateMobileChrome() {
   els.mobileTransportToggle.setAttribute('aria-label', mobileChrome.bottomCollapsed ? 'Mostra i controlli di riproduzione' : 'Nascondi i controlli di riproduzione');
   els.mobileToolbarToggle.title = els.mobileToolbarToggle.getAttribute('aria-label');
   els.mobileTransportToggle.title = els.mobileTransportToggle.getAttribute('aria-label');
-  els.mobileToolbarToggle.firstElementChild.textContent = mobileChrome.topCollapsed ? '⌄' : '⌃';
-  els.mobileTransportToggle.firstElementChild.textContent = mobileChrome.bottomCollapsed ? '⌃' : '⌄';
+  els.mobileToolbarToggle.firstElementChild.classList.toggle('is-down', mobileChrome.topCollapsed);
+  els.mobileTransportToggle.firstElementChild.classList.toggle('is-down', !mobileChrome.bottomCollapsed);
 }
 
 function redrawAfterChromeChange() {
@@ -176,12 +182,54 @@ function formatRmsThreshold(value) {
   return Number(value).toFixed(value < .00001 ? 6 : value < .0001 ? 5 : 4).replace('.', ',');
 }
 
+function readAudioOutputPreference(now = Date.now()) {
+  try {
+    const preference = JSON.parse(sessionStorage.getItem(AUDIO_OUTPUT_SESSION_KEY));
+    const validType = preference?.type === 'bluetooth' || preference?.type === 'standard';
+    const confirmedAt = Number(preference?.confirmedAt);
+    if (!validType || !Number.isFinite(confirmedAt) || now - confirmedAt >= AUDIO_OUTPUT_CONFIRMATION_TTL_MS) return null;
+    return { type: preference.type, confirmedAt };
+  } catch (_) { return null; }
+}
+
+function scheduleAudioOutputExpiry(preference) {
+  clearTimeout(audioOutputExpiryTimer);
+  if (!preference) return;
+  const remaining = Math.max(0, AUDIO_OUTPUT_CONFIRMATION_TTL_MS - (Date.now() - preference.confirmedAt));
+  audioOutputExpiryTimer = setTimeout(() => invalidateAudioOutputPreference(true), remaining);
+}
+
+function restoreAudioOutputPreference() {
+  const preference = readAudioOutputPreference();
+  state.audioOutputType = preference?.type ?? null;
+  scheduleAudioOutputExpiry(preference);
+  return Boolean(preference);
+}
+
+function saveAudioOutputPreference(type) {
+  const preference = { type, confirmedAt: Date.now() };
+  try { sessionStorage.setItem(AUDIO_OUTPUT_SESSION_KEY, JSON.stringify(preference)); } catch (_) {}
+  state.audioOutputType = type;
+  scheduleAudioOutputExpiry(preference);
+}
+
+function invalidateAudioOutputPreference(notifyUser = false) {
+  if (!state.audioOutputType && !readAudioOutputPreference()) return;
+  try { sessionStorage.removeItem(AUDIO_OUTPUT_SESSION_KEY); } catch (_) {}
+  state.audioOutputType = null;
+  clearTimeout(audioOutputExpiryTimer);
+  updateDetectorSettingsUi();
+  if (notifyUser) showToast('Conferma di nuovo l’uscita audio nelle Impostazioni.');
+}
+
 function updateDetectorSettingsUi() {
+  els.settingsAudioOutputStandard.checked = state.audioOutputType === 'standard';
+  els.settingsAudioOutputBluetooth.checked = state.audioOutputType === 'bluetooth';
+  els.settingsAudioOutputStatus.textContent = state.audioOutputType === 'bluetooth'
+    ? 'Bluetooth' : state.audioOutputType === 'standard' ? 'Non Bluetooth' : 'Da confermare';
   els.settingsTextScale.value = String(Math.round(state.lyricTextScale * 100));
   els.settingsTextScaleValue.textContent = `${Math.round(state.lyricTextScale * 100)}%`;
   els.settingsShowIntervals.checked = state.showIntervals;
-  els.settingsMetronomeOffset.value = String(state.metronomeOffsetMs);
-  els.settingsMetronomeOffsetValue.textContent = `${state.metronomeOffsetMs >= 0 ? '+' : '−'}${Math.abs(state.metronomeOffsetMs)} ms`;
   const threshold = state.detectorSettings.rmsThreshold;
   els.settingsV1Rms.value = String(rmsSliderFromThreshold(threshold));
   els.settingsV1RmsValue.textContent = `${formatRmsThreshold(threshold)} RMS`;
@@ -207,7 +255,6 @@ function updateDetectorSettingsUi() {
   els.settingsV1PlumeAdvanceValue.textContent = `${state.plumeSettings.timeAdvanceMs} ms`;
   els.settingsPianoRollDelay.value = String(state.pianoRollDelayMs);
   els.settingsPianoRollDelayValue.textContent = `${state.pianoRollDelayMs} ms`;
-  els.settingsDisplayPitchAlgorithm.value = state.displayPitchAlgorithm;
 }
 
 function applyLiveTrackerSettings() {
@@ -219,16 +266,42 @@ function activeRecognitionSettings() {
   return PitchShared.recognitionSettings(state.detectorSettings);
 }
 
-function openDetectorSettings() {
+function closeSettingsMenu() {
+  els.settingsMenu.hidden = true;
+  els.settings.setAttribute('aria-expanded', 'false');
+}
+
+function toggleSettingsMenu() {
+  const opening = els.settingsMenu.hidden;
+  els.settingsMenu.hidden = !opening;
+  els.settings.setAttribute('aria-expanded', String(opening));
+  if (opening) els.settingsMenuBasic.focus();
+}
+
+function openDetectorSettings(mode = 'basic') {
+  const advanced = mode === 'advanced';
+  closeSettingsMenu();
+  restoreAudioOutputPreference();
   updateDetectorSettingsUi();
+  els.settingsBasicPanel.hidden = advanced;
+  els.settingsAdvancedPanel.hidden = !advanced;
+  els.settingsHeading.textContent = advanced ? 'Impostazioni avanzate' : 'Impostazioni';
   if (!els.settingsDialog.open) els.settingsDialog.showModal();
 }
 
-function closeSettingsFromBackdrop(event) {
-  const rect = els.settingsDialog.getBoundingClientRect();
+function closeDialogFromBackdrop(dialog, event) {
+  const rect = dialog.getBoundingClientRect();
   const outsideDialog = event.clientX < rect.left || event.clientX > rect.right
     || event.clientY < rect.top || event.clientY > rect.bottom;
-  if (outsideDialog) els.settingsDialog.close();
+  if (outsideDialog) dialog.close();
+}
+
+function closeSettingsFromBackdrop(event) {
+  closeDialogFromBackdrop(els.settingsDialog, event);
+}
+
+function closeVoiceMixerFromBackdrop(event) {
+  closeDialogFromBackdrop(els.voiceMixerDialog, event);
 }
 
 function normalizeSlug(value) {
@@ -270,6 +343,8 @@ function noteLabel(pitch, beat = state.clock?.snapshot().beat ?? 0) {
       : ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   return names[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
 }
+
+const TONAL_ROLE_COLOURS = Object.freeze({ tonic: '#a8b98b', fifth: '#4f86b5' });
 
 function vocalParts(runtime) {
   return runtime.parts.filter((part) => !/(^|[-\s])(organo|organ|piano|accompagnamento|accompaniment)([-\s]|$)/i.test(part.name));
@@ -322,6 +397,7 @@ function measureIndexAt(beat) {
 }
 
 function sourceGlyph(event) {
+  if (state.scoreLayout === 'continuous') return null;
   return event ? state.scoreGeometry.get(event.sourceEventId) ?? null : null;
 }
 
@@ -350,9 +426,15 @@ function closestScoreEvent(beat) {
 
 function loadScoreImage(page = 1) {
   const part = state.runtime.parts.find((item) => item.id === state.runtime.selectedPartId);
+  const continuousSource = state.bundleManifest.assets.continuous_scores?.[state.runtime.selectedPartId];
   const pages = state.bundleManifest.assets.score_pages?.[state.runtime.selectedPartId] ?? [];
-  const source = pages?.[Math.max(0, Math.min(pages.length - 1, page - 1))];
+  const source = continuousSource ?? pages?.[Math.max(0, Math.min(pages.length - 1, page - 1))];
   if (!source) { els.scoreLoading.hidden = false; els.scoreLoading.textContent = 'Pagina spartito non disponibile'; return; }
+  const layout = continuousSource ? 'continuous' : 'paged';
+  if (state.scoreLayout !== layout) state.activeScoreSegment = null;
+  state.scoreLayout = layout;
+  els.scoreSheet.classList.toggle('is-continuous', layout === 'continuous');
+  els.scoreImage.dataset.layout = layout;
   if (els.scoreImage.getAttribute('src') === source) return;
   els.scoreLoading.hidden = false;
   state.activeScoreSegment = null;
@@ -662,6 +744,10 @@ function scorePageFallbackSlots(svg, page) {
     const match = (symbol.getAttribute('d') ?? '').match(/^\s*M\s*([-+\d.eE]+)[,\s]+([-+\d.eE]+)/);
     return match ? { x: Number(match[1]), y: Number(match[2]) } : null;
   }).filter((symbol) => symbol && Number.isFinite(symbol.x) && Number.isFinite(symbol.y));
+  // Double final barlines contain two nearby SVG BarLine elements.  On a
+  // very wide continuous score their gap can exceed the old fixed threshold
+  // and masquerade as an extra measure, so scale the minimum with the viewBox.
+  const minimumMeasureWidth = Math.max(40, width * .001);
   const slots = [];
   for (let offset = 0, systemIndex = 0; offset + 4 < staffLines.length; offset += 5, systemIndex += 1) {
     const lines = staffLines.slice(offset, offset + 5);
@@ -680,7 +766,7 @@ function scorePageFallbackSlots(svg, page) {
           && symbol.x > left + 20 && symbol.x < right).map((symbol) => symbol.x))
         : Number.POSITIVE_INFINITY;
       const visualLeft = Number.isFinite(firstSymbolX) ? firstSymbolX : left;
-      if (right - visualLeft > 40) slots.push({ page, systemId: `fallback-p${page}-s${systemIndex}`, startX: visualLeft / width * 100,
+      if (right - visualLeft > minimumMeasureWidth) slots.push({ page, systemId: `fallback-p${page}-s${systemIndex}`, startX: visualLeft / width * 100,
         endX: right / width * 100, y_percent: centerY / height * 100, systemCenterY: centerY / height * 100 });
       left = right;
     }
@@ -689,10 +775,14 @@ function scorePageFallbackSlots(svg, page) {
 }
 
 async function buildFallbackScoreGeometry(partId) {
+  const continuousSource = state.bundleManifest.assets.continuous_scores?.[partId];
   const pages = state.bundleManifest.assets.score_pages?.[partId] ?? [];
-  if (!pages?.length) { state.fallbackScoreSlots = []; return; }
+  const sources = continuousSource ? [continuousSource] : pages;
+  state.scoreLayout = continuousSource ? 'continuous' : 'paged';
+  els.scoreSheet.classList.toggle('is-continuous', Boolean(continuousSource));
+  if (!sources?.length) { state.fallbackScoreSlots = []; return; }
   try {
-    const contents = await Promise.all(pages.map(async (page) => {
+    const contents = await Promise.all(sources.map(async (page) => {
       const response = await fetch(page, { cache: 'force-cache' });
       if (!response.ok) throw new Error(`pagina spartito non disponibile (${response.status})`);
       return response.text();
@@ -715,7 +805,8 @@ function renderScore(beat) {
   const glyph = sourceGlyph(event);
   const fallback = glyph ? null : fallbackScorePosition(beat);
   const activeGlyph = glyph ?? fallback;
-  const page = activeGlyph?.page ?? Math.min(3, Math.floor(measureIndexAt(beat) / 7) + 1);
+  const page = state.scoreLayout === 'continuous'
+    ? 1 : activeGlyph?.page ?? Math.min(3, Math.floor(measureIndexAt(beat) / 7) + 1);
   if (page !== state.scorePage) state.scorePage = page;
   loadScoreImage(page);
   if (!activeGlyph) {
@@ -747,6 +838,16 @@ function renderScore(beat) {
   // than limiting it to a small marker around the active note.
   els.scoreCursor.style.height = `${Math.max(86, viewportHeight)}px`;
   const systemY = imageHeight * activeGlyph.systemCenterY / 100;
+  if (state.scoreLayout === 'continuous') {
+    const cursorAnchor = Math.max(72, Math.min(viewportWidth - 48, viewportWidth * .38));
+    const scoreX = sheetWidth * x / 100;
+    const offsetX = Math.max(viewportWidth - sheetWidth, Math.min(0, cursorAnchor - scoreX));
+    const offsetY = Math.max(viewportHeight - imageHeight, Math.min(0, viewportHeight * .52 - systemY));
+    els.scoreSheet.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+    state.activeScoreSegment = null;
+    state.lastScoreEvent = { eventId: event.id, sourceEventId: event.sourceEventId, measureNumber: event.measureNumber, beat };
+    return;
+  }
   const panelCount = Math.max(1, Math.ceil(sheetWidth / viewportWidth));
   const panelIndex = Math.min(panelCount - 1, Math.floor(x / 100 * panelCount));
   const segmentKey = `${activeGlyph.systemId}-panel${panelIndex}`;
@@ -811,8 +912,7 @@ function applyPitchEstimate(rawEstimate, beat, sampledAt, analysisMs, running) {
   } else if (state.trackedPitch == null) {
     state.displayPitchFilter.reset();
     state.displayPitch = null;
-  } else if (state.displayPitchAlgorithm === 'v1') state.displayPitch = displayPitchFromTracked(state.trackedPitch);
-  else state.displayPitch = state.displayPitchFilter.filter(state.trackedPitch, sampledAt / 1000);
+  } else state.displayPitch = state.displayPitchFilter.filter(state.trackedPitch, sampledAt / 1000);
   document.getElementById('microphone-level').value = state.microphoneRms;
   const microphoneHelp = state.trackedPitch == null
     ? state.microphoneRms < activeRecognitionSettings().rmsThreshold ? 'Microfono aperto: segnale troppo debole. Controlla ingresso e volume in Windows.' : 'Il segnale arriva. Tieni una nota per riconoscerla.'
@@ -1120,6 +1220,7 @@ function livePlumeSettings(displayBeat, inspecting, nowX, trailStartX) {
   const speed = Math.max(.1, Number(els.playbackSpeed.value) || 1);
   return { ...state.plumeSettings, nowX, trailStartX,
     mode: inspecting ? 'review' : 'live', sortedTimeline: !inspecting,
+    retainHistory: !inspecting,
     minConfidence: activeRecognitionSettings().minConfidence,
     currentTime: state.runtime.secondsAtBeat(displayBeat) / speed,
     timeAt: sample => state.runtime.secondsAtBeat(sample.beat) / speed };
@@ -1162,8 +1263,10 @@ function drawPitchLane(beat) {
   const compactLayout = window.matchMedia('(max-width: 960px)').matches;
   const baseHistoryBeats = compactLayout ? UI_CONFIG.mobileHistoryBeats : UI_CONFIG.historyBeats;
   const baseFutureBeats = compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats;
-  const historyBeats = baseHistoryBeats / (inspecting ? inspect.timeZoom : 1);
-  const futureBeats = baseFutureBeats / (inspecting ? inspect.timeZoom : 1);
+  let historyBeats = baseHistoryBeats / (inspecting ? inspect.timeZoom : 1);
+  let futureBeats = baseFutureBeats / (inspecting ? inspect.timeZoom : 1);
+  if (compactLayout) ({ historyBeats, futureBeats } = limitTimelineWindowToMeasures(
+    state.occurrenceMeasures, displayBeat, historyBeats, futureBeats, 4));
   const rowHeight = (plot.bottom - plot.top) / (bounds.max - bounds.min);
   const nowX = timeToX(displayBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
   const noteLabelX = compactLayout ? 6 : nowX - UI_CONFIG.pitchNoteLabelOffsetPx;
@@ -1202,6 +1305,7 @@ function drawPitchLane(beat) {
   ctx.save();
   ctx.beginPath(); ctx.rect(plot.left, 0, plot.right - plot.left, plot.bottom); ctx.clip();
   rhythmGridLines(state.occurrenceMeasures, visibleStart, visibleEnd).forEach((line) => {
+    if (compactLayout && line.kind === 'subdivision') return;
     const x = timeToX(line.beat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
     if (line.kind === 'measure') {
       ctx.strokeStyle = 'rgba(226,180,101,.48)'; ctx.lineWidth = 1.4; ctx.setLineDash([]);
@@ -1257,8 +1361,9 @@ function drawPitchLane(beat) {
     const xAtVoice = (sample) => {
       // Keep the detector-latency correction when switching from the live
       // ribbon to the paused history view, including after zooming out.
-      const x = timeToX(visuallyAdvancedPitchBeat(sample.beat), displayBeat, plot.left, plot.right, historyBeats, futureBeats);
-      return inspecting ? x : Math.min(melodyHeadX, x);
+      // Do not clamp several observations to the same live-head coordinate:
+      // the renderer clips the single-valued graph at melodyHeadX instead.
+      return timeToX(visuallyAdvancedPitchBeat(sample.beat), displayBeat, plot.left, plot.right, historyBeats, futureBeats);
     };
     const yAtVoice = (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
     const trailSettings = { ...livePlumeSettings(displayBeat, inspecting, inspecting ? plot.right : melodyHeadX, plot.left),
@@ -1290,15 +1395,29 @@ function drawPitchLane(beat) {
   ctx.restore(); ctx.shadowBlur = 0;
 
   const currentTarget = state.runtime.targetAt(displayBeat);
-  ctx.fillStyle = '#0a181e'; ctx.fillRect(noteStripLeft, plot.top - 8, Math.max(0, noteStripRight - noteStripLeft), plot.bottom - plot.top + 16);
+  const tonicPitchClass = state.runtime.tonicPitchClassAt(displayBeat, state.transpose);
+  const fifthPitchClass = tonicPitchClass == null ? null : (tonicPitchClass + 7) % 12;
+  const noteStripWidth = Math.max(0, noteStripRight - noteStripLeft);
+  ctx.fillStyle = '#0a181e'; ctx.fillRect(noteStripLeft, plot.top - 8, noteStripWidth, plot.bottom - plot.top + 16);
   for (let pitch = Math.ceil(bounds.min); pitch <= Math.floor(bounds.max); pitch += 1) {
     const y = pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
     const active = currentTarget && pitch === currentTarget.midiPitch + state.transpose;
-    ctx.fillStyle = active ? '#f0cf8f' : '#93a9a8';
-    ctx.font = `${active ? '700 ' : ''}${Math.max(8, Math.min(12, rowHeight * .8))}px Inter, sans-serif`;
+    const pitchClass = ((pitch % 12) + 12) % 12;
+    const tonalColour = pitchClass === tonicPitchClass ? TONAL_ROLE_COLOURS.tonic
+      : pitchClass === fifthPitchClass ? TONAL_ROLE_COLOURS.fifth : null;
+    if (tonalColour) {
+      ctx.fillStyle = tonalColour;
+      ctx.fillRect(noteStripLeft, y - rowHeight / 2, noteStripWidth, rowHeight);
+    }
+    ctx.fillStyle = tonalColour ? '#fff' : (active ? '#f0cf8f' : '#93a9a8');
+    ctx.shadowColor = tonalColour ? 'rgba(0,0,0,.58)' : 'transparent';
+    ctx.shadowBlur = tonalColour ? 2 : 0;
+    ctx.shadowOffsetY = tonalColour ? 1 : 0;
+    ctx.font = `${active || tonalColour ? '700 ' : ''}${Math.max(8, Math.min(12, rowHeight * .8))}px Inter, sans-serif`;
     ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
     ctx.fillText(noteLabel(pitch, displayBeat), noteLabelX, y);
   }
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
   if (Number.isFinite(state.displayPitch)) {
     const markerY = Math.max(plot.top + 4, Math.min(plot.bottom - 4,
       pitchToY(state.displayPitch, bounds.min, bounds.max, plot.top, plot.bottom)));
@@ -1554,6 +1673,12 @@ function prepareAttemptResume() {
 async function togglePlayback() {
   if (!state.bundleApproved) { showToast('Serve l’approvazione admin di questo bundle.'); return; }
   if (state.playbackPlan?.kind === 'muted') { showToast('Attiva almeno una traccia nel Mixer.'); return; }
+  if (!state.clock.running && !restoreAudioOutputPreference()) {
+    openDetectorSettings();
+    els.settingsAudioOutputBluetooth.focus();
+    showToast('Prima di iniziare, conferma l’uscita audio in uso.');
+    return;
+  }
   if (playbackSnapshot().beat >= totalBeats()) state.clock.seekBeat(0);
   if (state.clock.running) {
     const checkpointBeat = playbackSnapshot().beat;
@@ -1606,7 +1731,8 @@ function bindGridInspection() {
     const span = (state.pitchViewport?.bounds.max ?? 67) - (state.pitchViewport?.bounds.min ?? 55);
     if (event.ctrlKey || event.metaKey) {
       const zoom = Math.exp(-event.deltaY * .0025);
-      view.timeZoom = Math.max(.55, Math.min(5, view.timeZoom * zoom));
+      const minimumTimeZoom = matchMedia('(max-width: 960px)').matches ? 1 : .55;
+      view.timeZoom = Math.max(minimumTimeZoom, Math.min(5, view.timeZoom * zoom));
       view.pitchZoom = Math.max(.55, Math.min(5, view.pitchZoom * zoom));
     } else if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
       view.viewBeat = Math.max(0, Math.min(totalBeats(), view.viewBeat + (event.deltaX || event.deltaY) * .015 / view.timeZoom));
@@ -1617,15 +1743,21 @@ function bindGridInspection() {
   }, { passive: false });
   const horizontalSpan = () => {
     const inspect = state.gridInspect;
-    return (UI_CONFIG.historyBeats + UI_CONFIG.futureBeats) / (inspect.active ? inspect.timeZoom : 1);
+    const compactLayout = matchMedia('(max-width: 960px)').matches;
+    const baseHistory = compactLayout ? UI_CONFIG.mobileHistoryBeats : UI_CONFIG.historyBeats;
+    const baseFuture = compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats;
+    return (baseHistory + baseFuture) / (inspect.active ? inspect.timeZoom : 1);
   };
   const beatAtPointer = (clientX) => {
     const rect = canvas.getBoundingClientRect();
     const plot = { left: rect.width < 700 ? 48 : 58, right: rect.width - 8 };
     const inspect = state.gridInspect;
     const displayBeat = inspect.active ? inspect.viewBeat : currentPianoRollBeat();
-    const historyBeats = UI_CONFIG.historyBeats / (inspect.active ? inspect.timeZoom : 1);
-    const futureBeats = UI_CONFIG.futureBeats / (inspect.active ? inspect.timeZoom : 1);
+    const compactLayout = matchMedia('(max-width: 960px)').matches;
+    const historyBeats = (compactLayout ? UI_CONFIG.mobileHistoryBeats : UI_CONFIG.historyBeats)
+      / (inspect.active ? inspect.timeZoom : 1);
+    const futureBeats = (compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats)
+      / (inspect.active ? inspect.timeZoom : 1);
     const nowX = timeToX(displayBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
     const ratio = (clientX - rect.left - nowX) / Math.max(1, plot.right - plot.left);
     return Math.max(0, Math.min(totalBeats(), displayBeat + ratio * (historyBeats + futureBeats)));
@@ -1696,6 +1828,10 @@ async function toggleMicrophone() {
     showToast('Il microfono richiede un contesto sicuro (HTTPS) e un browser compatibile.'); render(); return;
   }
   state.microphoneStatus = 'requesting'; updateMicrophoneButton();
+  // Granting microphone permission can itself change the devices exposed by
+  // the browser. Do not mistake that privacy-related update for a real output
+  // switch and immediately ask the user the same question again.
+  state.ignoreAudioDeviceChangesUntil = Date.now() + 5000;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 }, video: false });
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
@@ -3173,7 +3309,7 @@ function finishAttempt() {
 
 function globalDetectorPreferences() {
   return {
-    metronomeOffsetMs: state.metronomeOffsetMs,
+    settingsDefaultsVersion: PitchShared.SETTINGS_DEFAULTS_VERSION,
     pianoRollDelayMs: state.pianoRollDelayMs,
     v1RmsThreshold: state.detectorSettings.rmsThreshold,
     v1WeakVoiceMode: state.detectorSettings.weakVoiceMode,
@@ -3185,7 +3321,6 @@ function globalDetectorPreferences() {
     v1PlumeIntensity: state.plumeSettings.intensity,
     v1PlumeColor: state.plumeSettings.color,
     v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
-    displayPitchAlgorithm: state.displayPitchAlgorithm,
     pitchLayerV1: state.pitchLayers.v1,
     pitchLayerCrepe: state.pitchLayers.crepe,
   };
@@ -3199,12 +3334,12 @@ function savePreferences() {
   try {
     localStorage.setItem(preferenceKey(), JSON.stringify({ transpose: state.transpose,
       speed: els.playbackSpeed.value, volume: els.volume.value, metronome: els.metronomeVolume.value,
-      metronomeOffsetMs: state.metronomeOffsetMs,
+      settingsDefaultsVersion: PitchShared.SETTINGS_DEFAULTS_VERSION,
       pianoRollDelayMs: state.pianoRollDelayMs,
       selectedVoiceIds: [...state.selectedVoiceIds], voiceLevels: Object.fromEntries(state.voiceLevels),
       accompanimentEnabled: state.accompanimentEnabled, accompanimentLevel: state.accompanimentLevel,
       noteNames: state.noteNames, noteNamesPreferenceVersion: 2, showIntervals: state.showIntervals,
-      scoreHeight: Math.round(els.scoreViewport.clientHeight), scoreHeightPreferenceVersion: 2,
+      scoreHeight: Math.round(els.scoreViewport.clientHeight), scoreHeightPreferenceVersion: 4,
       v1RmsThreshold: state.detectorSettings.rmsThreshold,
       v1WeakVoiceMode: state.detectorSettings.weakVoiceMode,
       v1FastAlpha: state.detectorSettings.fastAlpha, v1SlowAlpha: state.detectorSettings.slowAlpha,
@@ -3212,7 +3347,7 @@ function savePreferences() {
       v1PlumeWidth: state.plumeSettings.width, plumeWidthPreferenceVersion: PitchShared.PLUME_WIDTH_PREFERENCE_VERSION,
       v1PlumeIntensity: state.plumeSettings.intensity,
       v1PlumeColor: state.plumeSettings.color, v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
-      displayPitchAlgorithm: state.displayPitchAlgorithm, pitchLayerV1: state.pitchLayers.v1,
+      pitchLayerV1: state.pitchLayers.v1,
       pitchLayerCrepe: state.pitchLayers.crepe }));
     localStorage.setItem(INTERVAL_ARROWS_PREFERENCE_KEY, String(state.showIntervals));
     saveGlobalDetectorPreferences();
@@ -3242,9 +3377,9 @@ function restorePreferences() {
   state.accompanimentEnabled = Boolean(state.backingManifest?.accompaniment_file) && saved.accompanimentEnabled !== false;
   state.accompanimentLevel = Number.isFinite(Number(saved.accompanimentLevel))
     ? Math.max(0, Math.min(1, Number(saved.accompanimentLevel))) : 1;
-  // Existing preferences used English as the implicit default. Migrate those
-  // users to Italian while preserving any deliberate choice made from now on.
-  state.noteNames = saved.noteNamesPreferenceVersion === 2 && saved.noteNames === 'international' ? 'international' : 'italian';
+  // Note names follow the current Italian interface. Language selection will
+  // return only as a single global application preference.
+  state.noteNames = 'italian';
   els.noteNames.value = state.noteNames;
   try {
     const intervalArrows = localStorage.getItem(INTERVAL_ARROWS_PREFERENCE_KEY);
@@ -3256,44 +3391,54 @@ function restorePreferences() {
   els.playbackSpeed.value = ['0.5', '0.75', '1'].includes(saved.speed) ? saved.speed : '1';
   els.volume.value = Number.isFinite(Number(saved.volume)) ? Math.max(0, Math.min(100, Number(saved.volume))) : 62;
   els.metronomeVolume.value = Number.isFinite(Number(saved.metronome)) ? Math.max(0, Math.min(100, Number(saved.metronome))) : 0;
-  const savedMetronomeOffset = Number(detectorSaved.metronomeOffsetMs ?? saved.metronomeOffsetMs);
-  state.metronomeOffsetMs = Number.isFinite(savedMetronomeOffset)
-    ? Math.round(Math.max(-100, Math.min(200, savedMetronomeOffset)) / 5) * 5 : 30;
+  // The click timing is deliberately fixed: legacy saved values must not
+  // override the application-wide 50 ms offset.
+  state.metronomeOffsetMs = METRONOME_OFFSET_MS;
+  const sharedPitchPreferences = PitchShared.readPreferences({
+    getItem: () => JSON.stringify(detectorSaved),
+  });
   const savedPianoRollDelay = Number(detectorSaved.pianoRollDelayMs ?? saved.pianoRollDelayMs);
-  state.pianoRollDelayMs = Number.isFinite(savedPianoRollDelay)
-    ? Math.round(Math.max(0, Math.min(400, savedPianoRollDelay)) / 10) * 10 : 150;
-  state.detectorSettings.rmsThreshold = Number.isFinite(Number(detectorSaved.v1RmsThreshold))
-    ? Math.max(V1_RMS_THRESHOLD.min, Math.min(V1_RMS_THRESHOLD.max, Number(detectorSaved.v1RmsThreshold)))
-    : V1_RMS_THRESHOLD.default;
-  state.detectorSettings.weakVoiceMode = detectorSaved.v1WeakVoiceMode === true;
-  state.detectorSettings.fastAlpha = Number.isFinite(Number(detectorSaved.v1FastAlpha))
-    ? Math.max(.05, Math.min(.95, Number(detectorSaved.v1FastAlpha))) : V1_TRACKER_DEFAULTS.fastAlpha;
-  state.detectorSettings.slowAlpha = Number.isFinite(Number(detectorSaved.v1SlowAlpha))
-    ? Math.max(.05, Math.min(.95, Number(detectorSaved.v1SlowAlpha))) : V1_TRACKER_DEFAULTS.slowAlpha;
-  const savedMedian = Number(detectorSaved.v1MedianWindowFrames);
-  state.detectorSettings.medianWindowFrames = Number.isFinite(savedMedian)
-    ? Math.max(1, Math.min(7, Math.round(savedMedian / 2) * 2 - 1)) : V1_TRACKER_DEFAULTS.medianWindowFrames;
-  const savedPlumeWidth = Number(detectorSaved.v1PlumeWidth);
-  const legacyDefaultPlumeWidth = detectorSaved.plumeWidthPreferenceVersion !== PitchShared.PLUME_WIDTH_PREFERENCE_VERSION
-    && Math.abs(savedPlumeWidth - 1) < 1e-9;
-  state.plumeSettings.width = Number.isFinite(savedPlumeWidth) && !legacyDefaultPlumeWidth
-    ? Math.max(.35, Math.min(2.5, savedPlumeWidth)) : PitchShared.PLUME_DEFAULTS.width;
-  state.plumeSettings.intensity = Number.isFinite(Number(detectorSaved.v1PlumeIntensity))
-    ? Math.max(.15, Math.min(2, Number(detectorSaved.v1PlumeIntensity))) : 1;
+  const previousPianoRollDefaults = detectorSaved.settingsDefaultsVersion === 2
+    ? [330, 500] : detectorSaved.settingsDefaultsVersion === 1 ? [270] : [150];
+  const legacyPianoRollDefault = detectorSaved.settingsDefaultsVersion !== PitchShared.SETTINGS_DEFAULTS_VERSION
+    && previousPianoRollDefaults.some((value) => Math.abs(savedPianoRollDelay - value) < 1e-9);
+  state.pianoRollDelayMs = Number.isFinite(savedPianoRollDelay) && !legacyPianoRollDefault
+    ? Math.round(Math.max(0, Math.min(PIANO_ROLL_DELAY_MAX_MS, savedPianoRollDelay)) / 10) * 10
+    : PIANO_ROLL_DELAY_DEFAULT_MS;
+  state.detectorSettings.rmsThreshold = Math.max(V1_RMS_THRESHOLD.min,
+    Math.min(V1_RMS_THRESHOLD.max, sharedPitchPreferences.detector.rmsThreshold));
+  state.detectorSettings.weakVoiceMode = sharedPitchPreferences.detector.weakVoiceMode;
+  state.detectorSettings.fastAlpha = Math.max(.05, Math.min(.95, sharedPitchPreferences.detector.fastAlpha));
+  state.detectorSettings.slowAlpha = Math.max(.05, Math.min(.95, sharedPitchPreferences.detector.slowAlpha));
+  const savedMedian = sharedPitchPreferences.detector.medianWindowFrames;
+  state.detectorSettings.medianWindowFrames = Math.max(1, Math.min(7, Math.round(savedMedian / 2) * 2 - 1));
+  state.plumeSettings.width = Math.max(.35, Math.min(2.5, sharedPitchPreferences.plume.width));
+  state.plumeSettings.intensity = Math.max(.15, Math.min(2, sharedPitchPreferences.plume.intensity));
   state.plumeSettings.color = '#72e0d2';
-  state.plumeSettings.timeAdvanceMs = Number.isFinite(Number(detectorSaved.v1PlumeAdvanceMs))
-    ? Math.round(Math.max(0, Math.min(PitchShared.PLUME_ADVANCE_MAX_MS, Number(detectorSaved.v1PlumeAdvanceMs))) / 10) * 10
-    : PitchShared.PLUME_DEFAULTS.timeAdvanceMs;
-  state.displayPitchAlgorithm = detectorSaved.displayPitchAlgorithm === 'v1' ? 'v1' : 'v1+display-filter';
+  state.plumeSettings.timeAdvanceMs = Math.round(sharedPitchPreferences.plume.timeAdvanceMs / 10) * 10;
   state.displayPitchFilter.reset();
   state.pitchLayers.v1 = detectorSaved.pitchLayerV1 !== false;
   state.pitchLayers.crepe = detectorSaved.pitchLayerCrepe !== false;
   els.pitchLayerV1.checked = state.pitchLayers.v1;
   els.pitchLayerCrepe.checked = state.pitchLayers.crepe;
   applyLiveTrackerSettings();
+  restoreAudioOutputPreference();
+  state.plumeSettings.timeAdvanceMs = state.audioOutputType === 'bluetooth'
+    ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
   updateDetectorSettingsUi();
   try { saveGlobalDetectorPreferences(); } catch (_) { /* Storage is optional. */ }
-  if (saved.scoreHeightPreferenceVersion === 2 && Number.isFinite(saved.scoreHeight)) setScoreHeight(saved.scoreHeight);
+  const mobileLayout = matchMedia('(max-width: 960px)').matches;
+  const compatibleScoreHeight = saved.scoreHeightPreferenceVersion === 4
+    || (!mobileLayout && [2, 3].includes(saved.scoreHeightPreferenceVersion));
+  if (compatibleScoreHeight && Number.isFinite(saved.scoreHeight)) setScoreHeight(saved.scoreHeight);
+  else if (mobileLayout) setScoreHeight(defaultMobileScoreHeight());
+}
+
+function defaultMobileScoreHeight() {
+  if (matchMedia('(orientation: landscape)').matches) {
+    return Math.max(105, Math.min(128, innerHeight * .3));
+  }
+  return innerHeight * .3;
 }
 
 function scoreHeightLimits() {
@@ -3398,6 +3543,7 @@ function bindControls() {
     if (!els.voiceMixerDialog.open) els.voiceMixerDialog.showModal();
   });
   els.voiceMixerClose.addEventListener('click', () => els.voiceMixerDialog.close());
+  els.voiceMixerDialog.addEventListener('click', closeVoiceMixerFromBackdrop);
   els.voiceMixerAccompanimentEnabled.addEventListener('click', () => {
     state.accompanimentEnabled = !state.accompanimentEnabled;
     void applyVoiceSelection(state.selectedVoiceIds); savePreferences();
@@ -3575,7 +3721,24 @@ function bindControls() {
   els.backingAudio.addEventListener('ended', () => { updatePlaybackButton(); render(); });
   els.backingAudio.addEventListener('pause', () => { updatePlaybackButton(); if (!state.clock.running) render(); });
   els.backingAudio.addEventListener('error', () => showToast(`Errore audio (${els.backingAudio.error?.code ?? 'sconosciuto'}).`));
-  els.settings.addEventListener('click', openDetectorSettings);
+  els.settings.addEventListener('click', (event) => { event.stopPropagation(); toggleSettingsMenu(); });
+  els.settingsMenuBasic.addEventListener('click', () => openDetectorSettings('basic'));
+  els.settingsMenuAdvanced.addEventListener('click', () => openDetectorSettings('advanced'));
+  document.addEventListener('click', (event) => {
+    if (!els.settingsMenuWrap.contains(event.target)) closeSettingsMenu();
+  });
+  for (const control of [els.settingsAudioOutputStandard, els.settingsAudioOutputBluetooth]) {
+    control.addEventListener('change', () => {
+      if (!control.checked) return;
+      saveAudioOutputPreference(control.value);
+      state.plumeSettings.timeAdvanceMs = control.value === 'bluetooth'
+        ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
+      updateDetectorSettingsUi(); savePreferences(); render();
+      showToast(control.value === 'bluetooth'
+        ? 'Bluetooth confermato: anticipo traccia vocale 550 ms.'
+        : 'Uscita non Bluetooth: anticipo traccia vocale 270 ms.');
+    });
+  }
   els.settingsTextScale.addEventListener('input', () => {
     state.lyricTextScale = UiPreferences.apply(Number(els.settingsTextScale.value) / 100);
     els.settingsTextScaleValue.textContent = `${Math.round(state.lyricTextScale * 100)}%`;
@@ -3589,19 +3752,6 @@ function bindControls() {
     state.showIntervals = els.settingsShowIntervals.checked;
     savePreferences(); render();
     showToast(state.showIntervals ? 'Frecce degli intervalli attive.' : 'Frecce degli intervalli nascoste.');
-  });
-  els.settingsMetronomeOffset.addEventListener('input', () => {
-    state.metronomeOffsetMs = Number(els.settingsMetronomeOffset.value);
-    state.lastMetronomeBeat = null; updateDetectorSettingsUi();
-  });
-  els.settingsMetronomeOffset.addEventListener('change', () => {
-    savePreferences();
-    showToast(`Metronomo: ${state.metronomeOffsetMs >= 0 ? '+' : '−'}${Math.abs(state.metronomeOffsetMs)} ms.`);
-  });
-  els.settingsDisplayPitchAlgorithm.addEventListener('change', () => {
-    state.displayPitchAlgorithm = els.settingsDisplayPitchAlgorithm.value === 'v1' ? 'v1' : 'v1+display-filter';
-    state.displayPitchFilter.reset(); savePreferences(); render();
-    showToast(state.displayPitchAlgorithm === 'v1' ? 'Visualizzazione v1 pura.' : 'Filtro adattivo attivo solo sulla visualizzazione.');
   });
   els.settingsV1Rms.addEventListener('input', () => {
     state.detectorSettings.rmsThreshold = rmsThresholdFromSlider(els.settingsV1Rms.value);
@@ -3653,23 +3803,40 @@ function bindControls() {
   els.settingsReset.addEventListener('click', () => {
     state.lyricTextScale = UiPreferences.write(UiPreferences.DEFAULT_LYRIC_SCALE);
     state.showIntervals = false;
-    state.metronomeOffsetMs = 30;
-    state.pianoRollDelayMs = 150;
+    state.metronomeOffsetMs = METRONOME_OFFSET_MS;
+    state.pianoRollDelayMs = PIANO_ROLL_DELAY_DEFAULT_MS;
     state.detectorSettings.rmsThreshold = V1_RMS_THRESHOLD.default;
     state.detectorSettings.weakVoiceMode = false;
     Object.assign(state.detectorSettings, V1_TRACKER_DEFAULTS);
-    state.plumeSettings = { ...PitchShared.PLUME_DEFAULTS };
-    state.displayPitchAlgorithm = 'v1+display-filter'; state.displayPitchFilter.reset();
+    state.plumeSettings = { ...PitchShared.PLUME_DEFAULTS,
+      timeAdvanceMs: state.audioOutputType === 'bluetooth' ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS };
+    state.displayPitchFilter.reset();
     applyLiveTrackerSettings(); updateDetectorSettingsUi(); savePreferences();
     render(); showToast('Impostazioni v1 ripristinate ai valori predefiniti.');
   });
+  els.settingsDialog.addEventListener('click', (event) => {
+    const selected = event.target.closest('.setting-info');
+    const shouldOpen = selected && !selected.classList.contains('is-open');
+    els.settingsDialog.querySelectorAll('.setting-info.is-open').forEach((button) => button.classList.remove('is-open'));
+    if (shouldOpen) selected.classList.add('is-open');
+  });
+  els.settingsDialog.addEventListener('close', () => {
+    els.settingsDialog.querySelectorAll('.setting-info.is-open').forEach((button) => button.classList.remove('is-open'));
+  });
   els.settingsDialog.addEventListener('click', closeSettingsFromBackdrop);
+  navigator.mediaDevices?.addEventListener('devicechange', () => {
+    if (Date.now() < state.ignoreAudioDeviceChangesUntil) return;
+    invalidateAudioOutputPreference(true);
+  });
   document.getElementById('admin-review').addEventListener('click', () => window.open('admin-review.html', 'choir-admin-review'));
   document.getElementById('exit-practice').addEventListener('click', openLibraryPicker);
   window.addEventListener('resize', () => { updateMobileChrome(); state.activeScoreSegment = null; render(); });
   window.addEventListener('resize', () => { if (!els.benchmarkAnalysis.hidden) drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); });
   window.addEventListener('beforeunload', () => { savePitchHistory(); state.microphoneStream?.getTracks().forEach((track) => track.stop()); });
   document.addEventListener('keydown', (event) => {
+    if (event.key === 'Escape' && !els.settingsMenu.hidden) {
+      closeSettingsMenu(); els.settings.focus(); event.preventDefault(); return;
+    }
     const targetTag = event.target?.tagName;
     const editingText = event.target?.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(targetTag);
     if (event.code === 'Space' && !editingText) {
@@ -3705,18 +3872,26 @@ async function initialize() {
   if (!state.library.length) throw new Error('Non ci sono brani MuseScore nella cartella sheets');
   bindLibraryPicker();
   const requestedPiece = new URLSearchParams(window.location.search).get('piece');
-  let rememberedPiece = null;
-  try { rememberedPiece = localStorage.getItem(LAST_PRACTICE_PIECE_KEY); } catch (_) { /* Optional convenience only. */ }
-  const selectedPiece = [requestedPiece, rememberedPiece, state.library[0]?.piece_id]
-    .find((pieceId) => pieceId && state.library.some((piece) => piece.piece_id === pieceId));
-  await loadPracticePiece(selectedPiece);
+  const requestedPieceExists = requestedPiece
+    && state.library.some((piece) => piece.piece_id === requestedPiece);
+  if (requestedPieceExists) {
+    await loadPracticePiece(requestedPiece);
+    return;
+  }
+  openLibraryPicker();
 }
 
 function openLibraryPicker() {
   if (state.clock?.running) state.clock.pause();
   if (state.clock) updatePlaybackButton();
   const requested = new URLSearchParams(window.location.search).get('piece');
-  populateLibraryPieces(requested);
+  let remembered = null;
+  try { remembered = localStorage.getItem(LAST_PRACTICE_PIECE_KEY); } catch (_) { /* Optional convenience only. */ }
+  const selectedPiece = [requested, state.bundleManifest?.piece_id, remembered, state.library[0]?.piece_id]
+    .find((pieceId) => pieceId && state.library.some((piece) => piece.piece_id === pieceId));
+  populateLibraryPieces(selectedPiece);
+  const returnButton = els.piecePickerDialog.querySelector('.studio-return');
+  if (returnButton) returnButton.hidden = !state.runtime;
   updateLibraryParts();
   if (!els.piecePickerDialog.open) els.piecePickerDialog.showModal();
 }
@@ -3756,6 +3931,9 @@ async function updateLibraryParts() {
 function bindLibraryPicker() {
   els.piecePicker.addEventListener('click', openLibraryPicker);
   els.library?.addEventListener('click', openLibraryPicker);
+  els.piecePickerDialog.addEventListener('cancel', (event) => {
+    if (!state.runtime) event.preventDefault();
+  });
   els.libraryPiece.addEventListener('change', updateLibraryParts);
   els.libraryOpen.addEventListener('click', () => {
     const query = new URLSearchParams({ piece: els.libraryPiece.value });

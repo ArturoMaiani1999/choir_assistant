@@ -60,7 +60,7 @@ def main() -> int:
                 time.sleep(1.2)
                 practice = evaluate(socket, 6, "({approved:state.bundleApproved, disabled:document.querySelector('#toggle-playback').disabled, audio:document.querySelector('#backing-audio').getAttribute('src'), status:document.querySelector('#asset-status').textContent})")
                 assert practice["approved"] is True and practice["disabled"] is False and practice["audio"]
-                microphone = evaluate(socket, 7, "(async()=>{await toggleMicrophone(); return state.microphoneStatus;})()")
+                microphone = evaluate(socket, 7, "(async()=>{els.settingsAudioOutputStandard.checked=true;els.settingsAudioOutputStandard.dispatchEvent(new Event('change'));await toggleMicrophone(); return state.microphoneStatus;})()")
                 assert microphone == "active"
                 playback = evaluate(socket, 8, """(async()=>{document.querySelector('#toggle-playback').click(); for(let i=0;i<40&&!state.clock.running;i++) await new Promise(r=>setTimeout(r,50)); await new Promise(r=>setTimeout(r,700)); const snapshot=state.clock.snapshot(); document.querySelector('#toggle-playback').click(); await stopMicrophone(); return snapshot;})()""")
                 assert playback["running"] is True and playback["beat"] > 0
