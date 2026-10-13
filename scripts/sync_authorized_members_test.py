@@ -22,6 +22,20 @@ class AuthorizedMemberSyncTests(unittest.TestCase):
         self.assertIn("BEGIN TRANSACTION", sql)
         self.assertIn("COMMIT", sql)
 
+    def test_replace_requires_matching_member_count(self) -> None:
+        with self.assertRaisesRegex(ValueError, "confirm-replace-count"):
+            MODULE.validate_replace_confirmation(True, False, 56, None)
+        with self.assertRaisesRegex(ValueError, "confirm-replace-count"):
+            MODULE.validate_replace_confirmation(True, False, 56, 55)
+        MODULE.validate_replace_confirmation(True, False, 56, 56)
+
+    def test_replace_dry_run_needs_no_confirmation(self) -> None:
+        MODULE.validate_replace_confirmation(True, True, 56, None)
+
+    def test_confirmation_is_invalid_without_replace(self) -> None:
+        with self.assertRaisesRegex(ValueError, "richiede --replace"):
+            MODULE.validate_replace_confirmation(False, False, 56, 56)
+
 
 if __name__ == "__main__":
     unittest.main()

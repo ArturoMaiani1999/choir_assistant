@@ -2,7 +2,7 @@
 
 **Status:** review baseline
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-11
+**Last reviewed:** 2026-10-13
 
 This document gives the independent security reviewer an explicit attack
 surface and reproducible acceptance criteria. It is not evidence that a
@@ -55,36 +55,43 @@ maintainer workstation -> private list digest sync and immutable release build
    JSON, SVG, audio and manifests behind the same middleware.
 3. **Identity/authorization separation.** A valid Clerk identity is
    insufficient without an active D1 digest.
-4. **Verified session origin.** Clerk validation receives one HTTPS
+4. **Canonical request origin.** Before serving even public authentication
+   files, the Worker requires the request origin to equal `APP_ORIGIN`.
+   Deployment rejects `workers.dev`, preview URLs and custom-domain routes that
+   do not exactly match that hostname.
+5. **Verified session origin.** Clerk validation receives one HTTPS
    `authorizedParties` origin to reduce CSRF/session-token misuse.
-5. **Minimal identity claim.** Only the verified primary email needed for the
-   authorization lookup is added to the Clerk session token.
-6. **Pseudonymous allowlist.** D1 stores HMAC-SHA-256 digests, not plaintext
+6. **Minimal identity claim.** Only the primary email needed for authorization
+   is added to the signed Clerk session token. The Worker normalizes and
+   validates it, and rejects any session containing Clerk's actor (`act`) claim.
+   Email verification itself remains a mandatory Clerk tenant setting.
+7. **Pseudonymous allowlist.** D1 stores HMAC-SHA-256 digests, not plaintext
    email addresses. The key is a Worker secret and is absent from Git.
-7. **Immediate application revocation.** D1 is consulted for every protected
+8. **Immediate application revocation.** D1 is consulted for every protected
    request. Disabling a row blocks subsequent asset requests regardless of the
    remaining Clerk session lifetime.
-8. **No external return URLs.** Client redirects accept only same-origin paths
+9. **No external return URLs.** Client redirects accept only same-origin paths
    beginning with one `/`; authentication paths cannot be return targets.
-9. **Cache containment.** Protected responses set `private, no-store` and vary
+10. **Cache containment.** Protected responses set `private, no-store` and vary
    on authentication headers. Login and public configuration are `no-store`.
-10. **Browser hardening.** Protected pages retain the restrictive static CSP.
+11. **Browser hardening.** Protected pages retain the restrictive static CSP.
     Login receives a separate CSP containing only its own origin and the Clerk
     origins required for identity and bot challenges. Frame embedding is
     denied, MIME sniffing is disabled and referrers are suppressed.
-11. **Local dependency bundle.** ClerkJS is bundled during the deterministic
+12. **Local dependency bundle.** ClerkJS is bundled during the deterministic
     build; production does not execute a generic third-party CDN script.
-12. **Least-privilege Clerk verification.** Sessions are verified networklessly
+13. **Least-privilege Clerk verification.** Sessions are verified networklessly
     with Clerk's public JWT key. `/auth/config` returns only the publishable
     key; the Worker has no Clerk Backend API secret, and the HMAC key remains an
     encrypted binding.
-13. **Private source-list handling.** `.gitignore` rejects conventional member
+14. **Private source-list handling.** `.gitignore` rejects conventional member
     list filenames; the sync tool emits only digests and deletes its temporary
-    SQL file in a `finally` block.
-14. **Existing release boundary.** Only repertoire explicitly approved by
+   SQL file in a `finally` block. Full replacement additionally requires the
+   operator to confirm the exact validated member count.
+15. **Existing release boundary.** Only repertoire explicitly approved by
     `deploy/repertoire.json` crosses into `dist/`; source scores, OMR and local
     administrative endpoints remain excluded.
-15. **Pre-deploy configuration gate.** The npm deployment path rejects
+16. **Pre-deploy configuration gate.** The npm deployment path rejects
     placeholders, non-HTTPS origins, preview URLs, invalid D1 identifiers and
     any configuration that would let static assets bypass the Worker.
 
@@ -99,6 +106,7 @@ member data in reports.
 - Test expired, not-yet-valid, wrong-issuer and wrong-authorized-party tokens.
 - Replay a signed-out/revoked session and tokens from development or another
   Clerk application.
+- Attempt a Clerk impersonation session; the Worker must deny it.
 - Test fixation across login/logout and multiple browser profiles.
 - Attempt email changes, secondary-email substitution and unverified-address
   promotion in Clerk.
@@ -154,6 +162,9 @@ member data in reports.
   runtime CSS. It does not permit inline scripts.
 - Clerk session custom claims can lag identity changes briefly. End-user email
   changes must remain disabled, and emergency revocation must occur in D1.
+- Email verification, bot protection and allowed redirects are controls in the
+  Clerk tenant rather than repository code. A dashboard configuration drift can
+  invalidate assumptions even while all local tests pass.
 - Application logs intentionally avoid email addresses, which limits forensic
   attribution. Cloudflare/Clerk retention and access should be reviewed against
   the privacy policy and incident-response needs.

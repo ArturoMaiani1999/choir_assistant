@@ -27,6 +27,12 @@ def https_origin(value: object) -> bool:
     )
 
 
+def origin_hostname(value: object) -> str | None:
+    if not https_origin(value):
+        return None
+    return urlsplit(str(value)).hostname
+
+
 def validate(config: dict) -> list[str]:
     errors: list[str] = []
     serialized = json.dumps(config)
@@ -34,12 +40,26 @@ def validate(config: dict) -> list[str]:
         errors.append("wrangler.jsonc contiene valori REPLACE_WITH_...")
     if config.get("preview_urls") is not False:
         errors.append("preview_urls deve essere false")
+    if config.get("workers_dev") is not False:
+        errors.append("workers_dev deve essere false")
     assets = config.get("assets", {})
     if assets.get("binding") != "ASSETS" or assets.get("run_worker_first") is not True:
         errors.append("ASSETS deve avere binding ASSETS e run_worker_first=true")
     variables = config.get("vars", {})
     if not https_origin(variables.get("APP_ORIGIN")):
         errors.append("APP_ORIGIN deve essere una singola origine HTTPS")
+    app_hostname = origin_hostname(variables.get("APP_ORIGIN"))
+    routes = config.get("routes", [])
+    canonical_routes = [
+        route for route in routes
+        if isinstance(route, dict)
+        and route.get("custom_domain") is True
+        and str(route.get("pattern", "")).casefold() == str(app_hostname).casefold()
+    ] if isinstance(routes, list) else []
+    if app_hostname and (not isinstance(routes, list) or len(routes) != 1 or len(canonical_routes) != 1):
+        errors.append(
+            "routes deve contenere un solo custom domain uguale all'hostname di APP_ORIGIN"
+        )
     if not https_origin(variables.get("CLERK_FRONTEND_API_ORIGIN")):
         errors.append("CLERK_FRONTEND_API_ORIGIN deve essere una singola origine HTTPS")
     if not str(variables.get("CLERK_PUBLISHABLE_KEY", "")).startswith("pk_"):

@@ -3,8 +3,9 @@
   "name": "choir-assistant-auth-staging",
   "main": "./src/worker.ts",
   "compatibility_date": "2026-10-11",
-  "workers_dev": true,
+  "workers_dev": false,
   "preview_urls": false,
+  "routes": [],
   "vars": {
     "APP_ORIGIN": "https://REPLACE_WITH_STAGING_HOSTNAME",
     "CLERK_FRONTEND_API_ORIGIN": "https://REPLACE_WITH_CLERK_FRONTEND_API",

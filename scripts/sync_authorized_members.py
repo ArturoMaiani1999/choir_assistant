@@ -68,11 +68,31 @@ def sql_for(digests: list[str], replace: bool) -> str:
     return "\n".join(statements) + "\n"
 
 
+def validate_replace_confirmation(
+    replace: bool,
+    dry_run: bool,
+    member_count: int,
+    confirmed_count: int | None,
+) -> None:
+    if confirmed_count is not None and not replace:
+        raise ValueError("--confirm-replace-count richiede --replace")
+    if replace and not dry_run and confirmed_count != member_count:
+        raise ValueError(
+            "--replace richiede --confirm-replace-count uguale al numero di membri validati "
+            f"({member_count})"
+        )
+
+
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path, help="CSV con colonna email, oppure file con una email per riga")
     parser.add_argument("--database", default="choir-assistant-auth-staging")
     parser.add_argument("--replace", action="store_true", help="revoca chi non compare nella lista fornita")
+    parser.add_argument(
+        "--confirm-replace-count",
+        type=int,
+        help="conferma obbligatoria: numero esatto di membri della lista completa",
+    )
     parser.add_argument("--local", action="store_true", help="aggiorna il database Wrangler locale")
     parser.add_argument("--dry-run", action="store_true", help="calcola i digest senza modificare D1")
     args = parser.parse_args()
@@ -81,6 +101,12 @@ def main() -> int:
     if len(secret) < 32:
         raise ValueError(f"Impostare {SECRET_ENV} con lo stesso segreto di almeno 32 caratteri usato dal Worker")
     addresses = read_addresses(args.source.resolve())
+    validate_replace_confirmation(
+        args.replace,
+        args.dry_run,
+        len(addresses),
+        args.confirm_replace_count,
+    )
     digests = [digest_email(email, secret) for email in addresses]
     if args.dry_run:
         print(f"Validati {len(digests)} membri; nessun dato inviato")

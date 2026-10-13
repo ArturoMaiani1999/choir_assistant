@@ -1,4 +1,4 @@
-import { authenticateClerkRequest, clerkFrontendOrigin } from "./auth";
+import { appOrigin, authenticateClerkRequest, clerkFrontendOrigin } from "./auth";
 import { isAuthorized } from "./authorization";
 import type { Env, RequestAuthenticator } from "./types";
 
@@ -71,6 +71,16 @@ function forbiddenJson(): Response {
   );
 }
 
+function unavailable(error: string): Response {
+  return Response.json(
+    { error },
+    {
+      status: 503,
+      headers: { "Cache-Control": "no-store", "Retry-After": "30" },
+    },
+  );
+}
+
 async function forbidden(request: Request, env: Env): Promise<Response> {
   const acceptsHtml = request.headers.get("Accept")?.includes("text/html") ?? false;
   if (request.method !== "GET" || !acceptsHtml) return forbiddenJson();
@@ -108,6 +118,21 @@ export function createWorker(authenticate: RequestAuthenticator = authenticateCl
   return {
     async fetch(request: Request, env: Env): Promise<Response> {
       const url = new URL(request.url);
+      let expectedOrigin: string;
+      try {
+        expectedOrigin = appOrigin(env);
+      } catch {
+        return withHeaders(unavailable("configuration_unavailable"), SECURITY_HEADERS);
+      }
+      if (url.origin !== expectedOrigin) {
+        return withHeaders(
+          Response.json(
+            { error: "misdirected_request" },
+            { status: 421, headers: { "Cache-Control": "no-store" } },
+          ),
+          SECURITY_HEADERS,
+        );
+      }
       if (PUBLIC_PATHS.has(url.pathname)) {
         return withHeaders(await servePublic(request, env), SECURITY_HEADERS);
       }
@@ -125,13 +150,7 @@ export function createWorker(authenticate: RequestAuthenticator = authenticateCl
           return withHeaders(await forbidden(request, env), SECURITY_HEADERS);
         }
       } catch {
-        return withHeaders(
-          Response.json(
-            { error: "authorization_unavailable" },
-            { status: 503, headers: { "Cache-Control": "no-store", "Retry-After": "30" } },
-          ),
-          SECURITY_HEADERS,
-        );
+        return withHeaders(unavailable("authorization_unavailable"), SECURITY_HEADERS);
       }
 
       const asset = await env.ASSETS.fetch(request);

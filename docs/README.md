@@ -41,6 +41,11 @@ take precedence over anything under `archive/`.
 
 ## Operations
 
+- [Consumer authentication implementation tracker](operations/consumer-auth-implementation-tracker.md) —
+  motivation, staged plan, implementation status, evidence and external gates.
+- [Consumer authentication dashboard checklist](operations/consumer-auth-dashboard-checklist.md) —
+  Clerk/Cloudflare tenant, anti-abuse, privacy and cost controls that cannot be
+  enforced from source code.
 - [Consumer authentication deployment](operations/consumer-auth-deployment.md) —
   staged Clerk/D1 provisioning, member synchronization, cutover and rollback.
 - [Consumer authentication security review](operations/consumer-auth-security-review.md) —

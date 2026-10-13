@@ -2,7 +2,7 @@
 
 **Status:** canonical for `feature/consumer-auth`; not yet the live production procedure
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-11
+**Last reviewed:** 2026-10-13
 
 This runbook provisions the Clerk + D1 authorization path without weakening
 the currently deployed Cloudflare Access application. Perform the first deploy
@@ -22,8 +22,9 @@ forced audit upgrade.
 
 ## 2. Clerk production instance
 
-1. Create a production Clerk application using email verification code or
-   magic-link authentication.
+1. Create a production Clerk application using only email verification code
+   or magic-link authentication. Do not enable password, SMS or social login
+   without a separate review of account linking and verified identifiers.
 2. Disable changes to the primary email identifier by end users.
 3. Enable Clerk attack/bot protection.
 4. Restrict allowed application origins and redirects to the staging hostname.
@@ -38,6 +39,11 @@ forced audit upgrade.
 6. Record the publishable key, public JWT verification key and exact HTTPS
    Frontend API origin. The Worker does not need a Clerk Backend API secret.
 
+The Worker rejects malformed email claims and Clerk impersonation sessions.
+The claim is accepted as a verified identifier only because the Clerk tenant
+is restricted to email-code/magic-link verification. This dashboard setting is
+a release gate, not an optional preference.
+
 Clerk's own allowlist is deliberately not the authorization authority. Users
 outside the D1 list may be able to create an identity, but the Worker returns
 `403` and never serves repertoire assets.
@@ -50,7 +56,17 @@ npx wrangler d1 create choir-assistant-auth-staging
 
 Copy the returned database ID into the staging `wrangler.jsonc`. Replace the
 three `REPLACE_WITH_...` values with the real staging origin, Clerk Frontend API
-origin and publishable key. Then apply migrations:
+origin and publishable key. Add exactly one custom-domain route matching the
+hostname in `APP_ORIGIN`; keep `workers_dev=false` and `preview_urls=false`:
+
+```json
+"routes": [
+  { "pattern": "staging.example.org", "custom_domain": true }
+]
+```
+
+The Worker also compares every incoming request origin with `APP_ORIGIN` before
+serving public login files or protected assets. Then apply migrations:
 
 ```powershell
 npx wrangler d1 migrations apply choir-assistant-auth-staging --remote
@@ -90,6 +106,18 @@ The default operation only adds/reactivates entries. After reviewing the
 source list, `--replace` also revokes active digests absent from that list.
 Never use `--replace` with a partial export.
 
+Run a dry-run first, record its member count, then repeat that exact count as
+an explicit destructive-operation confirmation:
+
+```powershell
+python scripts/sync_authorized_members.py C:\private\coristi.csv --replace --dry-run
+python scripts/sync_authorized_members.py C:\private\coristi.csv --replace --confirm-replace-count 56
+```
+
+Replacement is one D1 transaction and does not delete old rows: missing
+members become inactive. Keep the source export so the prior active set can be
+restored deliberately if the wrong complete list was supplied.
+
 ## 6. Build and stage
 
 The repository must be clean because the release builder rejects dirty builds.
@@ -119,9 +147,13 @@ state:
 7. Disconnecting or misbinding D1 returns `503`; no asset is served.
 8. CSP has no unexpected report-only violations during login or rehearsal.
 9. Browser storage and network traces contain no mailing list or secret key.
+10. Requests to `workers.dev`, preview/version URLs or any alternate hostname
+    cannot retrieve even `/auth/config`; the canonical Worker returns `421`.
 
 Complete the independent procedure in
-[consumer-auth-security-review.md](consumer-auth-security-review.md).
+[consumer-auth-security-review.md](consumer-auth-security-review.md) and record
+the external controls in
+[consumer-auth-dashboard-checklist.md](consumer-auth-dashboard-checklist.md).
 
 ## 8. Production cutover and rollback
 

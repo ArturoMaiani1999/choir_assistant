@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { identityFromSessionClaims } from "../src/auth";
 import { emailDigest, normalizeEmail } from "../src/authorization";
 import type { AuthenticatedIdentity, Env, RequestAuthenticator } from "../src/types";
 import { createWorker } from "../src/worker";
@@ -68,6 +69,21 @@ describe("email authorization", () => {
   it("rejects weak HMAC secrets", async () => {
     await expect(emailDigest("singer@example.org", "short")).rejects.toThrow(/32/);
   });
+
+  it("accepts and normalizes the signed primary email claim", () => {
+    expect(identityFromSessionClaims("user_test", {
+      primaryEmail: " Singer\uff20Example.org ",
+    })).toEqual({ subject: "user_test", primaryEmail: "singer@example.org" });
+  });
+
+  it("rejects missing, malformed, or impersonated identity claims", () => {
+    expect(identityFromSessionClaims("user_test", {})).toBeNull();
+    expect(identityFromSessionClaims("user_test", { primaryEmail: "not-an-email" })).toBeNull();
+    expect(identityFromSessionClaims("user_test", {
+      primaryEmail: "singer@example.org",
+      act: { sub: "admin_test" },
+    })).toBeNull();
+  });
 });
 
 describe("post-authentication return URL", () => {
@@ -91,6 +107,32 @@ describe("post-authentication return URL", () => {
 });
 
 describe("edge authorization", () => {
+  it("rejects alternate hostnames before authentication or asset access", async () => {
+    let authenticationCalls = 0;
+    const countingAuthenticator: RequestAuthenticator = async () => {
+      authenticationCalls += 1;
+      return IDENTITY;
+    };
+    const response = await createWorker(countingAuthenticator).fetch(
+      new Request("https://alternate.example.org/auth/config"),
+      fakeEnv(),
+    );
+    expect(response.status).toBe(421);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(authenticationCalls).toBe(0);
+  });
+
+  it("fails closed when the canonical application origin is invalid", async () => {
+    const env = fakeEnv();
+    env.APP_ORIGIN = "http://choir.example.org";
+    const response = await createWorker(authenticated).fetch(
+      new Request("https://choir.example.org/"),
+      env,
+    );
+    expect(response.status).toBe(503);
+    await expect(response.json()).resolves.toEqual({ error: "configuration_unavailable" });
+  });
+
   it("redirects anonymous HTML navigation to sign-in without an external return URL", async () => {
     const response = await createWorker(anonymous).fetch(
       new Request("https://choir.example.org/library?piece=x", {

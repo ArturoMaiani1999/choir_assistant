@@ -11,7 +11,9 @@ SPEC.loader.exec_module(MODULE)
 
 def valid_config() -> dict:
     return {
+        "workers_dev": False,
         "preview_urls": False,
+        "routes": [{"pattern": "choir.example.org", "custom_domain": True}],
         "assets": {"binding": "ASSETS", "run_worker_first": True},
         "vars": {
             "APP_ORIGIN": "https://choir.example.org",
@@ -44,6 +46,20 @@ class DeployConfigTests(unittest.TestCase):
         errors = MODULE.validate(config)
         self.assertTrue(any("APP_ORIGIN" in error for error in errors))
         self.assertTrue(any("UUID" in error for error in errors))
+
+    def test_rejects_workers_dev_and_noncanonical_routes(self) -> None:
+        config = valid_config()
+        config["workers_dev"] = True
+        config["routes"] = [{"pattern": "alternate.example.org", "custom_domain": True}]
+        errors = MODULE.validate(config)
+        self.assertTrue(any("workers_dev" in error for error in errors))
+        self.assertTrue(any("custom domain" in error for error in errors))
+
+    def test_rejects_an_extra_route_even_with_the_canonical_domain(self) -> None:
+        config = valid_config()
+        config["routes"].append({"pattern": "alternate.example.org", "custom_domain": True})
+        errors = MODULE.validate(config)
+        self.assertTrue(any("custom domain" in error for error in errors))
 
 
 if __name__ == "__main__":
