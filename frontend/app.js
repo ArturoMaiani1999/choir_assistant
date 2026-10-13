@@ -146,6 +146,8 @@ const state = {
   playbackPlan: null,
   voiceMixChangeToken: 0,
   voiceMixResumeRequested: false,
+  transportSeekToken: 0,
+  transportSeekResumeRequested: false,
   playbackMixer: new MediaElementMixer({ pitchWorkletUrl: 'pitch_shifter_worklet.js' }),
   voiceStemAudio: new Map(),
   selectedVoiceIds: new Set(),
@@ -1709,11 +1711,20 @@ function updateTransposeControl() {
 function applyPendingAudioSeek() {
   const target = state.pendingAudioTime;
   if (target == null || !state.clock) return true;
-  state.clock.seekPerformanceTime(target);
+  try {
+    state.clock.seekPerformanceTime(target);
+  } catch (_) {
+    // Some mobile media stacks reject currentTime assignments until the MP3
+    // has exposed metadata/seek ranges. Keep the destination queued for retry.
+    return false;
+  }
   const applied = Math.abs(state.clock.snapshot().performanceTime - target) < .05;
   if (applied) {
     state.pendingAudioTime = null;
-    for (const audio of state.voiceStemAudio.values()) audio.currentTime = els.backingAudio.currentTime;
+    for (const audio of state.voiceStemAudio.values()) {
+      if (audio.readyState < 1) continue;
+      try { audio.currentTime = els.backingAudio.currentTime; } catch (_) { /* Retried after media readiness. */ }
+    }
     render();
   }
   return applied;
@@ -1735,6 +1746,65 @@ function queueAudioSeek(performanceTime) {
   [100, 300, 800, 1600].forEach((delay) => setTimeout(() => {
     if (state.pendingAudioTime === target) applyPendingAudioSeek();
   }, delay));
+}
+
+async function navigateToMeasure(index) {
+  const seekToken = ++state.transportSeekToken;
+  const shouldResume = state.clock.running || state.transportSeekResumeRequested;
+  state.transportSeekResumeRequested = shouldResume;
+  if (state.clock.running) state.clock.pause();
+  pauseVoiceStems();
+  seekToMeasure(index, false, false);
+  const selectedMeasure = state.occurrenceMeasures[state.selectedMeasureIndex];
+  const targetPerformanceTime = state.runtime.secondsAtBeat(selectedMeasure?.startBeat ?? 0);
+
+  const media = [els.backingAudio, ...state.voiceStemAudio.values()];
+  await Promise.all(media.map((item) => waitForMediaReady(item, 1)));
+  if (seekToken !== state.transportSeekToken) return;
+
+  applyPendingAudioSeek();
+  await waitForMediaSeek(els.backingAudio);
+  if (seekToken !== state.transportSeekToken) return;
+
+  // A browser may accept currentTime before the underlying MP3 range is
+  // actually seekable, then snap back to zero. Verify after `seeked` and retry
+  // once with enough buffered data before resuming all channels.
+  if (Math.abs(state.clock.snapshot().performanceTime - targetPerformanceTime) >= .05) {
+    state.pendingAudioTime = targetPerformanceTime;
+    await waitForMediaReady(els.backingAudio, 3);
+    if (seekToken !== state.transportSeekToken) return;
+    applyPendingAudioSeek();
+    await waitForMediaSeek(els.backingAudio);
+  }
+  if (seekToken !== state.transportSeekToken) return;
+  if (Math.abs(state.clock.snapshot().performanceTime - targetPerformanceTime) >= .08) {
+    state.transportSeekResumeRequested = false;
+    showToast('Audio non ancora pronto per il salto. Riprova.');
+    updatePlaybackButton();
+    render();
+    return;
+  }
+
+  for (const audio of state.voiceStemAudio.values()) {
+    if (audio.readyState < 1) continue;
+    try { audio.currentTime = els.backingAudio.currentTime; } catch (_) { /* Playback can still use the master. */ }
+  }
+
+  const resume = state.transportSeekResumeRequested;
+  state.transportSeekResumeRequested = false;
+  if (resume) {
+    try {
+      await state.playbackMixer.resume(media);
+      syncBackingLevel();
+      syncVoiceStemLevels();
+      await state.clock.play();
+    } catch (error) {
+      console.error('Measure navigation failed', error);
+      showToast('Salto alla battuta non riuscito. Riprova.');
+    }
+  }
+  updatePlaybackButton();
+  render();
 }
 
 function seekToMeasure(index, autoPlay = false, preRoll = true) {
@@ -3495,7 +3565,7 @@ function restorePreferences() {
   // Playback position is session-only. Opening a piece must always begin at
   // the first measure instead of restoring a stale position from localStorage.
   state.selectedMeasureIndex = 0;
-  els.playbackSpeed.value = ['0.5', '0.75', '1'].includes(saved.speed) ? saved.speed : '1';
+  els.playbackSpeed.value = ['0.8', '0.9', '1'].includes(saved.speed) ? saved.speed : '1';
   els.volume.value = Number.isFinite(Number(saved.volume)) ? Math.max(0, Math.min(100, Number(saved.volume))) : 62;
   els.metronomeVolume.value = Number.isFinite(Number(saved.metronome)) ? Math.max(0, Math.min(100, Number(saved.metronome))) : 0;
   // The click timing is deliberately fixed: legacy saved values must not
@@ -3604,6 +3674,8 @@ function bindScorePitchDivider() {
 }
 
 function changePart(partId) {
+  state.transportSeekToken += 1;
+  state.transportSeekResumeRequested = false;
   state.attemptActive = false;
   state.resumeCheckpointBeat = null;
   if (state.clock.running) state.clock.pause();
@@ -3787,8 +3859,8 @@ function bindControls() {
     if (state.benchmark.capture) { event.preventDefault(); els.benchmarkStatus.textContent = 'Interrompi o scarta prima la registrazione attiva.'; }
   });
   els.neuralLive.addEventListener('click', toggleNeuralLive);
-  els.previousMeasure.addEventListener('click', () => seekToMeasure(Math.max(0, measureIndexAt(playbackSnapshot().beat) - 1), false, false));
-  els.nextMeasure.addEventListener('click', () => seekToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(playbackSnapshot().beat) + 1), false, false));
+  els.previousMeasure.addEventListener('click', () => void navigateToMeasure(Math.max(0, measureIndexAt(playbackSnapshot().beat) - 1)));
+  els.nextMeasure.addEventListener('click', () => void navigateToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(playbackSnapshot().beat) + 1)));
   els.partSelector.addEventListener('change', () => changePart(els.partSelector.value));
   els.playbackSpeed.addEventListener('change', async () => {
     state.attemptActive = false; state.resumeCheckpointBeat = null; state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
@@ -3944,8 +4016,8 @@ function bindControls() {
       void togglePlayback();
       return;
     }
-    if (event.code === 'ArrowLeft' && event.altKey) seekToMeasure(measureIndexAt(playbackSnapshot().beat) - 1, false, false);
-    if (event.code === 'ArrowRight' && event.altKey) seekToMeasure(measureIndexAt(playbackSnapshot().beat) + 1, false, false);
+    if (event.code === 'ArrowLeft' && event.altKey) void navigateToMeasure(measureIndexAt(playbackSnapshot().beat) - 1);
+    if (event.code === 'ArrowRight' && event.altKey) void navigateToMeasure(measureIndexAt(playbackSnapshot().beat) + 1);
   });
   els.scoreImage.addEventListener('load', () => { state.activeScoreSegment = null; els.scoreLoading.hidden = true; render(); });
   els.scoreImage.addEventListener('error', () => { els.scoreLoading.hidden = false; els.scoreLoading.textContent = 'Spartito non disponibile'; });
@@ -4069,6 +4141,8 @@ function bindLibraryPicker() {
 }
 
 function restartPractice() {
+  state.transportSeekToken += 1;
+  state.transportSeekResumeRequested = false;
   state.clock.pause();
   clearPitchHistory();
   state.attemptActive = false;
@@ -4084,6 +4158,8 @@ function restartPractice() {
 
 async function loadPracticePiece(pieceId, { partId = null, updateHistory = false } = {}) {
   const generation = ++practiceLoadGeneration;
+  state.transportSeekToken += 1;
+  state.transportSeekResumeRequested = false;
   if (state.runtime) savePitchHistory();
   if (state.clock?.running) state.clock.pause();
   pauseVoiceStems();

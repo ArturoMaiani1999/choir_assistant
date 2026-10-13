@@ -257,7 +257,7 @@ def main() -> int:
               state.accompanimentLevel = 0;
               state.transpose = 3;
               state.playbackMixer.setTranspose(3);
-              els.playbackSpeed.value = '0.75';
+              els.playbackSpeed.value = '0.9';
               await applyVoiceSelection([state.runtime.selectedPartId]);
               await new Promise(resolve => setTimeout(resolve, 80));
               const pitchRatios = [...state.playbackMixer.channels.entries()]
@@ -285,23 +285,30 @@ def main() -> int:
                 muted: els.backingAudio.muted,
                 level: state.playbackMixer.levels.get(els.backingAudio)
               };
-              els.playbackSpeed.value = '0.5';
+              els.playbackSpeed.value = '0.8';
               await applyVoiceSelection([state.runtime.selectedPartId]);
-              custom.halfSpeed = state.clock.snapshot().speed;
-              custom.halfSpeedPreservesPitch = els.backingAudio.preservesPitch
+              custom.slowestSpeed = state.clock.snapshot().speed;
+              custom.slowestSpeedPreservesPitch = els.backingAudio.preservesPitch
                 && [...state.voiceStemAudio.values()].every(audio => audio.preservesPitch);
               state.clock.pause();
               seekToMeasure(0, false, false);
+              await state.clock.play();
+              await new Promise(resolve => setTimeout(resolve, 80));
               document.querySelector('#next-measure').click();
+              const navigationDeadline = performance.now() + 4000;
+              while ((state.pendingAudioTime != null || !state.clock.running) && performance.now() < navigationDeadline) {
+                await new Promise(resolve => setTimeout(resolve, 25));
+              }
               const navigationIndex = Math.min(1, state.occurrenceMeasures.length - 1);
               const navigationSeconds = state.runtime.secondsAtBeat(state.occurrenceMeasures[navigationIndex].startBeat);
               const navigationSeekable = [...Array(els.backingAudio.seekable.length).keys()]
                 .some(index => els.backingAudio.seekable.start(index) <= navigationSeconds
                   && els.backingAudio.seekable.end(index) + .01 >= navigationSeconds);
-              const navigation = {canSeek:navigationSeekable, index:navigationIndex,
+              const navigation = {canSeek:navigationSeekable, index:navigationIndex, running:state.clock.running,
                 expectedBeat:state.occurrenceMeasures[navigationIndex].startBeat,
                 actualBeat:playbackSnapshot().beat,
                 cue:document.querySelector('#scoring-cue').textContent};
+              state.clock.pause();
               return {available: allIds.length, beforeSwitch, full, own, custom, navigation};
             })()""")
             call_id += 1
@@ -600,13 +607,14 @@ def main() -> int:
                 assert urlsplit(soprano_only["source"]).path.endswith("/voice-P1.mp3"), soprano_only
                 assert soprano_only["masterPartId"] == "P1" and soprano_only["otherStems"] == 0, soprano_only
                 assert soprano_only["muted"] is False and soprano_only["level"] > 0, soprano_only
-                assert custom["speed"] == .75 and custom["preservesPitch"], custom
-                assert custom["halfSpeed"] == .5 and custom["halfSpeedPreservesPitch"], custom
+                assert custom["speed"] == .9 and custom["preservesPitch"], custom
+                assert custom["slowestSpeed"] == .8 and custom["slowestSpeedPreservesPitch"], custom
                 assert custom["workletReady"] and custom["pitchRatios"], custom
                 expected_ratio = 2 ** (3 / 12)
                 assert all(abs(value - expected_ratio) < .001 for value in custom["pitchRatios"]), custom
                 navigation = voice_mix["navigation"]
-                assert abs(navigation["actualBeat"] - navigation["expectedBeat"]) < .01, navigation
+                assert navigation["running"], navigation
+                assert navigation["expectedBeat"] <= navigation["actualBeat"] < navigation["expectedBeat"] + .2, navigation
                 assert "ingresso da 2" in navigation["cue"].lower(), navigation
             assert microphone == {"status": "active", "worker": True, "workerDisabled": False}, microphone
             assert preliminary_result["pausedWithoutDialog"] and preliminary_result["feedbackVisible"], preliminary_result

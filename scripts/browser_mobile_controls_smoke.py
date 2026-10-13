@@ -125,12 +125,12 @@ def main() -> None:
               assert(document.querySelector('#transpose-value').textContent === '±0', 'semitones remain visible');
               assert(getComputedStyle(speed).display !== 'none' && speed.getBoundingClientRect().width > 0,
                 'speed control is visible on mobile');
-              assert([...speedSelect.options].map(option => option.textContent).join(',') === '100%,75%,50%',
-                'speed control offers 100, 75 and 50 percent');
-              speedSelect.value = '0.75';
+              assert([...speedSelect.options].map(option => option.textContent).join(',') === '100%,90%,80%',
+                'speed control offers 100, 90 and 80 percent');
+              speedSelect.value = '0.9';
               speedSelect.dispatchEvent(new Event('change'));
               await new Promise(resolve => setTimeout(resolve, 50));
-              assert(state.clock.snapshot().speed === .75, 'mobile speed control updates playback speed');
+              assert(state.clock.snapshot().speed === .9, 'mobile speed control updates playback speed');
               assert(getComputedStyle(mixerButton).display === 'none', 'standalone mobile mixer button is hidden');
               assert(settingsButton.querySelector('.settings-label').getBoundingClientRect().width === 0,
                 'mobile settings text is replaced');
