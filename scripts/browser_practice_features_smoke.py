@@ -106,8 +106,8 @@ def main():
               els.settingsAudioOutputBluetooth.checked = true;
               els.settingsAudioOutputBluetooth.dispatchEvent(new Event('change'));
               assert(state.audioOutputType === 'bluetooth' && state.pianoRollDelayMs === 270
-                && state.plumeSettings.timeAdvanceMs === 550,
-                'Bluetooth applies 550 ms only to the vocal trace advance');
+                && state.plumeSettings.timeAdvanceMs === 320,
+                'Bluetooth applies 320 ms only to the vocal trace advance');
               els.settingsAudioOutputStandard.checked = true;
               els.settingsAudioOutputStandard.dispatchEvent(new Event('change'));
               assert(state.pianoRollDelayMs === 270 && state.plumeSettings.timeAdvanceMs === 270,

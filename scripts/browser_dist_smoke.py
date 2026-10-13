@@ -172,7 +172,7 @@ def main() -> int:
             assert visual_delay["initial"]["ms"] == 270 and visual_delay["initial"]["label"] == "270 ms", visual_delay
             assert visual_delay["initial"]["beat"] < visual_delay["actualBeat"], visual_delay
             assert visual_delay["bluetooth"] == {
-                "type": "bluetooth", "delay": 270, "advance": 550, "stored": "bluetooth", "max": "600",
+                "type": "bluetooth", "delay": 270, "advance": 320, "stored": "bluetooth", "max": "600",
                 "firstSettingId": "settings-audio-output-heading",
             }, visual_delay
             assert visual_delay["expired"] is True, visual_delay

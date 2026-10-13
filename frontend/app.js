@@ -36,7 +36,7 @@ const AUDIO_OUTPUT_CONFIRMATION_TTL_MS = 30 * 60 * 1000;
 const PIANO_ROLL_DELAY_MAX_MS = 600;
 const PIANO_ROLL_DELAY_DEFAULT_MS = 270;
 const STANDARD_PLUME_ADVANCE_MS = 270;
-const BLUETOOTH_PLUME_ADVANCE_MS = 550;
+const BLUETOOTH_PLUME_ADVANCE_MS = 320;
 const METRONOME_OFFSET_MS = 50;
 let audioOutputExpiryTimer = null;
 
@@ -3735,7 +3735,7 @@ function bindControls() {
         ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
       updateDetectorSettingsUi(); savePreferences(); render();
       showToast(control.value === 'bluetooth'
-        ? 'Bluetooth confermato: anticipo traccia vocale 550 ms.'
+        ? 'Bluetooth confermato: anticipo traccia vocale 320 ms.'
         : 'Uscita non Bluetooth: anticipo traccia vocale 270 ms.');
     });
   }
