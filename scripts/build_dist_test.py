@@ -6,11 +6,51 @@ import json
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 import build_dist
 
 
 class BuildDistTest(unittest.TestCase):
+    def test_piece_build_publishes_continuous_scores(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            frontend = root / "frontend"
+            source = frontend / "library-assets" / "test-piece"
+            destination = root / "dist"
+            source.mkdir(parents=True)
+            destination.mkdir()
+            metadata = {
+                "piece_id": "test-piece",
+                "title": "Test piece",
+                "score_version_id": "test-v1",
+                "monodic": False,
+                "parts": [{"id": "P1", "name": "Soprano"}],
+                "score_pages": ["score-1.svg"],
+                "part_pages": {"P1": ["part-P1-1.svg"]},
+                "continuous_part_scores": {"P1": "part-P1-continuous-1.svg"},
+            }
+            audio_manifest = {
+                "mixes": {"P1": {"file": "score.mp3", "files_by_speed": {}}},
+                "full_mix_file": "score.mp3",
+                "voice_stems": {},
+            }
+            (source / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
+            (source / "audio-manifest.json").write_text(json.dumps(audio_manifest), encoding="utf-8")
+            for name in ("score.json", "glyph-map.json", "score-1.svg", "part-P1-1.svg",
+                         "part-P1-continuous-1.svg", "score.mp3"):
+                (source / name).write_text(name, encoding="utf-8")
+
+            with mock.patch.object(build_dist, "FRONTEND", frontend):
+                build_dist.build_piece({"id": "test-piece"}, destination)
+
+            bundle = json.loads(
+                (destination / "library-assets" / "test-piece" / "bundle.json").read_text(encoding="utf-8")
+            )
+            continuous = "library-assets/test-piece/part-P1-continuous-1.svg"
+            self.assertEqual(bundle["assets"]["continuous_scores"], {"P1": continuous})
+            self.assertTrue((destination / continuous).is_file())
+
     def test_placeholder_rights_note_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             config = Path(directory) / "repertoire.json"

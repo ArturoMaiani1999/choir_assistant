@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-09-28
+**Last reviewed:** 2026-10-13
 
 Status: stable frontend decisions, 9 September 2026.
 
@@ -19,7 +19,7 @@ Practice always shows one selected vocal part. The full score belongs to the sep
 
 ## Temporal model
 
-During real accompaniment, `MediaPlaybackClock` reads `HTMLAudioElement.currentTime`; this audio-derived score time is authoritative for score cursor, pitch timeline, transport and mock voice samples. RAF only redraws. Score notation stays stationary within an event-mapped system/segment and its cursor moves. In the pitch lane, `NOW_X_RATIO = 0.375` stays fixed and events move right-to-left. These positions are intentionally not geometrically aligned.
+During real accompaniment, `MediaPlaybackClock` reads `HTMLAudioElement.currentTime`; this audio-derived score time is authoritative for score cursor, pitch timeline, transport and mock voice samples. RAF only redraws. The selected-part score is one horizontal continuous system: its cursor follows score time and the sheet translates only enough to keep that cursor visible. In the pitch lane, `NOW_X_RATIO = 0.375` stays fixed and events move right-to-left. These positions are intentionally not geometrically aligned.
 
 Measure selection stores two positions: playback begins at the preceding performance occurrence and evaluation begins at the selected occurrence. The frontend represents the distinction; scoring remains mocked.
 
@@ -39,7 +39,9 @@ The pitch Y viewport is stable for one performance occurrence. Its range is calc
 
 ## Score rendering
 
-The current prototype uses the existing selected-part SVG exports plus their event-to-glyph map. Target events are associated with source events by occurrence/part/measure ordinal; no target-ID parsing is used. Mapped Y coordinates are clustered into page/system identities. A system/segment transform remains stable while its cursor moves and changes only at a mapped boundary. This is real draft notation, not arbitrary HTML notation. It remains a partial renderer: final production must consume an approved score version and expose stable event/system bounds directly.
+Practice consumes a dedicated one-staff continuous SVG for the selected part; paged SVG files remain available only as a compatibility fallback and for the separate reading view. The cursor and the piano roll share the canonical playback beat. Score geometry is indexed by written-measure identity, not by performance-occurrence index: repeats therefore return to the same graphical measure instead of advancing into a nonexistent duplicate. Repeat and final barlines are collapsed into one semantic boundary before measure slots are built. The production build must copy each `continuous_part_scores` asset and publish it as `continuous_scores` in the piece bundle; a Chromium smoke test verifies these invariants on desktop and mobile.
+
+This is real draft notation, not arbitrary HTML notation. Horizontal position inside a measure currently follows canonical beat progress between its barlines. A future renderer may expose stable event-to-glyph bounds for note-level highlighting, but it must preserve the same audio-derived clock and written-measure mapping.
 
 ## Responsive behavior
 

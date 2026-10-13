@@ -369,6 +369,7 @@ function buildOccurrenceMeasures(runtime) {
       const written = runtime.measures.find((measure) => measure.id === occurrence.writtenMeasureId);
       return {
         id: occurrence.id,
+        writtenMeasureId: occurrence.writtenMeasureId,
         number: written?.number ?? '?',
         startBeat: occurrence.startBeat,
         endBeat: occurrence.endBeat,
@@ -381,7 +382,7 @@ function buildOccurrenceMeasures(runtime) {
   let beat = 0;
   return runtime.measures.map((measure) => {
     const duration = measure.timeSignatureNumerator * (4 / measure.timeSignatureDenominator);
-    const item = { id: measure.id, number: measure.number, startBeat: beat, endBeat: beat + duration, timeSignatureNumerator: measure.timeSignatureNumerator, timeSignatureDenominator: measure.timeSignatureDenominator, beatOffset: measure.beatOffset ?? 0 };
+    const item = { id: measure.id, writtenMeasureId: measure.id, number: measure.number, startBeat: beat, endBeat: beat + duration, timeSignatureNumerator: measure.timeSignatureNumerator, timeSignatureDenominator: measure.timeSignatureDenominator, beatOffset: measure.beatOffset ?? 0 };
     beat += duration;
     return item;
   });
@@ -402,14 +403,18 @@ function sourceGlyph(event) {
 }
 
 function fallbackScorePosition(beat) {
-  const index = measureIndexAt(beat);
-  const measure = state.occurrenceMeasures[index];
+  const occurrenceIndex = measureIndexAt(beat);
+  const measure = state.occurrenceMeasures[occurrenceIndex];
+  const writtenIndex = measure?.writtenMeasureId
+    ? state.runtime.measures.findIndex((candidate) => candidate.id === measure.writtenMeasureId)
+    : occurrenceIndex;
+  const slotIndex = writtenIndex >= 0 ? writtenIndex : occurrenceIndex;
   const defaultMeasureWidths = [[13, 32], [32, 55], [55, 73], [73, 93]];
   const pages = state.bundleManifest?.assets?.score_pages?.[state.runtime.selectedPartId] ?? [];
-  const slot = state.fallbackScoreSlots[index] ?? (pages.length ? (() => {
-    const [startX, endX] = defaultMeasureWidths[index % defaultMeasureWidths.length];
-    return { page: Math.min(pages.length, Math.floor(index / defaultMeasureWidths.length) + 1),
-      systemId: `estimated-p${Math.floor(index / defaultMeasureWidths.length) + 1}`, startX, endX,
+  const slot = state.fallbackScoreSlots[slotIndex] ?? (pages.length ? (() => {
+    const [startX, endX] = defaultMeasureWidths[slotIndex % defaultMeasureWidths.length];
+    return { page: Math.min(pages.length, Math.floor(slotIndex / defaultMeasureWidths.length) + 1),
+      systemId: `estimated-p${Math.floor(slotIndex / defaultMeasureWidths.length) + 1}`, startX, endX,
       y_percent: 17.4, systemCenterY: 17.4 };
   })() : null);
   if (!measure || !slot) return null;
@@ -738,15 +743,30 @@ function scorePageFallbackSlots(svg, page) {
   }).filter((line) => line.x1 != null && line.y != null && line.x2 != null).sort((a, b) => a.y - b.y);
   const barLines = [...document.querySelectorAll('.BarLine')].map((line) => {
     const points = (line.getAttribute('points') ?? '').trim().split(/[\s,]+/).map(Number);
-    return { x: points[0], y1: points[1], y2: points[3] };
+    return { x: points[0], y1: points[1], y2: points[3], strokeWidth: Number(line.getAttribute('stroke-width')) || 0 };
   }).filter((line) => line.x != null && line.y1 != null && line.y2 != null);
   const musicalSymbols = [...document.querySelectorAll('.Note, .Rest')].map((symbol) => {
     const match = (symbol.getAttribute('d') ?? '').match(/^\s*M\s*([-+\d.eE]+)[,\s]+([-+\d.eE]+)/);
     return match ? { x: Number(match[1]), y: Number(match[2]) } : null;
   }).filter((symbol) => symbol && Number.isFinite(symbol.x) && Number.isFinite(symbol.y));
-  // Double final barlines contain two nearby SVG BarLine elements.  On a
-  // very wide continuous score their gap can exceed the old fixed threshold
-  // and masquerade as an extra measure, so scale the minimum with the viewBox.
+  // MuseScore draws repeat/final boundaries as multiple nearby polylines. Treat
+  // those strokes as one semantic boundary before deriving measure slots.
+  const collapseBarlineComponents = (lines) => {
+    const boundaries = [];
+    lines.sort((a, b) => a.x - b.x).forEach((line) => {
+      const previous = boundaries.at(-1);
+      const componentGap = previous
+        ? Math.max(40, Math.max(previous.strokeWidth, line.strokeWidth) * 2)
+        : 0;
+      if (previous && line.x - previous.x <= componentGap) {
+        previous.x = Math.max(previous.x, line.x);
+        previous.strokeWidth = Math.max(previous.strokeWidth, line.strokeWidth);
+      } else {
+        boundaries.push({ ...line });
+      }
+    });
+    return boundaries.map((line) => line.x);
+  };
   const minimumMeasureWidth = Math.max(40, width * .001);
   const slots = [];
   for (let offset = 0, systemIndex = 0; offset + 4 < staffLines.length; offset += 5, systemIndex += 1) {
@@ -754,8 +774,10 @@ function scorePageFallbackSlots(svg, page) {
     const startX = Math.min(...lines.map((line) => line.x1));
     const endX = Math.max(...lines.map((line) => line.x2));
     const centerY = lines.reduce((sum, line) => sum + line.y, 0) / lines.length;
-    const barXs = [...new Set(barLines.filter((line) => Math.abs((line.y1 + line.y2) / 2 - centerY) < 420
-      && line.x > startX + 20 && line.x <= endX + 25).map((line) => Math.round(line.x)).sort((a, b) => a - b))];
+    const barXs = collapseBarlineComponents(barLines.filter(
+      (line) => Math.abs((line.y1 + line.y2) / 2 - centerY) < 420
+        && line.x > startX + 20 && line.x <= endX + 25,
+    ));
     let left = startX;
     for (let barIndex = 0; barIndex < barXs.length; barIndex += 1) {
       const right = barXs[barIndex];
@@ -789,8 +811,8 @@ async function buildFallbackScoreGeometry(partId) {
     }));
     if (state.runtime.selectedPartId !== partId) return;
     state.fallbackScoreSlots = contents.flatMap((svg, index) => scorePageFallbackSlots(svg, index + 1));
-    if (!state.scoreGeometry.size && state.fallbackScoreSlots.length !== state.occurrenceMeasures.length) {
-      console.warn('Mappa di fallback spartito incompleta', { slots: state.fallbackScoreSlots.length, measures: state.occurrenceMeasures.length });
+    if (!state.scoreGeometry.size && state.fallbackScoreSlots.length !== state.runtime.measures.length) {
+      console.warn('Mappa di fallback spartito incompleta', { slots: state.fallbackScoreSlots.length, writtenMeasures: state.runtime.measures.length });
     }
   } catch (error) {
     state.fallbackScoreSlots = [];

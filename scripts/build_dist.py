@@ -200,6 +200,7 @@ def build_piece(piece: dict, destination: Path) -> dict:
     required.update(metadata.get("score_pages", []))
     for pages in metadata.get("part_pages", {}).values():
         required.update(pages)
+    required.update(metadata.get("continuous_part_scores", {}).values())
     audio_manifest = json.loads((source / "audio-manifest.json").read_text(encoding="utf-8"))
     for mix in audio_manifest.get("mixes", {}).values():
         required.add(mix["file"])
@@ -223,9 +224,16 @@ def build_piece(piece: dict, destination: Path) -> dict:
         {"id": "mono-tenore", "name": "Tenore"}, {"id": "mono-basso", "name": "Basso"},
     ] if metadata.get("monodic") else metadata["parts"])
     part_pages = {key: [f"{root}/{name}" for name in value] for key, value in metadata["part_pages"].items()}
+    continuous_scores = {
+        key: f"{root}/{name}"
+        for key, name in metadata.get("continuous_part_scores", {}).items()
+    }
     if metadata.get("monodic"):
         written = next(iter(part_pages.values()))
         part_pages = {part_id: written for part_id in part_ids}
+        if continuous_scores:
+            written_continuous_score = next(iter(continuous_scores.values()))
+            continuous_scores = {part_id: written_continuous_score for part_id in part_ids}
     bundle = {
         "piece_id": piece_id, "score_version_id": metadata["score_version_id"],
         "published": True, "local_source": False, "monodic": bool(metadata.get("monodic")), "parts": parts,
@@ -234,6 +242,7 @@ def build_piece(piece: dict, destination: Path) -> dict:
             "score": f"{root}/score.json", "glyph_map": f"{root}/glyph-map.json",
             "audio_manifest": f"{root}/audio-manifest.json", "audio_root": root,
             "full_score_pages": [f"{root}/{name}" for name in metadata["score_pages"]], "score_pages": part_pages,
+            "continuous_scores": continuous_scores,
         },
     }
     (target / "bundle.json").write_text(json.dumps(bundle, ensure_ascii=False), encoding="utf-8")
