@@ -9,9 +9,38 @@ const cents = (hz, reference) => 1200 * Math.log2(hz / reference);
 const frame = (smoother, hz, index) => smoother.update(estimate(hz), index * 20);
 
 {
+  const normal = new PitchSmoother();
+  const quietEstimate = { hz: 220, rms: .00001, clarity: .9, confidence: .22 };
+  assert.equal(normal.update(quietEstimate, 0).rejectionReason, 'low-confidence', 'normal mode keeps the 30% confidence gate');
+  const weakVoice = new PitchSmoother();
+  weakVoice.configure({ minConfidence: .20 });
+  const frames = [0, 1, 2].map(index => weakVoice.update(quietEstimate, index * 20));
+  assert.equal(frames.at(-1).accepted, true, 'weak-voice preset admits a stable low-confidence pitch');
+
+  const permissive = new PitchSmoother();
+  permissive.configure({ minClarity: .35, minConfidence: .12, weakSignalHoldFrames: 2 });
+  [0, 1, 2].forEach(index => permissive.update({ ...quietEstimate, confidence: .14 }, index * 20));
+  const firstDropout = permissive.update({ hz: null, rms: .00001, clarity: 0, confidence: 0 }, 60);
+  const secondDropout = permissive.update({ hz: null, rms: .00001, clarity: 0, confidence: 0 }, 80);
+  const expiredDropout = permissive.update({ hz: null, rms: .00001, clarity: 0, confidence: 0 }, 100);
+  assert.equal(firstDropout.rejectionReason, 'weak-signal-held');
+  assert.equal(secondDropout.accepted, true, 'weak mode bridges a two-frame microphone dropout');
+  assert.equal(expiredDropout.accepted, false, 'weak mode does not invent pitch through a sustained dropout');
+}
+
+{
   const smoother = new PitchSmoother();
   const frames = [440, 440, 440].map((hz, index) => frame(smoother, hz, index));
   assert.equal(frames.at(-1).accepted, true, 'stable pitch is accepted after warm-up');
+}
+
+{
+  const smoother = new PitchSmoother();
+  smoother.configure({ minClarity: .32, minConfidence: .10, candidateConsistencyCents: 220 });
+  const wanderingNoise = [220, 330, 440].map((hz, index) => frame(smoother, hz, index));
+  assert.equal(wanderingNoise.at(-1).accepted, false, 'three unrelated YIN minima are not published as a weak voice');
+  const coherentVoice = [440, 440].map((hz, index) => frame(smoother, hz, index + 3));
+  assert.equal(coherentVoice.at(-1).accepted, true, 'a coherent weak voice is published after three matching observations');
 }
 
 {
@@ -41,12 +70,25 @@ const frame = (smoother, hz, index) => smoother.update(estimate(hz), index * 20)
   const quietTone = Float32Array.from({ length: 1024 }, (_, index) => .0008 * Math.sin(2 * Math.PI * 220 * index / sampleRate));
   assert.equal(global.ChoirPitch.detectPitch(quietTone, sampleRate).hz, null, 'default RMS threshold rejects a very quiet input');
   assert.ok(Number.isFinite(global.ChoirPitch.detectPitch(quietTone, sampleRate, { rmsThreshold: .0001 }).hz), 'configurable RMS threshold can admit a quiet periodic input');
-  const whisperedTone = Float32Array.from({ length: 1024 }, (_, index) => .00008 * Math.sin(2 * Math.PI * 220 * index / sampleRate));
-  const whispered = global.ChoirPitch.detectPitch(whisperedTone, sampleRate, { rmsThreshold: .00001 });
+  const whisperedTone = Float32Array.from({ length: 1024 }, (_, index) => .000008 * Math.sin(2 * Math.PI * 220 * index / sampleRate));
+  const whispered = global.ChoirPitch.detectPitch(whisperedTone, sampleRate, { rmsThreshold: .000001 });
   assert.ok(Number.isFinite(whispered.hz) && whispered.confidence >= .3, 'extended sensitivity admits a periodic whisper-level input to the tracker');
   const smoother = new PitchSmoother();
   const tracked = [0, 1, 2].map(index => smoother.update(whispered, index * 20));
   assert.equal(tracked.at(-1).accepted, true, 'whisper-level pitch survives detector and tracker gates');
+  const weakMode = global.ChoirPitch.detectPitch(whisperedTone, sampleRate,
+    { rmsThreshold: .000001, yinThreshold: .68, levelConfidenceFloor: .68 });
+  assert.ok(weakMode.confidence > whispered.confidence,
+    'weak voice decouples confidence from amplitude after the RMS gate is crossed');
+}
+
+{
+  const sampleRate = 48000;
+  const lowBassHz = 82.41;
+  const lowBass = Float32Array.from({ length: 2048 }, (_, index) => .08 * Math.sin(2 * Math.PI * lowBassHz * index / sampleRate));
+  const results = Array.from({ length: 12 }, () => global.ChoirPitch.detectPitch(lowBass, sampleRate));
+  assert.ok(results.every(result => Math.abs(cents(result.hz, lowBassHz)) < 5),
+    'the pooled detector remains accurate down to E2 even with a compact 2048-sample frame');
 }
 
 {

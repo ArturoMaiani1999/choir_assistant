@@ -1,0 +1,180 @@
+(function (root, factory) {
+  const api = factory();
+  if (typeof module === 'object' && module.exports) module.exports = api;
+  else root.ChoirPitchShared = api;
+})(typeof globalThis !== 'undefined' ? globalThis : this, function () {
+  'use strict';
+  const PREFERENCE_KEY = 'choir-detector-settings:v1';
+  const SETTINGS_DEFAULTS_VERSION = 4;
+  const DETECTOR_DEFAULTS = Object.freeze({ rmsThreshold: .000002, weakVoiceMode: false, fastAlpha: .65, slowAlpha: .65, medianWindowFrames: 3 });
+  const LEGACY_DETECTOR_DEFAULTS = Object.freeze({ rmsThreshold: .001, fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 });
+  const VERSION_1_DETECTOR_DEFAULTS = Object.freeze({ rmsThreshold: .0001, fastAlpha: .6, slowAlpha: .65, medianWindowFrames: 3 });
+  const RECOGNITION_MODES = Object.freeze({
+    normal: Object.freeze({ minClarity: .45, minConfidence: .30, yinThreshold: .42, weakSignalHoldFrames: 0 }),
+    // Weak voice deliberately makes RMS the only amplitude gate. Periodicity
+    // and short-term continuity still protect against room noise.
+    weakVoice: Object.freeze({ minClarity: .32, minConfidence: .10, yinThreshold: .68,
+      levelConfidenceFloor: .68, rmsThresholdCeiling: .00003, weakSignalHoldFrames: 6,
+      candidateConsistencyCents: 220 }),
+  });
+  const PLUME_ADVANCE_MAX_MS = 600;
+  const PLUME_WIDTH_PREFERENCE_VERSION = 2;
+  const PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1.75, color: '#72e0d2', timeAdvanceMs: 270 });
+  const LEGACY_PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1, timeAdvanceMs: 200 });
+  const VERSION_1_PLUME_DEFAULTS = Object.freeze({ width: 2.05, intensity: 1.75, timeAdvanceMs: 310 });
+  const VERSION_2_3_PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1.75, timeAdvanceMs: 280 });
+  // Visual density, NOT a calibrated F0 posterior or confidence interval.
+  const AURORA = Object.freeze({ trailSeconds: 2.8, historyOpacity: .08, sigmaSemitones: .16,
+    palette: Object.freeze([[114,224,210], [114,224,210], [114,224,210]]) });
+  const surfaces = new WeakMap();
+  const smoothstep = (value) => { const v = Math.max(0, Math.min(1, value)); return v * v * (3 - 2 * v); };
+  function readPreferences(storage = globalThis.localStorage) {
+    let saved = {};
+    try { saved = JSON.parse(storage?.getItem(PREFERENCE_KEY)) || {}; } catch (_) {}
+    const currentDefaults = saved.settingsDefaultsVersion === SETTINGS_DEFAULTS_VERSION;
+    const previousDetectorDefaults = saved.settingsDefaultsVersion === 1
+      ? VERSION_1_DETECTOR_DEFAULTS : LEGACY_DETECTOR_DEFAULTS;
+    const previousPlumeDefaults = saved.settingsDefaultsVersion === 1
+      ? VERSION_1_PLUME_DEFAULTS : saved.settingsDefaultsVersion === 2 || saved.settingsDefaultsVersion === 3
+        ? VERSION_2_3_PLUME_DEFAULTS : LEGACY_PLUME_DEFAULTS;
+    const migratedNumber = (key, legacyDefault, currentDefault) => {
+      const value = Number(saved[key]);
+      if (!Number.isFinite(value)) return currentDefault;
+      return !currentDefaults && Math.abs(value - legacyDefault) < 1e-9 ? currentDefault : value;
+    };
+    const savedPlumeWidth = Number(saved.v1PlumeWidth);
+    const legacyInitialPlumeWidth = saved.plumeWidthPreferenceVersion !== PLUME_WIDTH_PREFERENCE_VERSION
+      && Math.abs(savedPlumeWidth - 1) < 1e-9;
+    return {
+      detector: {
+        rmsThreshold: migratedNumber('v1RmsThreshold', previousDetectorDefaults.rmsThreshold, DETECTOR_DEFAULTS.rmsThreshold),
+        weakVoiceMode: saved.v1WeakVoiceMode === true,
+        fastAlpha: migratedNumber('v1FastAlpha', previousDetectorDefaults.fastAlpha, DETECTOR_DEFAULTS.fastAlpha),
+        slowAlpha: migratedNumber('v1SlowAlpha', previousDetectorDefaults.slowAlpha, DETECTOR_DEFAULTS.slowAlpha),
+        medianWindowFrames: migratedNumber('v1MedianWindowFrames', previousDetectorDefaults.medianWindowFrames, DETECTOR_DEFAULTS.medianWindowFrames),
+      },
+      plume: {
+        width: legacyInitialPlumeWidth ? PLUME_DEFAULTS.width
+          : migratedNumber('v1PlumeWidth', previousPlumeDefaults.width, PLUME_DEFAULTS.width),
+        intensity: migratedNumber('v1PlumeIntensity', previousPlumeDefaults.intensity, PLUME_DEFAULTS.intensity),
+        color: '#72e0d2',
+        timeAdvanceMs: Math.max(0, Math.min(PLUME_ADVANCE_MAX_MS,
+          migratedNumber('v1PlumeAdvanceMs', previousPlumeDefaults.timeAdvanceMs, PLUME_DEFAULTS.timeAdvanceMs))),
+      },
+    };
+  }
+  function recognitionSettings(detectorSettings = DETECTOR_DEFAULTS) {
+    const mode = detectorSettings.weakVoiceMode ? RECOGNITION_MODES.weakVoice : RECOGNITION_MODES.normal;
+    const requestedRms = Number.isFinite(Number(detectorSettings.rmsThreshold))
+      ? Math.max(0, Number(detectorSettings.rmsThreshold)) : DETECTOR_DEFAULTS.rmsThreshold;
+    return { ...mode, rmsThreshold: Number.isFinite(mode.rmsThresholdCeiling)
+      ? Math.min(requestedRms, mode.rmsThresholdCeiling) : requestedRms };
+  }
+  function plumeSegments(samples, xAt, settings = {}) {
+    const timeAt = settings.timeAt || (sample => sample.time ?? sample.audioTimeSec);
+    const now = settings.currentTime ?? timeAt(samples.at(-1) || {});
+    const review = settings.mode === 'review';
+    // Infer actual observation cadence; ignore silence gaps when estimating it.
+    const deltas = [];
+    for (let i = Math.max(1, samples.length - 96); i < samples.length; i++) {
+      const dt = timeAt(samples[i]) - timeAt(samples[i - 1]);
+      if (dt > 0 && dt < .5) deltas.push(dt);
+    }
+    deltas.sort((a,b) => a-b);
+    const cadence = deltas[Math.floor(deltas.length / 2)] ?? .05;
+    const gap = Math.min(.3, Math.max(.075, cadence * 2.5));
+    const segments = []; let points = [];
+    const close = () => { if (points.length) segments.push(points); points = []; };
+    let start = 0, end = samples.length;
+    if (settings.sortedTimeline) {
+      const lowerBound = (value, coordinate) => {
+        let low = 0, high = samples.length;
+        while (low < high) { const mid = (low+high) >>> 1; if (coordinate(samples[mid]) < value) low = mid+1; else high = mid; }
+        return low;
+      };
+      // Keep all visible history; crop by viewport, never by the colour window.
+      start = Math.max(0, lowerBound(settings.viewportLeft ?? -Infinity, xAt)-1);
+      end = Math.min(samples.length, lowerBound(settings.viewportRight ?? Infinity, xAt)+1);
+      if (!review) end = Math.min(end, lowerBound(now+1e-9, timeAt));
+    }
+    const minConfidence = Number.isFinite(settings.minConfidence) ? settings.minConfidence : .3;
+    for (let index = start; index < end; index++) {
+      const sample = samples[index];
+      const time = timeAt(sample), pitch = sample.displayPitch, confidence = sample.confidence ?? 0;
+      if (!Number.isFinite(time) || !Number.isFinite(pitch) || !Number.isFinite(confidence) || confidence < minConfidence
+          || sample.confirmationState === 'provisional' || (!review && time > now)) { close(); continue; }
+      const x = xAt(sample);
+      if (!Number.isFinite(x)) { close(); continue; }
+      const previous = points.at(-1);
+      if (previous && (x <= previous.x || time <= previous.time || time - previous.time > gap
+          || sample.takeId !== previous.takeId || Math.abs(pitch - previous.pitch) > 3.2)) close();
+      points.push({ x, time, pitch, confidence: Math.min(1, confidence), takeId: sample.takeId });
+    }
+    close();
+    return { segments, now, cadence, gap, inspectedSamples: end-start };
+  }
+  function auroraStyle(age, confidence, settings = {}) {
+    const review = settings.mode === 'review', retainHistory = settings.retainHistory === true;
+    const trail = settings.trailSeconds ?? AURORA.trailSeconds;
+    const fraction = review || retainHistory ? .5 : Math.max(0, Math.min(1, age / trail));
+    const palette = settings.palette || AURORA.palette, phase = Math.min(1.999999, fraction * 2);
+    const index = Math.floor(phase), mix = smoothstep(phase - index);
+    return { color: palette[index].map((v,i) => Math.round(v + (palette[index+1][i]-v)*mix)),
+      alpha: Math.min(1, confidence * (settings.intensity ?? 1)) * (review || retainHistory ? 1
+        : 1 - (1 - (settings.historyOpacity ?? AURORA.historyOpacity)) * smoothstep(fraction)) };
+  }
+  // Linear interpolation per physical pixel column: no overshoot, no DSP smoothing.
+  function visitPlumeColumns(model, left, right, step, settings, visit) {
+    for (const points of model.segments) {
+      if (points.length < 2) continue; // One isolated detection is not a trajectory.
+      const first = points[0], last = points.at(-1); let pair = 1;
+      for (let x = Math.max(left, Math.ceil(first.x / step) * step); x <= Math.min(right, last.x); x += step) {
+        while (pair < points.length - 1 && points[pair].x < x) pair++;
+        const a = points[pair-1], b = points[pair], t = (x-a.x)/(b.x-a.x);
+        const time = a.time + (b.time-a.time)*t, pitch = a.pitch+(b.pitch-a.pitch)*t;
+        const style = auroraStyle(model.now-time, a.confidence+(b.confidence-a.confidence)*t, settings);
+        // Attack/release stay strictly inside observed data, never bridge silence.
+        const edge = Math.min(smoothstep((time-first.time)/.045),
+          last.time < model.now - model.cadence * 1.5 ? smoothstep((last.time-time)/.06) : 1);
+        visit(x, pitch, style.color, style.alpha * edge);
+      }
+    }
+  }
+  function drawConfidencePlume(context, samples, xAt, yAt, minPitch, maxPitch, settings = PLUME_DEFAULTS) {
+    const transform = context.getTransform(), ratio = Math.max(1, Math.abs(transform.a));
+    const left = Math.max(0, settings.trailStartX ?? 0);
+    const right = Math.min(context.canvas.width / ratio, settings.nowX ?? context.canvas.width / ratio);
+    const top = Math.max(0, Math.min(yAt(minPitch), yAt(maxPitch)));
+    const bottom = Math.min(context.canvas.height / ratio, Math.max(yAt(minPitch), yAt(maxPitch)));
+    const width = Math.ceil((right-left)*ratio), height = Math.ceil((bottom-top)*ratio);
+    if (width <= 0 || height <= 0) return;
+    const model = plumeSegments(samples, xAt, { ...settings, viewportLeft: left, viewportRight: right });
+    let surface = surfaces.get(context.canvas);
+    if (!surface) {
+      const canvas = context.canvas.ownerDocument.createElement('canvas');
+      surface = { canvas, ctx: canvas.getContext('2d') }; surfaces.set(context.canvas, surface);
+    }
+    if (!surface.pixels || surface.canvas.width !== width || surface.canvas.height !== height) {
+      surface.canvas.width = width; surface.canvas.height = height;
+      surface.pixels = surface.ctx.createImageData(width, height);
+    }
+    const data = surface.pixels.data; data.fill(0);
+    const sigma = Math.max(1.25, Math.abs(yAt(minPitch + AURORA.sigmaSemitones)-yAt(minPitch)) * Math.max(.4, Math.min(3, settings.width ?? 1))) * ratio;
+    visitPlumeColumns(model, left, right - 1/ratio, 1/ratio, settings, (x,pitch,color,alpha) => {
+      const col = Math.min(width-1, Math.max(0, Math.round((x-left)*ratio))), center = (yAt(pitch)-top)*ratio;
+      for (let row = Math.max(0, Math.floor(center-3.5*sigma)); row <= Math.min(height-1, Math.ceil(center+3.5*sigma)); row++) {
+        const d = (row+.5-center)/sigma;
+        const density = .76*Math.exp(-.5*d*d) + .24*Math.exp(-.5*(d/.48)**2);
+        const offset = (row*width+col)*4, opacity = Math.round(255*alpha*density);
+        if (opacity <= data[offset+3]) continue;
+        data[offset] = color[0]; data[offset+1] = color[1]; data[offset+2] = color[2]; data[offset+3] = opacity;
+      }
+    });
+    surface.ctx.putImageData(surface.pixels, 0, 0);
+    context.save(); context.globalCompositeOperation = 'source-over';
+    context.drawImage(surface.canvas, left, top, width/ratio, height/ratio); context.restore();
+  }
+  return { PREFERENCE_KEY, SETTINGS_DEFAULTS_VERSION, DETECTOR_DEFAULTS, RECOGNITION_MODES, PLUME_ADVANCE_MAX_MS, PLUME_WIDTH_PREFERENCE_VERSION,
+    PLUME_DEFAULTS, AURORA, readPreferences, recognitionSettings,
+    plumeSegments, auroraStyle, visitPlumeColumns, drawConfidencePlume };
+});

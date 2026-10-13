@@ -1,0 +1,69 @@
+{
+  "pieces": [
+    {
+      "id": "ave-verum",
+      "publication_approved": true,
+      "rights_note": "W. A. Mozart, Ave verum corpus K. 618: composizione in pubblico dominio. Trascrizione SATB © Robert Garrigós, CC BY 4.0, https://github.com/robertgarrigos/lilypond-scores/blob/main/Mozart/Ave-verum-k618.ly. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "dove-la-carita",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "o-sacrum",
+      "publication_approved": true,
+      "rights_note": "Approvato da Molfino. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "animachristi-strofa-monodico",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "cantico-dell-agnello",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "santo-frisina",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "ti-cerco-signore-mia-speranza",
+      "publication_approved": true,
+      "rights_note": "Approvato da Massimillo. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "guarda-signore-i-doni",
+      "publication_approved": true,
+      "rights_note": "Approvato da Massimillo. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "gustate-e-vedete",
+      "publication_approved": true,
+      "rights_note": "Approvato da Massimillo. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "saldo-e-il-mio-cuore",
+      "publication_approved": true,
+      "rights_note": "Approvato da Massimillo. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "i-cieli-narrano",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "celebra-il-signore-terra-tutta",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "qui-credit-in-me-non-sitiet",
+      "publication_approved": true,
+      "rights_note": "Mio brano."
+    }
+  ]
+}

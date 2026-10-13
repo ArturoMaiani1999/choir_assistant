@@ -17,9 +17,54 @@
     const width = right - left;
     return left + width * (historyBeats / (historyBeats + futureBeats)) + (eventBeat - currentBeat) * width / (historyBeats + futureBeats);
   }
-  function measureSeekState(measures, selectedIndex) {
+  function melodicIntervalLabel(semitones) {
+    if (!Number.isFinite(semitones)) return null;
+    const distance = Math.abs(semitones);
+    const rounded = Math.round(distance);
+    if (Math.abs(distance - rounded) > 1e-6) return null;
+    return ({ 2: '2', 3: '3m', 4: '3M', 5: '4', 7: '5' })[rounded] ?? null;
+  }
+  function adjacentMelodicIntervals(events, epsilon = .001) {
+    const intervals = [];
+    for (let index = 1; index < events.length; index += 1) {
+      const previous = events[index - 1], next = events[index];
+      const previousEnd = previous.onsetBeat + previous.durationBeats;
+      if (Math.abs(previousEnd - next.onsetBeat) > epsilon) continue;
+      const difference = next.midiPitch - previous.midiPitch;
+      const label = melodicIntervalLabel(difference);
+      if (label) intervals.push({ previous, next, label, direction: Math.sign(difference) });
+    }
+    return intervals;
+  }
+  function measureSeekState(measures, selectedIndex, { preRoll = true } = {}) {
     const safeIndex = Math.max(0, Math.min(measures.length - 1, selectedIndex));
-    return { selectedIndex: safeIndex, playbackStart: measures[Math.max(0, safeIndex - 1)]?.startBeat ?? 0, scoringStart: measures[safeIndex]?.startBeat ?? 0 };
+    const scoringStart = measures[safeIndex]?.startBeat ?? 0;
+    return { selectedIndex: safeIndex,
+      playbackStart: preRoll ? measures[Math.max(0, safeIndex - 1)]?.startBeat ?? 0 : scoringStart,
+      scoringStart };
+  }
+  function attemptResumeState(measures, checkpointBeat) {
+    const endBeat = measures.at(-1)?.endBeat ?? 0;
+    const resumeBeat = Math.max(0, Math.min(endBeat, Number(checkpointBeat) || 0));
+    let resumeIndex = measures.findIndex((measure) => measure.startBeat <= resumeBeat && resumeBeat < measure.endBeat);
+    if (resumeIndex < 0) resumeIndex = Math.max(0, measures.length - 1);
+    return {
+      resumeIndex,
+      playbackStart: measures[Math.max(0, resumeIndex - 1)]?.startBeat ?? 0,
+      scoringStart: resumeBeat,
+    };
+  }
+  function metronomePerformanceTime(performanceTime, speed, offsetMs) {
+    const safeTime = Math.max(0, Number(performanceTime) || 0);
+    const safeSpeed = Math.max(.1, Number(speed) || 1);
+    const safeOffset = Number(offsetMs) || 0;
+    return Math.max(0, safeTime - safeOffset / 1000 * safeSpeed);
+  }
+  function delayedVisualBeat(runtime, performanceTime, speed, delayMs) {
+    const safeTime = Math.max(0, Number(performanceTime) || 0);
+    const safeSpeed = Math.max(.1, Number(speed) || 1);
+    const safeDelay = Math.max(0, Number(delayMs) || 0);
+    return runtime.beatAtSeconds(Math.max(0, safeTime - safeDelay / 1000 * safeSpeed));
   }
   function rhythmGridLines(measures, visibleStart, visibleEnd) {
     const lines = [];
@@ -42,11 +87,33 @@
     });
     return lines.filter((line) => line.beat >= visibleStart && line.beat <= visibleEnd);
   }
+
+  function limitTimelineWindowToMeasures(measures, centerBeat, historyBeats, futureBeats, maximumMeasures) {
+    const validMeasures = (measures ?? []).filter((measure) => Number.isFinite(measure.startBeat)
+      && Number.isFinite(measure.endBeat) && measure.endBeat > measure.startBeat);
+    const limit = Math.max(1, Math.floor(Number(maximumMeasures) || 1));
+    const countVisible = (scale) => {
+      const start = centerBeat - historyBeats * scale;
+      const end = centerBeat + futureBeats * scale;
+      const epsilon = 1e-7;
+      return validMeasures.filter((measure) => measure.endBeat > start + epsilon
+        && measure.startBeat < end - epsilon).length;
+    };
+    if (!validMeasures.length || countVisible(1) <= limit) return { historyBeats, futureBeats };
+    let lower = 0;
+    let upper = 1;
+    for (let iteration = 0; iteration < 32; iteration += 1) {
+      const scale = (lower + upper) / 2;
+      if (countVisible(scale) <= limit) lower = scale;
+      else upper = scale;
+    }
+    return { historyBeats: historyBeats * lower, futureBeats: futureBeats * lower };
+  }
   function smoothPitchBounds(current, target, elapsedMs, responseMs = 180) {
     const alpha = 1 - Math.exp(-Math.max(0, elapsedMs) / responseMs);
     const bounds = { min: current.min + (target.min - current.min) * alpha, max: current.max + (target.max - current.max) * alpha };
     const animating = Math.abs(target.min - bounds.min) > .01 || Math.abs(target.max - bounds.max) > .01;
     return { bounds: animating ? bounds : { ...target }, animating };
   }
-  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, measureSeekState, rhythmGridLines, smoothPitchBounds };
+  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, attemptResumeState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, limitTimelineWindowToMeasures, smoothPitchBounds };
 });

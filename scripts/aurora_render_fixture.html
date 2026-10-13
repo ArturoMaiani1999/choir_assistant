@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en"><meta charset="utf-8"><title>Aurora renderer acceptance fixture</title>
+<style>
+body { margin:0; background:#09171c; color:#c6d5d6; font:14px system-ui; padding:24px; }
+h1 { font-size:22px; font-weight:500; margin:0 0 20px; }
+section { margin-bottom:12px; } canvas { display:block; width:100%; height:114px; }
+label { display:block; color:#93a7ad; margin-bottom:4px; font-size:12px; }
+</style>
+<h1>Aurora · synthetic rendering acceptance</h1><main></main>
+<script src="../frontend/pitch_shared.js"></script>
+<script>
+const shared = ChoirPitchShared;
+const cases = [
+  ['Stable note · persistent trail, brighter present', t=>60, ()=>.9],
+  ['Vibrato · continuous columns, no sprites', t=>60+.35*Math.sin(t*2*Math.PI*4), ()=>.9],
+  ['Glissando · no spline overshoot', t=>58+t*.85, ()=>.9],
+  ['Silence then octave jump · no invented diagonal', t=>t>1&&t<1.5?null:t>2?64:58, ()=>.9],
+  ['Low confidence · opacity, not exaggerated width', t=>60, t=>t<1.8?.4:.9],
+  ['Full recording review · history does not fade', t=>60+.25*Math.sin(t*7), ()=>.9, 'review'],
+];
+const samples = cases.map(([,pitch,confidence])=>Array.from({length:161},(_,i)=>({time:i*.025,displayPitch:pitch(i*.025),confidence:confidence(i*.025),takeId:1})));
+cases.forEach(([label],i)=>{ const section=document.createElement('section');section.innerHTML=`<label>${label}</label><canvas id="case-${i}"></canvas>`;document.querySelector('main').append(section); });
+function draw(index, options={}) {
+  const canvas=document.querySelector(`#case-${index}`), dpr=devicePixelRatio, w=canvas.clientWidth,h=canvas.clientHeight;
+  if(canvas.width!==Math.round(w*dpr)||canvas.height!==Math.round(h*dpr)){canvas.width=Math.round(w*dpr);canvas.height=Math.round(h*dpr);}
+  const ctx=canvas.getContext('2d');ctx.setTransform(dpr,0,0,dpr,0,0);ctx.fillStyle='#09171c';ctx.fillRect(0,0,w,h);
+  const y=p=>h/2-(p-60.5)*14;
+  for(let p=57;p<=65;p++){ctx.strokeStyle=p%2?'#172a30':'#20363e';ctx.beginPath();ctx.moveTo(0,y(p));ctx.lineTo(w,y(p));ctx.stroke();}
+  ctx.fillStyle='#b49459';ctx.globalAlpha=.7;ctx.fillRect(0,y(60)-3,w,6);ctx.globalAlpha=1;
+  shared.drawConfidencePlume(ctx, options.samples || samples[index],p=>p.time/4*(w-20),y,56,66,{currentTime:4,nowX:w-20,mode:cases[index][3]||'live',...options});
+  ctx.strokeStyle='#e3c685';ctx.beginPath();ctx.moveTo(w-20,0);ctx.lineTo(w-20,h);ctx.stroke();
+}
+function render(){cases.forEach((_,i)=>draw(i));}
+window.addEventListener('resize',render); render();
+window.verifyAurora = () => {
+  const canvas=document.querySelector('#case-0'),ctx=canvas.getContext('2d');
+  const snapshot=()=>ctx.getImageData(0,0,canvas.width,canvas.height).data;
+  draw(0);const dense=Uint8ClampedArray.from(snapshot());
+  draw(0,{samples:samples[0].filter((_,i)=>i%2===0)});const sparse=snapshot();
+  let maxDifference=0;for(let i=0;i<dense.length;i++)maxDifference=Math.max(maxDifference,Math.abs(dense[i]-sparse[i]));
+  if(maxDifference>5)throw Error('Downsampling changed surface: '+maxDifference);
+  draw(0,{samples:[]});const empty=Uint8ClampedArray.from(snapshot());
+  draw(0,{samples:samples[0],currentTime:0});const reset=snapshot();
+  if(reset.some((v,i)=>v!==empty[i]))throw Error('Future/ghost data after reset');
+  const times=[]; for(let i=0;i<60;i++){const start=performance.now();draw(1);times.push(performance.now()-start);}
+  times.sort((a,b)=>a-b);render();
+  return {dpr:devicePixelRatio,width:canvas.width,downsamplingMaxPixelDifference:maxDifference,medianMs:times[30],p95Ms:times[57]};
+};
+</script></html>

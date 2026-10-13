@@ -35,6 +35,23 @@ const pickupRuntime = ChoirScore.NormalizedScoreRuntime.fromNormalizedScore({
 assert.equal(pickupRuntime.measureAt(0).beatInMeasure, 6, 'the pickup begins on metrical beat 6');
 assert.equal(pickupRuntime.measureAt(1).beatInMeasure, 1, 'the next full measure begins immediately after the pickup');
 
+const tonalRuntime = ChoirScore.NormalizedScoreRuntime.fromNormalizedScore({
+  title: 'Tonal test', tempo_map: [{ beat: 0, bpm: 60 }],
+  measures: [
+    { id: 'major', number: '1', time_signature_numerator: 4, time_signature_denominator: 4, key_fifths: 2, key_mode: 'major' },
+    { id: 'minor', number: '2', time_signature_numerator: 4, time_signature_denominator: 4, key_fifths: 2, key_mode: 'minor' },
+  ],
+  performance_occurrences: [
+    { id: 'major-occ', written_measure_id: 'major', occurrence_index: 1, start_beat: 0, end_beat: 4 },
+    { id: 'minor-occ', written_measure_id: 'minor', occurrence_index: 1, start_beat: 4, end_beat: 8 },
+  ],
+  parts: [], target_events: [],
+});
+assert.deepEqual(tonalRuntime.keyAt(1), { fifths: 2, mode: 'major' });
+assert.equal(tonalRuntime.tonicPitchClassAt(1), 2, 'two sharps major resolves to D');
+assert.equal(tonalRuntime.tonicPitchClassAt(5), 11, 'two sharps minor resolves to B');
+assert.equal(tonalRuntime.tonicPitchClassAt(5, 2), 1, 'the displayed tonic follows transposition');
+
 const listeners = new Map();
 const media = {
   currentTime: 0,
@@ -61,6 +78,10 @@ const mediaClock = new ChoirScore.MediaPlaybackClock({ mediaElement: media, scor
   assert.equal(mediaClock.speed, .5);
   mediaClock.seekBeat(12);
   assert.equal(media.currentTime, 6);
+  media.duration = 0;
+  mediaClock.seekBeat(8);
+  assert.equal(media.currentTime, 4, 'a transient zero duration must not clamp a measure seek to the start');
+  media.duration = 40;
   mediaClock.setPreRenderedSpeed(.5);
   mediaClock.seekBeat(12);
   assert.equal(media.currentTime, 12, 'pre-rendered 50% audio maps canonical time to the longer media file');
@@ -68,5 +89,5 @@ const mediaClock = new ChoirScore.MediaPlaybackClock({ mediaElement: media, scor
   assert.equal(mediaClock.snapshot().speed, .5);
   mediaClock.pause();
   assert.equal(mediaClock.running, false);
-  console.log('media playback clock: 5 assertions passed');
+  console.log('media playback clock: 6 assertions passed');
 })();

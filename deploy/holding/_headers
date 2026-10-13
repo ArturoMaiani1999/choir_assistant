@@ -1,0 +1,7 @@
+/*
+  Content-Security-Policy: default-src 'self'; style-src 'unsafe-inline'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'
+  X-Content-Type-Options: nosniff
+  Referrer-Policy: no-referrer
+  Permissions-Policy: camera=(), geolocation=(), microphone=()
+  X-Robots-Tag: noindex, nofollow, noarchive
+  Cache-Control: no-store

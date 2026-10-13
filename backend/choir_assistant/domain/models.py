@@ -40,6 +40,9 @@ class WrittenMeasure:
     # Circle-of-fifths value: negative for flat keys, positive for sharp keys.
     # The rehearsal UI uses it to preserve the score's enharmonic spelling.
     key_fifths: int = 0
+    # MusicXML tonal mode. None means the source declared only an armature, so
+    # the relative major/minor tonic cannot be selected safely.
+    key_mode: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

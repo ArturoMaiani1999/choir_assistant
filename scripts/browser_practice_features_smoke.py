@@ -46,10 +46,20 @@ def main():
             result = evaluate(socket, 1, """(async () => {
               const assert = (value, message) => { if (!value) throw Error(message); };
               assert(state.runtime, 'runtime initialized');
-              assert(state.plumeSettings.timeAdvanceMs === 200, 'global default visual advance');
+              assert(state.detectorSettings.rmsThreshold === .000002, 'global default RMS threshold');
+              assert(state.detectorSettings.fastAlpha === .65, 'global default attack responsiveness');
+              assert(state.detectorSettings.slowAlpha === .65, 'global default stable responsiveness');
+              assert(state.detectorSettings.medianWindowFrames === 3, 'global default median window');
+              assert(state.plumeSettings.timeAdvanceMs === 270, 'global default visual advance');
+              assert(state.plumeSettings.width === 2.5, 'global default plume width is 250%');
+              assert(state.plumeSettings.intensity === 1.75, 'global default plume intensity is 175%');
+              assert(state.pianoRollDelayMs === 270, 'global default piano roll delay');
+              assert(getComputedStyle(els.intonationReadout).display === 'none', 'intonation readout is hidden on desktop');
               assert(els.transpose.options.length === 25, 'semitone and octave options');
               // Approval is stubbed in this isolated test profile, never persisted.
               state.bundleApproved = true;
+              els.settingsAudioOutputStandard.checked = true;
+              els.settingsAudioOutputStandard.dispatchEvent(new Event('change'));
               const ready = new Promise((resolve, reject) => {
                 const timer = setTimeout(() => reject(Error('transposed audio timeout')), 12000);
                 els.backingAudio.addEventListener('loadedmetadata', () => {clearTimeout(timer); resolve();}, {once:true});
@@ -85,8 +95,37 @@ def main():
               state.attempt = {voicedMs:0, insideMs:0}; finishAttempt();
               assert(els.resultText.textContent.includes('insufficienti'), 'silence not scored');
               els.resultClose.click();
+              els.settings.click();
+              assert(!els.settingsMenu.hidden, 'settings level menu opens');
+              els.settingsMenuAdvanced.click();
+              assert(els.settingsDialog.open, 'settings dialog opens');
+              assert(els.settingsBasicPanel.hidden && !els.settingsAdvancedPanel.hidden, 'advanced settings selected');
+              assert(!document.querySelector('#settings-close'), 'settings dialog has no close button');
+              assert(els.settingsPianoRollDelay.max === '600', 'piano roll delay supports up to 600 ms latency');
+              assert(els.settingsV1PlumeAdvance.max === '600', 'visual pitch advance supports Bluetooth latency');
+              els.settingsAudioOutputBluetooth.checked = true;
+              els.settingsAudioOutputBluetooth.dispatchEvent(new Event('change'));
+              assert(state.audioOutputType === 'bluetooth' && state.pianoRollDelayMs === 270
+                && state.plumeSettings.timeAdvanceMs === 550,
+                'Bluetooth applies 550 ms only to the vocal trace advance');
+              els.settingsAudioOutputStandard.checked = true;
+              els.settingsAudioOutputStandard.dispatchEvent(new Event('change'));
+              assert(state.pianoRollDelayMs === 270 && state.plumeSettings.timeAdvanceMs === 270,
+                'standard output applies 270 ms to the vocal trace advance');
+              els.settingsPianoRollDelay.value = '150';
+              els.settingsPianoRollDelay.dispatchEvent(new Event('input'));
+              els.settingsPianoRollDelay.dispatchEvent(new Event('change'));
+              els.settingsV1PlumeAdvance.value = '600';
+              els.settingsV1PlumeAdvance.dispatchEvent(new Event('input'));
+              assert(state.plumeSettings.timeAdvanceMs === 600, 'visual pitch advance accepts 600 ms');
               els.settingsV1PlumeAdvance.value = '120';
               els.settingsV1PlumeAdvance.dispatchEvent(new Event('input'));
+              els.settingsV1PlumeAdvance.dispatchEvent(new Event('change'));
+              const settingsRect = els.settingsDialog.getBoundingClientRect();
+              els.settingsDialog.dispatchEvent(new MouseEvent('click', {
+                bubbles: true, clientX: settingsRect.left - 1, clientY: settingsRect.top - 1,
+              }));
+              assert(!els.settingsDialog.open, 'backdrop click closes settings dialog');
               assert(state.plumeSettings.timeAdvanceMs === 120, 'visual pitch advance setting');
               const sourceBeat = Math.min(10, totalBeats() - 1);
               const shiftedBeat = visuallyAdvancedPitchBeat(sourceBeat);
@@ -95,25 +134,39 @@ def main():
                 'visual pitch advance is timestamp-only: ' + JSON.stringify({sourceBeat,shiftedBeat,shiftedSeconds}));
               els.settingsV1Rms.value = '0';
               els.settingsV1Rms.dispatchEvent(new Event('input'));
-              assert(Math.abs(state.detectorSettings.rmsThreshold - .00001) < 1e-10,
+              assert(Math.abs(state.detectorSettings.rmsThreshold - .000001) < 1e-12,
                 'extended quiet-voice sensitivity');
-              assert(els.settingsV1RmsValue.textContent.startsWith('0,00001'), 'low RMS value remains readable');
+              assert(els.settingsV1RmsValue.textContent.startsWith('0,000001'), 'low RMS value remains readable');
+              els.settingsWeakVoiceMode.checked = true;
+              els.settingsWeakVoiceMode.dispatchEvent(new Event('change'));
+              const weakRecognition = activeRecognitionSettings();
+              assert(state.detectorSettings.weakVoiceMode
+                && Math.abs(state.pitchSmoother.minConfidence - .10) < 1e-10
+                && Math.abs(state.pitchSmoother.minClarity - .32) < 1e-10
+                && state.pitchSmoother.weakSignalHoldFrames === 6
+                && weakRecognition.rmsThreshold <= .00003
+                && Math.abs(weakRecognition.yinThreshold - .68) < 1e-10
+                && Math.abs(livePlumeSettings(0,false,100,0).minConfidence - .10) < 1e-10,
+                'weak-voice mode lowers the complete recognition and rendering gates');
               savePreferences();
               const piecePreferences = JSON.parse(localStorage.getItem(preferenceKey()));
-              for (const key of ['v1RmsThreshold','v1FastAlpha','v1SlowAlpha','v1MedianWindowFrames','v1PlumeWidth',
+              for (const key of ['v1RmsThreshold','v1WeakVoiceMode','v1FastAlpha','v1SlowAlpha','v1MedianWindowFrames','v1PlumeWidth',
                 'v1PlumeIntensity','v1PlumeColor','v1PlumeAdvanceMs','displayPitchAlgorithm','pitchLayerV1','pitchLayerCrepe']) delete piecePreferences[key];
               localStorage.setItem(preferenceKey(), JSON.stringify(piecePreferences));
               assert(JSON.parse(localStorage.getItem(GLOBAL_DETECTOR_PREFERENCES_KEY)).v1PlumeAdvanceMs === 120,
                 'detector preferences saved globally');
               return {duration:els.backingAudio.duration, transpose:state.transpose, phrase:state.phrase,
-                plumeAdvanceMs:state.plumeSettings.timeAdvanceMs, rmsThreshold:state.detectorSettings.rmsThreshold};
+                plumeAdvanceMs:state.plumeSettings.timeAdvanceMs, rmsThreshold:state.detectorSettings.rmsThreshold,
+                weakVoiceMode:state.detectorSettings.weakVoiceMode};
             })()""")
             command(socket, 2, 'Page.reload')
             time.sleep(.8)
             restored = evaluate(socket, 3, """({transpose:state.transpose, phrase:state.phrase,
-              plumeAdvanceMs:state.plumeSettings.timeAdvanceMs, rmsThreshold:state.detectorSettings.rmsThreshold})""")
-            assert (restored['transpose'] == 0 and restored['phrase']['end'] == 1
-                    and restored['plumeAdvanceMs'] == 120 and abs(restored['rmsThreshold'] - .00001) < 1e-10), restored
+              plumeAdvanceMs:state.plumeSettings.timeAdvanceMs, rmsThreshold:state.detectorSettings.rmsThreshold,
+              weakVoiceMode:state.detectorSettings.weakVoiceMode})""")
+            assert (restored['transpose'] == 0 and restored['phrase'] is None
+                    and restored['plumeAdvanceMs'] == 120 and abs(restored['rmsThreshold'] - .000001) < 1e-12
+                    and restored['weakVoiceMode'] is True), restored
             print(json.dumps({'features': result, 'restored': restored}, indent=2))
         finally:
             if socket:

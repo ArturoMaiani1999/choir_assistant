@@ -49,7 +49,18 @@ def main():
             socket = websocket.create_connection(page["webSocketDebuggerUrl"], timeout=10)
             try:
                 command(socket, 1, "Page.enable")
-                time.sleep(.8)
+                for _ in range(100):
+                    if evaluate(socket, 2, "Boolean(typeof state !== 'undefined' && state.runtime && state.bundleManifest)"):
+                        break
+                    time.sleep(.1)
+                else:
+                    loading = evaluate(socket, 3, """({
+                      loading: document.querySelector('#score-loading')?.textContent,
+                      title: document.querySelector('#piece-title')?.textContent,
+                      stateType: typeof state,
+                      appLoaded: performance.getEntriesByType('resource').some(entry => entry.name.includes('/app.js'))
+                    })""")
+                    raise RuntimeError(f"Practice initialization timed out: {loading}")
                 results = []
                 call_id = 10
                 for width, height in VIEWPORTS:
@@ -64,9 +75,15 @@ def main():
                       transportBottom: document.querySelector('.practice-transport').getBoundingClientRect().bottom,
                       nowRatio: (() => { const c=document.querySelector('#pitch-lane'); return 4.5/(4.5+7.5); })(),
                       portraitHint: getComputedStyle(document.querySelector('.orientation-hint')).display,
+                      topCollapsed: document.querySelector('.practice-shell').classList.contains('mobile-top-collapsed'),
+                      bottomCollapsed: document.querySelector('.practice-shell').classList.contains('mobile-bottom-collapsed'),
+                      readoutDisplay: getComputedStyle(document.querySelector('#intonation-readout')).display,
+                      buildDisplay: getComputedStyle(document.querySelector('#build-version')).display,
+                      topToggleDisplay: getComputedStyle(document.querySelector('#mobile-toolbar-toggle')).display,
+                      bottomToggleDisplay: getComputedStyle(document.querySelector('#mobile-transport-toggle')).display,
                       part: document.querySelector('#part-selector').value,
                       cursorLeft: document.querySelector('#score-cursor').style.left,
-                      publicationStatus: state.bundleManifest?.publication_status,
+                      publicationStatus: state.bundleManifest?.publication_status ?? (state.bundleManifest?.local_source ? 'local_source' : null),
                       playbackDisabled: document.querySelector('#toggle-playback').disabled,
                       audioSrc: document.querySelector('#backing-audio').getAttribute('src'),
                       microphoneControl: Boolean(document.querySelector('#microphone')),
@@ -74,22 +91,58 @@ def main():
                       fabricatedLyrics: state.runtime.targetEvents.filter(event => ['lu','ce','can','ta'].includes(event.lyric)).length,
                       missingProvenance: state.runtime.targetEvents.filter(event => !event.sourceEventId).length
                     })"""); call_id += 1
-                    assert metrics["scrollHeight"] == height and metrics["bodyScrollHeight"] == height
+                    assert metrics["scrollHeight"] == height and metrics["bodyScrollHeight"] == height, metrics
                     assert metrics["scoreHeight"] > 90 and metrics["pitchHeight"] > 80, metrics
                     assert abs(metrics["transportBottom"] - height) < 1
                     assert metrics["cursorLeft"] and metrics["part"]
-                    assert metrics["publicationStatus"] == "pending_review"
-                    assert metrics["playbackDisabled"] is True and metrics["audioSrc"] is None
-                    assert metrics["fabricatedLyrics"] == 0 and metrics["missingProvenance"] == 0
-                    assert metrics["microphoneControl"] is True
+                    assert metrics["publicationStatus"] in {"pending_review", "local_source"}
+                    if metrics["publicationStatus"] == "pending_review":
+                        assert metrics["playbackDisabled"] is True and metrics["audioSrc"] is None
+                    else:
+                        assert metrics["playbackDisabled"] is False and metrics["audioSrc"]
+                    if metrics["publicationStatus"] == "pending_review":
+                        assert metrics["fabricatedLyrics"] == 0 and metrics["missingProvenance"] == 0
                     assert metrics["metronomeControl"] is True
-                    if width < height: assert metrics["portraitHint"] == "flex"
-                    else: assert metrics["portraitHint"] == "none"
+                    assert metrics["portraitHint"] == "none"
+                    assert metrics["readoutDisplay"] == "none"
+                    if width <= 960:
+                        assert metrics["topCollapsed"] is True
+                        assert metrics["buildDisplay"] == "none"
+                        assert metrics["topToggleDisplay"] == "grid"
+                        if width > height:
+                            assert metrics["bottomCollapsed"] is True and metrics["bottomToggleDisplay"] == "grid"
+                        else:
+                            assert metrics["bottomCollapsed"] is False and metrics["bottomToggleDisplay"] == "none"
+                    else:
+                        assert metrics["topCollapsed"] is False and metrics["bottomCollapsed"] is False
+                        assert metrics["topToggleDisplay"] == "none" and metrics["bottomToggleDisplay"] == "none"
                     screenshot = command(socket, call_id, "Page.captureScreenshot", {"format": "png", "fromSurface": True}); call_id += 1
                     import base64
                     (ARTIFACTS / f"practice-{width}x{height}.png").write_bytes(base64.b64decode(screenshot["data"]))
                     results.append(metrics)
 
+                top_toggle = evaluate(socket, call_id, """(async()=>{
+                  document.querySelector('#mobile-toolbar-toggle').click();
+                  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                  const open={expanded:document.querySelector('#mobile-toolbar-toggle').getAttribute('aria-expanded'),height:document.querySelector('#practice-toolbar').getBoundingClientRect().height};
+                  document.querySelector('#mobile-toolbar-toggle').click();
+                  return open;
+                })()"""); call_id += 1
+                assert top_toggle["expanded"] == "true" and top_toggle["height"] >= 80
+
+                command(socket, call_id, "Emulation.setDeviceMetricsOverride", {"width": 844, "height": 390, "deviceScaleFactor": 1, "mobile": True}); call_id += 1
+                time.sleep(.15)
+                bottom_toggle = evaluate(socket, call_id, """(async()=>{
+                  document.querySelector('#mobile-transport-toggle').click();
+                  await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+                  const open={expanded:document.querySelector('#mobile-transport-toggle').getAttribute('aria-expanded'),height:document.querySelector('#practice-transport').getBoundingClientRect().height,pitchHeight:document.querySelector('.pitch-region').getBoundingClientRect().height};
+                  document.querySelector('#mobile-transport-toggle').click();
+                  return open;
+                })()"""); call_id += 1
+                assert bottom_toggle["expanded"] == "true" and bottom_toggle["height"] >= 50 and bottom_toggle["pitchHeight"] > 170
+
+                command(socket, call_id, "Emulation.setDeviceMetricsOverride", {"width": 390, "height": 844, "deviceScaleFactor": 1, "mobile": True}); call_id += 1
+                time.sleep(.15)
                 interaction = evaluate(socket, call_id, """(async () => {
                   const before = state.clock.snapshot(performance.now()).beat;
                   document.querySelector('#metronome-toggle').click();
@@ -132,14 +185,38 @@ def main():
                 assert 50 < interaction["pureMath"]["smoothMin"] < 60
                 assert abs(interaction["detectedPitch"]["hz"] - 220) < 1
                 assert interaction["detectedPitch"]["clarity"] > .9
-                microphone = evaluate(socket, call_id + 1, "(async()=>{await toggleMicrophone(); const active={status:state.microphoneStatus, pressed:document.querySelector('#microphone').getAttribute('aria-pressed'), analyser:Boolean(state.microphoneAnalyser)}; await stopMicrophone(); return active;})()")
-                assert microphone == {"status": "active", "pressed": "true", "analyser": True}
+                microphone = evaluate(socket, call_id + 1, "(async()=>{await toggleMicrophone(); const active={status:state.microphoneStatus, analyser:Boolean(state.microphoneAnalyser)}; await stopMicrophone(); return active;})()")
+                assert microphone == {"status": "active", "analyser": True}
                 command(socket, call_id + 1, "Emulation.setDeviceMetricsOverride", {"width": 1440, "height": 900, "deviceScaleFactor": 1, "mobile": False})
                 evaluate(socket, call_id + 2, "document.querySelector('#next-measure').click()")
                 time.sleep(.2)
                 running_shot = command(socket, call_id + 4, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
                 (ARTIFACTS / "practice-1440x900-trajectory.png").write_bytes(base64.b64decode(running_shot["data"]))
-                print(json.dumps({"viewports": results, "interaction": interaction}, ensure_ascii=False, indent=2))
+                settings_levels = evaluate(socket, call_id + 5, """(() => {
+                  if (els.settingsDialog.open) els.settingsDialog.close();
+                  els.settings.click();
+                  const menu = {open:!els.settingsMenu.hidden, expanded:els.settings.getAttribute('aria-expanded')};
+                  els.settingsMenuBasic.click();
+                  const basic = {open:els.settingsDialog.open, basicHidden:els.settingsBasicPanel.hidden,
+                    advancedHidden:els.settingsAdvancedPanel.hidden, paper:Boolean(document.querySelector('#score-paper-color')),
+                    visibleDescriptions:[...els.settingsBasicPanel.querySelectorAll('p')].filter(item=>!item.hidden).length};
+                  els.settingsDialog.close(); els.settings.click(); els.settingsMenuAdvanced.click();
+                  const advanced = {basicHidden:els.settingsBasicPanel.hidden,
+                    advancedHidden:els.settingsAdvancedPanel.hidden, title:els.settingsHeading.textContent,
+                    displayAlgorithm:Boolean(document.querySelector('#settings-display-pitch-algorithm')),
+                    pianoRollDelayMax:els.settingsPianoRollDelay.max};
+                  els.settingsDialog.close();
+                  return {menu,basic,advanced};
+                })()""")
+                assert settings_levels == {
+                    "menu": {"open": True, "expanded": "true"},
+                    "basic": {"open": True, "basicHidden": False, "advancedHidden": True,
+                              "paper": True, "visibleDescriptions": 0},
+                    "advanced": {"basicHidden": True, "advancedHidden": False,
+                                 "title": "Impostazioni avanzate", "displayAlgorithm": False,
+                                 "pianoRollDelayMax": "600"},
+                }, settings_levels
+                print(json.dumps({"viewports": results, "interaction": interaction, "settings": settings_levels}, ensure_ascii=False, indent=2))
             finally:
                 socket.close()
         finally:

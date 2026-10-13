@@ -1,37 +1,63 @@
 const { NormalizedScoreRuntime, MediaPlaybackClock } = window.ChoirScore;
-const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, measureSeekState, rhythmGridLines, smoothPitchBounds } = window.PracticeMath;
+const { centsBetween, pitchToHz, pitchToName, pitchToY, timeToX, adjacentMelodicIntervals, measureSeekState, attemptResumeState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, limitTimelineWindowToMeasures, smoothPitchBounds } = window.PracticeMath;
 const { detectPitch, PitchSmoother, OctaveAwarePitchTracker, yinCandidates, decodeYinCandidatePath, mpmCandidates, decodeCrepeProbabilities } = window.ChoirPitch;
+const PitchShared = window.ChoirPitchShared;
+const FluidPitchTrail = window.ChoirFluidPitchTrail;
 const { OneEuroFilter } = window.ChoirOneEuro;
+const UiPreferences = window.ChoirUiPreferences;
+const VocalFeedback = window.VocalFeedback;
+const { MediaElementMixer, buildMediaPlaybackPlan } = window.ChoirMedia;
+const RUNTIME_CONFIG = window.ChoirRuntimeConfig ?? Object.freeze({});
 
-/** @typedef {number|null} TrackedPitch MIDI pitch consumed only by scoring. */
-/** @typedef {number|null} DisplayPitch MIDI pitch consumed only by presentation. */
-/** @param {TrackedPitch} trackedPitch @returns {DisplayPitch} */
-function displayPitchFromTracked(trackedPitch) { return trackedPitch; }
+function libraryBundleUrl(pieceId) {
+  const template = RUNTIME_CONFIG.bundleUrlTemplate;
+  if (!template) throw new Error('Configurazione della libreria incompleta');
+  return template.replace('{pieceId}', encodeURIComponent(pieceId));
+}
 
 const UI_CONFIG = Object.freeze({
   historyBeats: 4.5,
   futureBeats: 7.5,
+  mobileHistoryBeats: 1.5,
+  mobileFutureBeats: 2.5,
   centeredCents: 12,
   acceptableCents: 30,
   targetToleranceCents: 25,
+  pitchNoteLabelOffsetPx: 44,
+  pitchHeadGapPx: 12,
   pitchViewportResponseMs: 180,
+  // Analysis follows a 60 Hz ceiling, but runs off the rendering thread.
+  // On slower devices the one-in-flight rule naturally applies backpressure.
+  pitchAnalysisIntervalMs: 1000 / 60,
 });
 
+const AUDIO_OUTPUT_SESSION_KEY = 'choir-audio-output:v1';
+const AUDIO_OUTPUT_CONFIRMATION_TTL_MS = 30 * 60 * 1000;
+const PIANO_ROLL_DELAY_MAX_MS = 600;
+const PIANO_ROLL_DELAY_DEFAULT_MS = 270;
+const STANDARD_PLUME_ADVANCE_MS = 270;
+const BLUETOOTH_PLUME_ADVANCE_MS = 550;
+const METRONOME_OFFSET_MS = 50;
+let audioOutputExpiryTimer = null;
+
 const els = Object.fromEntries([
-  'transpose', 'settings-display-pitch-algorithm',
-  'exercise', 'exercise-dialog', 'phrase-start', 'phrase-end', 'phrase-apply', 'phrase-clear', 'exercise-close', 'settings-dialog', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-color', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-reset', 'settings-close',
-  'result-dialog', 'result-text', 'result-progress', 'retry', 'next-phrase', 'result-close',
-  'phrase-loop', 'note-names',
-  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-title', 'library-title-save', 'library-part', 'library-note', 'library-open', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-mode', 'settings',
+  'transpose', 'transpose-value', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
+  'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-accompaniment', 'voice-mixer-accompaniment-enabled', 'voice-mixer-accompaniment-level', 'voice-mixer-accompaniment-value', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
+  'settings-menu-wrap', 'settings-menu', 'settings-menu-basic', 'settings-menu-advanced', 'settings-dialog', 'settings-heading', 'settings-basic-panel', 'settings-advanced-panel', 'settings-audio-output-standard', 'settings-audio-output-bluetooth', 'settings-audio-output-status', 'settings-audio-output-description', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
+  'result-dialog', 'result-heading', 'result-text', 'result-progress', 'retry', 'result-resume', 'result-close',
+  'note-names',
+  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-viewer-link', 'settings',
   'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
-  'score-loading', 'score-pitch-divider', 'pitch-lane', 'intonation-readout', 'live-note', 'live-cents', 'live-state', 'pitch-layer-v1', 'pitch-layer-crepe',
-  'measure-counter', 'scoring-cue', 'previous-measure', 'toggle-playback', 'next-measure', 'volume', 'metronome-toggle', 'metronome-volume', 'backing-audio', 'toast', 'asset-status', 'microphone',
+  'score-loading', 'score-pitch-divider', 'pitch-lane', 'pitch-fluid-layer', 'intonation-readout', 'live-note', 'live-cents', 'live-state', 'pitch-layer-v1', 'pitch-layer-crepe',
+  'feedback-analyse', 'feedback-status', 'feedback-priorities', 'feedback-priority-list', 'feedback-score-image', 'feedback-note-card', 'feedback-note-name', 'feedback-note-meta', 'feedback-cent-chart', 'feedback-note-metrics', 'feedback-message', 'feedback-previous', 'feedback-next', 'feedback-original', 'feedback-corrected', 'feedback-strength', 'feedback-strength-value', 'feedback-playback-kind',
+  'measure-counter', 'scoring-cue', 'previous-measure', 'toggle-playback', 'next-measure', 'show-feedback', 'volume', 'metronome-toggle', 'metronome-volume', 'backing-audio', 'toast', 'asset-status',
+  'practice-shell', 'practice-toolbar', 'practice-transport', 'mobile-toolbar-toggle', 'mobile-transport-toggle',
 ].map((id) => [id.replace(/-([a-z])/g, (_, letter) => letter.toUpperCase()), document.getElementById(id)]));
 
 const state = {
+  lyricTextScale: UiPreferences.read(),
+  showIntervals: false,
   transpose: 0,
-  phrase: null,
-  autoLoop: false,
   noteNames: 'italian',
   attemptActive: false,
   attempt: { voicedMs: 0, insideMs: 0 },
@@ -43,35 +69,53 @@ const state = {
   occurrenceMeasures: [],
   selectedMeasureIndex: 0,
   scoringStartBeat: 0,
+  resumeCheckpointBeat: null,
   scorePage: 1,
-  fullScore: false,
   rafId: null,
   lastAnnouncedState: '',
   backingManifest: null,
+  playbackPlan: null,
+  voiceMixChangeToken: 0,
+  voiceMixResumeRequested: false,
+  playbackMixer: new MediaElementMixer({ pitchWorkletUrl: 'pitch_shifter_worklet.js' }),
+  voiceStemAudio: new Map(),
+  selectedVoiceIds: new Set(),
+  voiceLevels: new Map(),
+  accompanimentEnabled: true,
+  accompanimentLevel: 1,
   bundleManifest: null,
   bundleApproved: false,
   scoreGeometry: new Map(),
   fallbackScoreSlots: [],
+  scoreLayout: 'paged',
   activeScoreSegment: null,
   pitchViewport: null,
   lastSnapshot: null,
   metronomeContext: null,
   lastMetronomeBeat: null,
+  metronomeOffsetMs: METRONOME_OFFSET_MS,
+  pianoRollDelayMs: PIANO_ROLL_DELAY_DEFAULT_MS,
+  audioOutputType: null,
   rememberedMetronomeVolume: 34,
   syncDebug: new URLSearchParams(window.location.search).has('syncDebug'),
   microphoneStatus: 'idle',
+  ignoreAudioDeviceChangesUntil: 0,
   microphoneStream: null,
   microphoneContext: null,
   microphoneSource: null,
   microphoneAnalyser: null,
   microphoneSilencer: null,
   microphoneBuffer: null,
+  pitchWorker: null,
+  pitchWorkerInFlight: false,
+  pitchWorkerDisabled: false,
+  pitchAnalysisGeneration: 0,
+  pitchAnalysisTimer: null,
   microphoneRms: 0,
   pitchSmoother: new PitchSmoother(),
   displayPitchFilter: new OneEuroFilter(),
-  displayPitchAlgorithm: 'v1+display-filter',
-  detectorSettings: { rmsThreshold: .001, fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 },
-  plumeSettings: { width: 1, intensity: 1, color: '#63c8c2', timeAdvanceMs: 200 },
+  detectorSettings: { ...PitchShared.DETECTOR_DEFAULTS },
+  plumeSettings: { ...PitchShared.PLUME_DEFAULTS },
   pitchLayers: { v1: true, crepe: true },
   trackedPitch: null,
   displayPitch: null,
@@ -80,13 +124,48 @@ const state = {
   pitchSamples: [],
   pitchTakeId: 1,
   groundTruth: { capture: null },
-  benchmark: { capture: null, pending: null, previewUrl: null, sessionId: null, savedTakes: [], selectedTakeId: null, analysisAudioUrl: null, analysisPlaybackRaf: null, analysisLayers: { v1: true, display: true, raw: true, audio: true, score: true },
+  benchmark: { capture: null, pending: null, previewUrl: null, sessionId: null, savedTakes: [], selectedTakeId: null, analysisAudioUrl: null, correctedAudioUrl: null, correctedAudioKey: null, audioVariant: 'original', analysisPlaybackRaf: null, feedbackSource: null, analysisLayers: { v1: false, display: true, raw: false, audio: false, score: false },
     analysisView: { timeZoom: 1, pitchZoom: 1, centerBeat: null, pitchOffset: 0, pointer: null, inspectBeat: null, selectedBeat: null } },
   gridInspect: { active: false, viewBeat: 0, pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null },
 };
 
-const V1_RMS_THRESHOLD = Object.freeze({ default: .001, min: .00001, max: .01 });
-const V1_TRACKER_DEFAULTS = Object.freeze({ fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 });
+const V1_RMS_THRESHOLD = Object.freeze({ default: .000002, min: .000001, max: .01 });
+const V1_TRACKER_DEFAULTS = Object.freeze({ fastAlpha: .65, slowAlpha: .65, medianWindowFrames: 3 });
+const fluidTrailRenderer = new FluidPitchTrail.Renderer(els.pitchFluidLayer);
+const mobileChrome = { mode: null, topCollapsed: false, bottomCollapsed: false };
+
+function mobilePracticeMode() {
+  if (!window.matchMedia('(max-width: 960px)').matches) return 'desktop';
+  return window.matchMedia('(orientation: landscape)').matches ? 'landscape' : 'portrait';
+}
+
+function updateMobileChrome() {
+  const mode = mobilePracticeMode();
+  if (mode !== mobileChrome.mode) {
+    mobileChrome.mode = mode;
+    mobileChrome.topCollapsed = mode !== 'desktop';
+    mobileChrome.bottomCollapsed = mode === 'landscape';
+  }
+  els.practiceShell.classList.toggle('mobile-top-collapsed', mobileChrome.topCollapsed);
+  els.practiceShell.classList.toggle('mobile-bottom-collapsed', mobileChrome.bottomCollapsed);
+  els.mobileToolbarToggle.hidden = mode === 'desktop';
+  els.mobileTransportToggle.hidden = mode !== 'landscape';
+  els.mobileToolbarToggle.setAttribute('aria-expanded', String(!mobileChrome.topCollapsed));
+  els.mobileTransportToggle.setAttribute('aria-expanded', String(!mobileChrome.bottomCollapsed));
+  els.mobileToolbarToggle.setAttribute('aria-label', mobileChrome.topCollapsed ? 'Mostra i comandi superiori' : 'Nascondi i comandi superiori');
+  els.mobileTransportToggle.setAttribute('aria-label', mobileChrome.bottomCollapsed ? 'Mostra i controlli di riproduzione' : 'Nascondi i controlli di riproduzione');
+  els.mobileToolbarToggle.title = els.mobileToolbarToggle.getAttribute('aria-label');
+  els.mobileTransportToggle.title = els.mobileTransportToggle.getAttribute('aria-label');
+  els.mobileToolbarToggle.firstElementChild.classList.toggle('is-down', mobileChrome.topCollapsed);
+  els.mobileTransportToggle.firstElementChild.classList.toggle('is-down', !mobileChrome.bottomCollapsed);
+}
+
+function redrawAfterChromeChange() {
+  state.activeScoreSegment = null;
+  requestAnimationFrame(() => {
+    if (state.runtime) render();
+  });
+}
 
 function rmsThresholdFromSlider(value) {
   const ratio = Math.max(0, Math.min(1, Number(value) / 100));
@@ -100,18 +179,68 @@ function rmsSliderFromThreshold(value) {
 }
 
 function formatRmsThreshold(value) {
-  return Number(value).toFixed(value < .0001 ? 5 : 4).replace('.', ',');
+  return Number(value).toFixed(value < .00001 ? 6 : value < .0001 ? 5 : 4).replace('.', ',');
+}
+
+function readAudioOutputPreference(now = Date.now()) {
+  try {
+    const preference = JSON.parse(sessionStorage.getItem(AUDIO_OUTPUT_SESSION_KEY));
+    const validType = preference?.type === 'bluetooth' || preference?.type === 'standard';
+    const confirmedAt = Number(preference?.confirmedAt);
+    if (!validType || !Number.isFinite(confirmedAt) || now - confirmedAt >= AUDIO_OUTPUT_CONFIRMATION_TTL_MS) return null;
+    return { type: preference.type, confirmedAt };
+  } catch (_) { return null; }
+}
+
+function scheduleAudioOutputExpiry(preference) {
+  clearTimeout(audioOutputExpiryTimer);
+  if (!preference) return;
+  const remaining = Math.max(0, AUDIO_OUTPUT_CONFIRMATION_TTL_MS - (Date.now() - preference.confirmedAt));
+  audioOutputExpiryTimer = setTimeout(() => invalidateAudioOutputPreference(true), remaining);
+}
+
+function restoreAudioOutputPreference() {
+  const preference = readAudioOutputPreference();
+  state.audioOutputType = preference?.type ?? null;
+  scheduleAudioOutputExpiry(preference);
+  return Boolean(preference);
+}
+
+function saveAudioOutputPreference(type) {
+  const preference = { type, confirmedAt: Date.now() };
+  try { sessionStorage.setItem(AUDIO_OUTPUT_SESSION_KEY, JSON.stringify(preference)); } catch (_) {}
+  state.audioOutputType = type;
+  scheduleAudioOutputExpiry(preference);
+}
+
+function invalidateAudioOutputPreference(notifyUser = false) {
+  if (!state.audioOutputType && !readAudioOutputPreference()) return;
+  try { sessionStorage.removeItem(AUDIO_OUTPUT_SESSION_KEY); } catch (_) {}
+  state.audioOutputType = null;
+  clearTimeout(audioOutputExpiryTimer);
+  updateDetectorSettingsUi();
+  if (notifyUser) showToast('Conferma di nuovo l’uscita audio nelle Impostazioni.');
 }
 
 function updateDetectorSettingsUi() {
+  els.settingsAudioOutputStandard.checked = state.audioOutputType === 'standard';
+  els.settingsAudioOutputBluetooth.checked = state.audioOutputType === 'bluetooth';
+  els.settingsAudioOutputStatus.textContent = state.audioOutputType === 'bluetooth'
+    ? 'Bluetooth' : state.audioOutputType === 'standard' ? 'Non Bluetooth' : 'Da confermare';
+  els.settingsTextScale.value = String(Math.round(state.lyricTextScale * 100));
+  els.settingsTextScaleValue.textContent = `${Math.round(state.lyricTextScale * 100)}%`;
+  els.settingsShowIntervals.checked = state.showIntervals;
   const threshold = state.detectorSettings.rmsThreshold;
   els.settingsV1Rms.value = String(rmsSliderFromThreshold(threshold));
   els.settingsV1RmsValue.textContent = `${formatRmsThreshold(threshold)} RMS`;
-  els.settingsV1RmsDescription.textContent = threshold < V1_RMS_THRESHOLD.default
-    ? 'Più sensibile: ammette segnali deboli; verifica che non compaiano pitch sul rumore.'
-    : threshold > V1_RMS_THRESHOLD.default
-      ? 'Più selettiva: richiede una voce più presente e filtra meglio il rumore debole.'
-      : 'Valore predefinito: filtra silenzio e rumore debole.';
+  els.settingsWeakVoiceMode.checked = state.detectorSettings.weakVoiceMode;
+  els.settingsV1RmsDescription.textContent = state.detectorSettings.weakVoiceMode
+    ? 'Voce debole: questa è l’unica soglia legata al volume; periodicità e confidenza usano limiti più permissivi.'
+    : threshold < V1_RMS_THRESHOLD.default
+      ? 'Più sensibile: ammette segnali deboli; verifica che non compaiano pitch sul rumore.'
+      : threshold > V1_RMS_THRESHOLD.default
+        ? 'Più selettiva: richiede una voce più presente e filtra meglio il rumore debole.'
+        : 'Valore predefinito: filtra silenzio e rumore debole.';
   els.settingsV1FastAlpha.value = String(Math.round(state.detectorSettings.fastAlpha * 100));
   els.settingsV1FastAlphaValue.textContent = `${Math.round(state.detectorSettings.fastAlpha * 100)}%`;
   els.settingsV1SlowAlpha.value = String(Math.round(state.detectorSettings.slowAlpha * 100));
@@ -120,21 +249,59 @@ function updateDetectorSettingsUi() {
   els.settingsV1MedianFramesValue.textContent = `${state.detectorSettings.medianWindowFrames} frame`;
   els.settingsV1PlumeWidth.value = String(Math.round(state.plumeSettings.width * 100));
   els.settingsV1PlumeWidthValue.textContent = `${Math.round(state.plumeSettings.width * 100)}%`;
-  els.settingsV1PlumeColor.value = state.plumeSettings.color;
   els.settingsV1PlumeIntensity.value = String(Math.round(state.plumeSettings.intensity * 100));
   els.settingsV1PlumeIntensityValue.textContent = `${Math.round(state.plumeSettings.intensity * 100)}%`;
   els.settingsV1PlumeAdvance.value = String(state.plumeSettings.timeAdvanceMs);
   els.settingsV1PlumeAdvanceValue.textContent = `${state.plumeSettings.timeAdvanceMs} ms`;
-  els.settingsDisplayPitchAlgorithm.value = state.displayPitchAlgorithm;
+  els.settingsPianoRollDelay.value = String(state.pianoRollDelayMs);
+  els.settingsPianoRollDelayValue.textContent = `${state.pianoRollDelayMs} ms`;
 }
 
 function applyLiveTrackerSettings() {
-  state.pitchSmoother.configure(state.detectorSettings);
+  const recognition = PitchShared.recognitionSettings(state.detectorSettings);
+  state.pitchSmoother.configure({ ...state.detectorSettings, ...recognition });
 }
 
-function openDetectorSettings() {
+function activeRecognitionSettings() {
+  return PitchShared.recognitionSettings(state.detectorSettings);
+}
+
+function closeSettingsMenu() {
+  els.settingsMenu.hidden = true;
+  els.settings.setAttribute('aria-expanded', 'false');
+}
+
+function toggleSettingsMenu() {
+  const opening = els.settingsMenu.hidden;
+  els.settingsMenu.hidden = !opening;
+  els.settings.setAttribute('aria-expanded', String(opening));
+  if (opening) els.settingsMenuBasic.focus();
+}
+
+function openDetectorSettings(mode = 'basic') {
+  const advanced = mode === 'advanced';
+  closeSettingsMenu();
+  restoreAudioOutputPreference();
   updateDetectorSettingsUi();
+  els.settingsBasicPanel.hidden = advanced;
+  els.settingsAdvancedPanel.hidden = !advanced;
+  els.settingsHeading.textContent = advanced ? 'Impostazioni avanzate' : 'Impostazioni';
   if (!els.settingsDialog.open) els.settingsDialog.showModal();
+}
+
+function closeDialogFromBackdrop(dialog, event) {
+  const rect = dialog.getBoundingClientRect();
+  const outsideDialog = event.clientX < rect.left || event.clientX > rect.right
+    || event.clientY < rect.top || event.clientY > rect.bottom;
+  if (outsideDialog) dialog.close();
+}
+
+function closeSettingsFromBackdrop(event) {
+  closeDialogFromBackdrop(els.settingsDialog, event);
+}
+
+function closeVoiceMixerFromBackdrop(event) {
+  closeDialogFromBackdrop(els.voiceMixerDialog, event);
 }
 
 function normalizeSlug(value) {
@@ -176,6 +343,8 @@ function noteLabel(pitch, beat = state.clock?.snapshot().beat ?? 0) {
       : ['C', 'C#', 'D', 'D#', 'E', 'F', 'F#', 'G', 'G#', 'A', 'A#', 'B'];
   return names[((midi % 12) + 12) % 12] + (Math.floor(midi / 12) - 1);
 }
+
+const TONAL_ROLE_COLOURS = Object.freeze({ tonic: '#a8b98b', fifth: '#4f86b5' });
 
 function vocalParts(runtime) {
   return runtime.parts.filter((part) => !/(^|[-\s])(organo|organ|piano|accompagnamento|accompaniment)([-\s]|$)/i.test(part.name));
@@ -228,6 +397,7 @@ function measureIndexAt(beat) {
 }
 
 function sourceGlyph(event) {
+  if (state.scoreLayout === 'continuous') return null;
   return event ? state.scoreGeometry.get(event.sourceEventId) ?? null : null;
 }
 
@@ -235,8 +405,7 @@ function fallbackScorePosition(beat) {
   const index = measureIndexAt(beat);
   const measure = state.occurrenceMeasures[index];
   const defaultMeasureWidths = [[13, 32], [32, 55], [55, 73], [73, 93]];
-  const pages = state.bundleManifest?.assets?.score_pages?.[state.runtime.selectedPartId]
-    ?? state.bundleManifest?.assets?.full_score_pages ?? [];
+  const pages = state.bundleManifest?.assets?.score_pages?.[state.runtime.selectedPartId] ?? [];
   const slot = state.fallbackScoreSlots[index] ?? (pages.length ? (() => {
     const [startX, endX] = defaultMeasureWidths[index % defaultMeasureWidths.length];
     return { page: Math.min(pages.length, Math.floor(index / defaultMeasureWidths.length) + 1),
@@ -257,16 +426,157 @@ function closestScoreEvent(beat) {
 
 function loadScoreImage(page = 1) {
   const part = state.runtime.parts.find((item) => item.id === state.runtime.selectedPartId);
-  const pages = state.fullScore
-    ? state.bundleManifest.assets.full_score_pages
-    : (state.bundleManifest.assets.score_pages[state.runtime.selectedPartId] ?? state.bundleManifest.assets.full_score_pages);
-  const source = pages?.[Math.max(0, Math.min(pages.length - 1, page - 1))];
+  const continuousSource = state.bundleManifest.assets.continuous_scores?.[state.runtime.selectedPartId];
+  const pages = state.bundleManifest.assets.score_pages?.[state.runtime.selectedPartId] ?? [];
+  const source = continuousSource ?? pages?.[Math.max(0, Math.min(pages.length - 1, page - 1))];
   if (!source) { els.scoreLoading.hidden = false; els.scoreLoading.textContent = 'Pagina spartito non disponibile'; return; }
+  const layout = continuousSource ? 'continuous' : 'paged';
+  if (state.scoreLayout !== layout) state.activeScoreSegment = null;
+  state.scoreLayout = layout;
+  els.scoreSheet.classList.toggle('is-continuous', layout === 'continuous');
+  els.scoreImage.dataset.layout = layout;
   if (els.scoreImage.getAttribute('src') === source) return;
   els.scoreLoading.hidden = false;
   state.activeScoreSegment = null;
   els.scoreImage.src = source;
-  els.scoreImage.alt = state.fullScore ? 'Partitura completa' : `Spartito: ${part?.name ?? 'parte selezionata'}`;
+  els.scoreImage.alt = `Spartito: ${part?.name ?? 'parte selezionata'}`;
+}
+
+function voiceStemUrl(filename) {
+  const path = `${state.bundleManifest.assets.audio_root}/${filename}`;
+  const version = RUNTIME_CONFIG.buildVersion;
+  return version ? `${path}?v=${encodeURIComponent(version)}` : path;
+}
+
+function pauseVoiceStems() {
+  for (const audio of state.voiceStemAudio.values()) audio.pause();
+}
+
+function discardVoiceStems() {
+  for (const audio of state.voiceStemAudio.values()) state.playbackMixer.release(audio);
+  state.voiceStemAudio.clear();
+}
+
+function voiceLevel(partId) {
+  const level = state.voiceLevels.get(partId);
+  return Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 1;
+}
+
+function mixNormalization() {
+  if (state.playbackPlan?.kind === 'full-mix') return 1;
+  const accompanimentCount = state.accompanimentEnabled && state.backingManifest?.accompaniment_file ? 1 : 0;
+  const voiceCount = (state.playbackPlan?.voiceStems?.length ?? state.voiceStemAudio.size)
+    + (state.playbackPlan?.masterPartId ? 1 : 0);
+  return 1 / Math.sqrt(Math.max(1, voiceCount + accompanimentCount));
+}
+
+function syncVoiceStemLevels() {
+  const masterLevel = Number(els.volume.value) / 100;
+  const normalization = mixNormalization();
+  for (const [partId, audio] of state.voiceStemAudio.entries()) {
+    state.playbackMixer.setLevel(audio, masterLevel * voiceLevel(partId) * normalization);
+    audio.playbackRate = Number(els.playbackSpeed.value);
+    audio.preservesPitch = true;
+    audio.webkitPreservesPitch = true;
+  }
+}
+
+function syncBackingLevel() {
+  const silentClock = state.playbackPlan?.silentMaster ?? (Object.keys(state.backingManifest?.voice_stems ?? {}).length > 0
+    && !state.backingManifest?.accompaniment_file);
+  const fullMix = state.playbackPlan?.kind === 'full-mix';
+  const masterPartId = state.playbackPlan?.masterPartId;
+  const channelLevel = fullMix ? 1 : masterPartId ? voiceLevel(masterPartId) : state.accompanimentLevel;
+  const level = Number(els.volume.value) / 100 * channelLevel * mixNormalization();
+  state.playbackMixer.setLevel(els.backingAudio, level, {
+    forceMuted: silentClock || (!fullMix && !masterPartId && !state.accompanimentEnabled),
+  });
+}
+
+function canUseFullMix() {
+  const ids = Object.keys(state.backingManifest?.voice_stems ?? {});
+  const hasAccompaniment = Boolean(state.backingManifest?.accompaniment_file);
+  return Boolean(state.backingManifest?.full_mix_file)
+    && (!hasAccompaniment || (state.accompanimentEnabled && state.accompanimentLevel >= .999))
+    && ids.length > 0 && ids.every((partId) => state.selectedVoiceIds.has(partId) && voiceLevel(partId) >= .999);
+}
+
+function configureVoiceStems() {
+  discardVoiceStems();
+  const stems = state.backingManifest?.voice_stems ?? {};
+  const mixerAvailable = Object.keys(stems).length > 0;
+  els.accompanimentMode.disabled = !mixerAvailable;
+  const plannedStems = state.playbackPlan?.voiceStems
+    ?? [...state.selectedVoiceIds].filter((partId) => stems[partId]).map((partId) => ({ partId, file: stems[partId] }));
+  for (const { partId, file } of plannedStems) {
+    const audio = new Audio(voiceStemUrl(file));
+    audio.preload = 'auto';
+    audio.playsInline = true;
+    state.voiceStemAudio.set(partId, audio);
+  }
+  syncVoiceStemLevels();
+  els.accompanimentMode.textContent = 'Mixer';
+  els.accompanimentMode.title = mixerAvailable
+    ? 'Scegli quali parti vocali ascoltare' : 'Questo brano dispone soltanto del mix audio completo';
+}
+
+async function playVoiceStems() {
+  const time = els.backingAudio.currentTime;
+  syncVoiceStemLevels();
+  await Promise.all([...state.voiceStemAudio.values()].map(async (audio) => {
+    if (Math.abs(audio.currentTime - time) > .04) audio.currentTime = time;
+    try { await audio.play(); } catch (_) { /* Master audio reports actionable playback errors. */ }
+  }));
+}
+
+function renderVoiceMixer() {
+  const stems = state.backingManifest?.voice_stems ?? {};
+  const parts = vocalParts(state.runtime).filter((part) => stems[part.id]);
+  const hasAccompaniment = Boolean(state.backingManifest?.accompaniment_file);
+  const accompanimentActive = hasAccompaniment && state.accompanimentEnabled;
+  els.voiceMixerAccompaniment.hidden = !hasAccompaniment;
+  els.voiceMixerAccompanimentEnabled.disabled = !hasAccompaniment;
+  els.voiceMixerAccompanimentEnabled.textContent = accompanimentActive ? 'Mute' : 'Unmute';
+  els.voiceMixerAccompanimentEnabled.setAttribute('aria-pressed', String(!accompanimentActive));
+  els.voiceMixerAccompaniment.classList.toggle('is-muted', !accompanimentActive);
+  els.voiceMixerAccompanimentLevel.value = String(Math.round(state.accompanimentLevel * 100));
+  els.voiceMixerAccompanimentLevel.disabled = !accompanimentActive;
+  els.voiceMixerAccompanimentValue.value = `${Math.round(state.accompanimentLevel * 100)}%`;
+  els.voiceMixerOptions.replaceChildren(...parts.map((part) => {
+    const active = state.selectedVoiceIds.has(part.id);
+    const row = document.createElement('section'); row.className = 'mixer-channel';
+    row.classList.toggle('is-muted', !active);
+    row.setAttribute('aria-label', `Canale ${part.name}`);
+    const heading = document.createElement('div'); heading.className = 'mixer-channel-heading';
+    const name = document.createElement('strong'); name.textContent = part.name;
+    const detail = document.createElement('span'); detail.textContent = part.id === state.runtime.selectedPartId ? 'mia parte' : 'voce';
+    heading.append(name, detail);
+    const output = document.createElement('output');
+    const slider = document.createElement('input');
+    slider.type = 'range'; slider.min = '0'; slider.max = '100'; slider.value = String(Math.round(voiceLevel(part.id) * 100));
+    slider.setAttribute('aria-label', `Volume ${part.name}`); slider.disabled = !active;
+    output.value = `${slider.value}%`;
+    const fader = document.createElement('div'); fader.className = 'mixer-fader'; fader.append(slider);
+    const mute = document.createElement('button'); mute.type = 'button'; mute.className = 'mixer-mute';
+    mute.textContent = active ? 'Mute' : 'Unmute'; mute.setAttribute('aria-pressed', String(!active));
+    mute.setAttribute('aria-label', `${active ? 'Silenzia' : 'Riattiva'} ${part.name}`);
+    mute.addEventListener('click', () => {
+      const next = new Set(state.selectedVoiceIds);
+      if (next.has(part.id)) next.delete(part.id); else next.add(part.id);
+      void applyVoiceSelection(next);
+      savePreferences();
+    });
+    slider.addEventListener('input', () => {
+      state.voiceLevels.set(part.id, Number(slider.value) / 100); output.value = `${slider.value}%`;
+      if (state.playbackPlan?.kind !== 'full-mix') {
+        syncVoiceStemLevels();
+        if (state.playbackPlan?.masterPartId === part.id) syncBackingLevel();
+      }
+    });
+    slider.addEventListener('change', () => { void applyVoiceSelection(state.selectedVoiceIds); savePreferences(); });
+    row.append(heading, output, fader, mute);
+    return row;
+  }));
 }
 
 function configureBacking() {
@@ -281,15 +591,115 @@ function configureBacking() {
   if (!mix) { els.backingAudio.removeAttribute('src'); return; }
   const speed = Number(els.playbackSpeed.value);
   const speedFile = mix.files_by_speed?.[String(speed)];
-  state.usesPreRenderedSpeed = Boolean(speedFile);
-  const file = `${state.bundleManifest.assets.audio_root}/${speedFile ?? mix.file}`;
-  els.backingAudio.src = state.transpose
-    ? `/api/transpose?file=${encodeURIComponent(file)}&semitones=${state.transpose}`
-    : file;
+  state.usesPreRenderedSpeed = Boolean(speedFile) && !state.backingManifest.accompaniment_file;
+  state.playbackPlan = buildMediaPlaybackPlan({
+    mixFile: speedFile ?? state.backingManifest.full_mix_file ?? mix.file,
+    accompanimentFile: state.backingManifest.accompaniment_file,
+    accompanimentEnabled: state.accompanimentEnabled,
+    voiceStems: state.backingManifest.voice_stems,
+    selectedVoiceIds: state.selectedVoiceIds,
+    preferFullMix: canUseFullMix(),
+  });
+  const baseFile = state.playbackPlan.masterFile;
+  if (!baseFile) {
+    discardVoiceStems();
+    els.backingAudio.pause();
+    els.backingAudio.removeAttribute('src');
+    els.backingAudio.load();
+    els.togglePlayback.disabled = true;
+    return;
+  }
+  const source = voiceStemUrl(baseFile);
+  if (els.backingAudio.getAttribute('src') !== source) {
+    els.backingAudio.src = source;
+    els.backingAudio.load();
+  }
   els.togglePlayback.disabled = false;
-  els.backingAudio.volume = Number(els.volume.value) / 100;
+  syncBackingLevel();
   els.backingAudio.playbackRate = state.usesPreRenderedSpeed ? 1 : speed;
   els.backingAudio.preservesPitch = true;
+  els.backingAudio.webkitPreservesPitch = true;
+  state.playbackMixer.setTranspose(state.transpose);
+  configureVoiceStems();
+}
+
+function waitForMediaReady(media, minimumReadyState = 1, timeoutMs = 8000) {
+  if (!media || !media.getAttribute('src') || media.readyState >= minimumReadyState || media.error) return Promise.resolve();
+  return new Promise((resolve) => {
+    const eventName = minimumReadyState >= 3 ? 'canplay' : 'loadedmetadata';
+    let timeout;
+    const finish = () => {
+      clearTimeout(timeout);
+      media.removeEventListener(eventName, finish);
+      media.removeEventListener('error', finish);
+      resolve();
+    };
+    media.addEventListener(eventName, finish, { once: true });
+    media.addEventListener('error', finish, { once: true });
+    timeout = setTimeout(finish, timeoutMs);
+    media.load();
+  });
+}
+
+function waitForMediaSeek(media, timeoutMs = 2000) {
+  if (!media?.seeking) return Promise.resolve();
+  return new Promise((resolve) => {
+    let timeout;
+    const finish = () => {
+      clearTimeout(timeout);
+      media.removeEventListener('seeked', finish);
+      media.removeEventListener('error', finish);
+      resolve();
+    };
+    media.addEventListener('seeked', finish, { once: true });
+    media.addEventListener('error', finish, { once: true });
+    timeout = setTimeout(finish, timeoutMs);
+  });
+}
+
+async function applyVoiceSelection(selectedVoiceIds) {
+  const changeToken = ++state.voiceMixChangeToken;
+  const snapshot = playbackSnapshot();
+  const shouldResume = state.clock.running || state.voiceMixResumeRequested;
+  state.voiceMixResumeRequested = shouldResume;
+  if (state.clock.running) {
+    state.clock.pause();
+    updatePlaybackButton();
+  }
+  state.selectedVoiceIds = new Set(selectedVoiceIds);
+  configureBacking();
+  renderVoiceMixer();
+  if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(Number(els.playbackSpeed.value));
+  else state.clock.setSpeed(Number(els.playbackSpeed.value));
+
+  const media = [els.backingAudio, ...state.voiceStemAudio.values()];
+  await Promise.all(media.map((item) => waitForMediaReady(item, shouldResume ? 3 : 1)));
+  if (changeToken !== state.voiceMixChangeToken) return;
+  if (els.backingAudio.readyState >= 1) {
+    state.clock.seekPerformanceTime(snapshot.performanceTime);
+    await waitForMediaSeek(els.backingAudio);
+    state.pendingAudioTime = null;
+  } else {
+    state.pendingAudioTime = snapshot.performanceTime;
+  }
+  for (const audio of state.voiceStemAudio.values()) {
+    if (audio.readyState >= 1) audio.currentTime = els.backingAudio.currentTime;
+  }
+
+  if (shouldResume) {
+    try {
+      await state.playbackMixer.resume(media);
+      syncBackingLevel();
+      syncVoiceStemLevels();
+      await state.clock.play();
+    } catch (error) {
+      console.error('Voice mix change failed', error);
+      showToast('Cambio del mix non riuscito. Riprova.');
+    }
+  }
+  state.voiceMixResumeRequested = false;
+  updatePlaybackButton();
+  render();
 }
 
 function buildScoreGeometry(partId) {
@@ -330,6 +740,14 @@ function scorePageFallbackSlots(svg, page) {
     const points = (line.getAttribute('points') ?? '').trim().split(/[\s,]+/).map(Number);
     return { x: points[0], y1: points[1], y2: points[3] };
   }).filter((line) => line.x != null && line.y1 != null && line.y2 != null);
+  const musicalSymbols = [...document.querySelectorAll('.Note, .Rest')].map((symbol) => {
+    const match = (symbol.getAttribute('d') ?? '').match(/^\s*M\s*([-+\d.eE]+)[,\s]+([-+\d.eE]+)/);
+    return match ? { x: Number(match[1]), y: Number(match[2]) } : null;
+  }).filter((symbol) => symbol && Number.isFinite(symbol.x) && Number.isFinite(symbol.y));
+  // Double final barlines contain two nearby SVG BarLine elements.  On a
+  // very wide continuous score their gap can exceed the old fixed threshold
+  // and masquerade as an extra measure, so scale the minimum with the viewBox.
+  const minimumMeasureWidth = Math.max(40, width * .001);
   const slots = [];
   for (let offset = 0, systemIndex = 0; offset + 4 < staffLines.length; offset += 5, systemIndex += 1) {
     const lines = staffLines.slice(offset, offset + 5);
@@ -339,8 +757,16 @@ function scorePageFallbackSlots(svg, page) {
     const barXs = [...new Set(barLines.filter((line) => Math.abs((line.y1 + line.y2) / 2 - centerY) < 420
       && line.x > startX + 20 && line.x <= endX + 25).map((line) => Math.round(line.x)).sort((a, b) => a - b))];
     let left = startX;
-    for (const right of barXs) {
-      if (right - left > 40) slots.push({ page, systemId: `fallback-p${page}-s${systemIndex}`, startX: left / width * 100,
+    for (let barIndex = 0; barIndex < barXs.length; barIndex += 1) {
+      const right = barXs[barIndex];
+      // On a new system the staff begins before clef, key and time signature.
+      // Anchor its first measure to the first actual note/rest instead.
+      const firstSymbolX = barIndex === 0
+        ? Math.min(...musicalSymbols.filter((symbol) => Math.abs(symbol.y - centerY) < 500
+          && symbol.x > left + 20 && symbol.x < right).map((symbol) => symbol.x))
+        : Number.POSITIVE_INFINITY;
+      const visualLeft = Number.isFinite(firstSymbolX) ? firstSymbolX : left;
+      if (right - visualLeft > minimumMeasureWidth) slots.push({ page, systemId: `fallback-p${page}-s${systemIndex}`, startX: visualLeft / width * 100,
         endX: right / width * 100, y_percent: centerY / height * 100, systemCenterY: centerY / height * 100 });
       left = right;
     }
@@ -349,10 +775,14 @@ function scorePageFallbackSlots(svg, page) {
 }
 
 async function buildFallbackScoreGeometry(partId) {
-  const pages = state.bundleManifest.assets.score_pages[partId] ?? state.bundleManifest.assets.full_score_pages;
-  if (!pages?.length) { state.fallbackScoreSlots = []; return; }
+  const continuousSource = state.bundleManifest.assets.continuous_scores?.[partId];
+  const pages = state.bundleManifest.assets.score_pages?.[partId] ?? [];
+  const sources = continuousSource ? [continuousSource] : pages;
+  state.scoreLayout = continuousSource ? 'continuous' : 'paged';
+  els.scoreSheet.classList.toggle('is-continuous', Boolean(continuousSource));
+  if (!sources?.length) { state.fallbackScoreSlots = []; return; }
   try {
-    const contents = await Promise.all(pages.map(async (page) => {
+    const contents = await Promise.all(sources.map(async (page) => {
       const response = await fetch(page, { cache: 'force-cache' });
       if (!response.ok) throw new Error(`pagina spartito non disponibile (${response.status})`);
       return response.text();
@@ -375,20 +805,17 @@ function renderScore(beat) {
   const glyph = sourceGlyph(event);
   const fallback = glyph ? null : fallbackScorePosition(beat);
   const activeGlyph = glyph ?? fallback;
-  const page = activeGlyph?.page ?? Math.min(3, Math.floor(measureIndexAt(beat) / 7) + 1);
+  const page = state.scoreLayout === 'continuous'
+    ? 1 : activeGlyph?.page ?? Math.min(3, Math.floor(measureIndexAt(beat) / 7) + 1);
   if (page !== state.scorePage) state.scorePage = page;
   loadScoreImage(page);
-  if (state.fullScore) { els.scoreSheet.style.transform = 'translate(0, 0)'; return; }
   if (!activeGlyph) {
-    // Library MSCZ exports currently use complete-score SVG pages.  There is
-    // no per-note SVG map yet, so expose the first staff system rather than
-    // the large blank top margin of an A4 MuseScore page.
+    // Without a per-note SVG map, expose the first staff system of the
+    // selected vocal part rather than the large blank top margin of the page.
     els.scoreSheet.style.transform = 'translate(0, -13%)';
     els.scoreCursor.style.display = 'none';
     return;
   }
-  els.scoreCursor.style.display = '';
-
   const nextEvent = glyph && state.runtime.targetEvents.find((candidate) => {
     const candidateGlyph = sourceGlyph(candidate);
     return candidate.onsetBeat >= event.onsetBeat + event.durationBeats - 0.001 && candidateGlyph?.systemId === glyph.systemId;
@@ -397,18 +824,30 @@ function renderScore(beat) {
   const nextGlyph = glyph && candidateNextGlyph?.x_percent >= glyph.x_percent ? candidateNextGlyph : null;
   const progress = Math.max(0, Math.min(1, (beat - event.onsetBeat) / Math.max(event.durationBeats, .01)));
   const x = glyph ? (nextGlyph ? glyph.x_percent + (nextGlyph.x_percent - glyph.x_percent) * progress : glyph.x_percent) : fallback.x_percent;
-  els.scoreCursor.style.left = `${x}%`;
-  els.scoreCursor.style.top = `${activeGlyph.y_percent}%`;
-
+  // Read layout before mutating cursor styles. The previous order forced the
+  // browser to synchronously recalculate layout on every animation frame.
   const imageHeight = els.scoreImage.getBoundingClientRect().height;
   const viewportHeight = els.scoreViewport.clientHeight;
   const sheetWidth = els.scoreSheet.getBoundingClientRect().width;
   const viewportWidth = els.scoreViewport.clientWidth;
   if (!imageHeight || !sheetWidth || !viewportWidth) return;
+  els.scoreCursor.style.display = '';
+  els.scoreCursor.style.left = `${x}%`;
+  els.scoreCursor.style.top = `${activeGlyph.y_percent}%`;
   // Keep the current-time bar visible across the whole score window, rather
   // than limiting it to a small marker around the active note.
   els.scoreCursor.style.height = `${Math.max(86, viewportHeight)}px`;
   const systemY = imageHeight * activeGlyph.systemCenterY / 100;
+  if (state.scoreLayout === 'continuous') {
+    const cursorAnchor = Math.max(72, Math.min(viewportWidth - 48, viewportWidth * .38));
+    const scoreX = sheetWidth * x / 100;
+    const offsetX = Math.max(viewportWidth - sheetWidth, Math.min(0, cursorAnchor - scoreX));
+    const offsetY = Math.max(viewportHeight - imageHeight, Math.min(0, viewportHeight * .52 - systemY));
+    els.scoreSheet.style.transform = `translate(${offsetX}px, ${offsetY}px)`;
+    state.activeScoreSegment = null;
+    state.lastScoreEvent = { eventId: event.id, sourceEventId: event.sourceEventId, measureNumber: event.measureNumber, beat };
+    return;
+  }
   const panelCount = Math.max(1, Math.ceil(sheetWidth / viewportWidth));
   const panelIndex = Math.min(panelCount - 1, Math.floor(x / 100 * panelCount));
   const segmentKey = `${activeGlyph.systemId}-panel${panelIndex}`;
@@ -452,27 +891,15 @@ function pitchBounds(beat) {
   return viewport.bounds;
 }
 
-function sampleMicrophone(beat, running) {
-  const now = performance.now();
-  const elapsed = state.lastSampleMs == null ? 0 : Math.min(64, now - state.lastSampleMs);
-  state.lastSampleMs = now;
-  if (state.microphoneStatus !== 'active') { state.trackedPitch = null; state.displayPitch = null; state.pitchConfirmationState = null; state.displayPitchFilter.reset(); state.microphoneRms = 0; return; }
-  state.microphoneAnalyser.getFloatTimeDomainData(state.microphoneBuffer);
-  const v1StartedMs = performance.now();
-  const rawEstimate = detectPitch(state.microphoneBuffer, state.microphoneContext.sampleRate, state.detectorSettings);
-  if (state.neuralLive.enabled || state.neuralLive.loading) {
-    state.neuralLive.v1DurationsMs.push(performance.now() - v1StartedMs);
+function applyPitchEstimate(rawEstimate, beat, sampledAt, analysisMs, running) {
+  if (state.microphoneStatus !== 'active') return;
+  if ((state.neuralLive.enabled || state.neuralLive.loading) && Number.isFinite(analysisMs)) {
+    state.neuralLive.v1DurationsMs.push(analysisMs);
     if (state.neuralLive.v1DurationsMs.length > 80) state.neuralLive.v1DurationsMs.shift();
   }
-  const estimate = state.pitchSmoother.update(rawEstimate, performance.now());
-  queueNeuralLiveInference(state.microphoneBuffer, state.microphoneContext.sampleRate, beat);
+  const estimate = state.pitchSmoother.update(rawEstimate, sampledAt);
   appendBenchmarkFrame(estimate, beat);
   state.microphoneRms = estimate.rms;
-  document.getElementById('microphone-level').value = state.microphoneRms;
-  document.getElementById('test-microphone-level').value = state.microphoneRms;
-  document.getElementById('microphone-help').textContent = state.trackedPitch == null
-    ? state.microphoneRms < .001 ? 'Microfono aperto: segnale troppo debole. Controlla ingresso e volume in Windows.' : 'Il segnale arriva. Tieni una nota per riconoscerla.'
-    : `Nota riconosciuta: ${noteLabel(state.trackedPitch)}. Sei pronto per iniziare.`;
   state.trackedPitch = estimate.stable && estimate.accepted && estimate.hz
     ? 69 + 12 * Math.log2(estimate.hz / 440)
     : null;
@@ -485,8 +912,112 @@ function sampleMicrophone(beat, running) {
   } else if (state.trackedPitch == null) {
     state.displayPitchFilter.reset();
     state.displayPitch = null;
-  } else if (state.displayPitchAlgorithm === 'v1') state.displayPitch = displayPitchFromTracked(state.trackedPitch);
-  else state.displayPitch = state.displayPitchFilter.filter(state.trackedPitch, performance.now() / 1000);
+  } else state.displayPitch = state.displayPitchFilter.filter(state.trackedPitch, sampledAt / 1000);
+  document.getElementById('microphone-level').value = state.microphoneRms;
+  const microphoneHelp = state.trackedPitch == null
+    ? state.microphoneRms < activeRecognitionSettings().rmsThreshold ? 'Microfono aperto: segnale troppo debole. Controlla ingresso e volume in Windows.' : 'Il segnale arriva. Tieni una nota per riconoscerla.'
+    : `Nota riconosciuta: ${noteLabel(state.trackedPitch)}. Sei pronto per iniziare.`;
+  const microphoneHelpElement = document.getElementById('microphone-help');
+  if (microphoneHelpElement && microphoneHelpElement.textContent !== microphoneHelp) microphoneHelpElement.textContent = microphoneHelp;
+
+  // Retain invalid observations too: the renderer must see silence boundaries.
+  // Paused listening and the one-measure count-in remain visible in the live
+  // readout, but must never become part of the recorded attempt.
+  const recording = running && state.clock?.running && beat >= state.scoringStartBeat;
+  if (recording) {
+    const previous = state.pitchSamples.at(-1);
+    const sample = { beat, trackedPitch: state.trackedPitch, displayPitch: state.displayPitch, rawPitch,
+      confirmationState: state.pitchConfirmationState,
+      confidence: estimate.confidence, clarity: estimate.clarity, takeId: state.pitchTakeId };
+    if (!previous || previous.takeId !== state.pitchTakeId || beat - previous.beat >= .025) state.pitchSamples.push(sample);
+  }
+  if (state.pitchSamples.length > 12000) state.pitchSamples.splice(0, state.pitchSamples.length - 12000);
+}
+
+function stopPitchWorker() {
+  state.pitchAnalysisGeneration += 1;
+  state.pitchWorker?.terminate();
+  state.pitchWorker = null;
+  state.pitchWorkerInFlight = false;
+}
+
+function ensurePitchWorker() {
+  if (state.pitchWorker || state.pitchWorkerDisabled || !window.Worker) return state.pitchWorker;
+  try {
+    const worker = new Worker('pitch_detector_worker.js');
+    worker.onmessage = ({ data }) => {
+      state.pitchWorkerInFlight = false;
+      if (data.buffer && state.microphoneStatus === 'active') state.microphoneBuffer = new Float32Array(data.buffer);
+      if (data.error) {
+        state.pitchWorkerDisabled = true;
+        worker.terminate(); state.pitchWorker = null;
+        if (state.microphoneStatus === 'active' && !state.microphoneBuffer)
+          state.microphoneBuffer = new Float32Array(state.microphoneAnalyser.fftSize);
+        return;
+      }
+      if (data.generation !== state.pitchAnalysisGeneration) return;
+      applyPitchEstimate(data.estimate, data.beat, data.sampledAt, data.analysisMs, data.running);
+    };
+    worker.onerror = () => {
+      state.pitchWorkerDisabled = true;
+      stopPitchWorker();
+      if (state.microphoneStatus === 'active') state.microphoneBuffer = new Float32Array(state.microphoneAnalyser.fftSize);
+    };
+    state.pitchWorker = worker;
+  } catch (_) { state.pitchWorkerDisabled = true; }
+  return state.pitchWorker;
+}
+
+function analyseMicrophone(beat, running, now) {
+  if (!state.microphoneBuffer || state.pitchWorkerInFlight) return;
+  state.microphoneAnalyser.getFloatTimeDomainData(state.microphoneBuffer);
+  queueNeuralLiveInference(state.microphoneBuffer, state.microphoneContext.sampleRate, beat, running);
+  const worker = ensurePitchWorker();
+  if (worker) {
+    const buffer = state.microphoneBuffer.buffer;
+    state.microphoneBuffer = null;
+    state.pitchWorkerInFlight = true;
+    try {
+      worker.postMessage({ buffer, sampleRate: state.microphoneContext.sampleRate,
+        settings: activeRecognitionSettings(), beat, sampledAt: now, running,
+        generation: state.pitchAnalysisGeneration }, [buffer]);
+    } catch (_) {
+      state.pitchWorkerInFlight = false;
+      state.pitchWorkerDisabled = true;
+      stopPitchWorker();
+      state.microphoneBuffer = new Float32Array(state.microphoneAnalyser.fftSize);
+    }
+    return;
+  }
+  const startedAt = performance.now();
+  const estimate = detectPitch(state.microphoneBuffer, state.microphoneContext.sampleRate, activeRecognitionSettings());
+  applyPitchEstimate(estimate, beat, now, performance.now() - startedAt, running);
+}
+
+function stopPitchAnalysisLoop() {
+  clearInterval(state.pitchAnalysisTimer);
+  state.pitchAnalysisTimer = null;
+}
+
+function startPitchAnalysisLoop() {
+  stopPitchAnalysisLoop();
+  const tick = () => {
+    if (state.microphoneStatus !== 'active' || state.pitchWorkerInFlight) return;
+    const snapshot = state.clock?.snapshot() ?? { beat: 0, running: false };
+    analyseMicrophone(snapshot.beat, snapshot.running, performance.now());
+  };
+  tick();
+  state.pitchAnalysisTimer = setInterval(tick, UI_CONFIG.pitchAnalysisIntervalMs);
+}
+
+function sampleMicrophone(beat, running) {
+  const now = performance.now();
+  const elapsed = state.lastSampleMs == null ? 0 : Math.min(64, now - state.lastSampleMs);
+  state.lastSampleMs = now;
+  if (state.microphoneStatus !== 'active') {
+    state.trackedPitch = null; state.displayPitch = null; state.pitchConfirmationState = null;
+    state.displayPitchFilter.reset(); state.microphoneRms = 0; return;
+  }
   if (running && state.trackedPitch != null) {
     const target = state.runtime.targetAt(beat);
     if (state.attemptActive && target && beat >= state.scoringStartBeat && beat >= target.onsetBeat + target.attackGraceBeats) {
@@ -494,17 +1025,6 @@ function sampleMicrophone(beat, running) {
       if (Math.abs((state.trackedPitch - target.midiPitch - state.transpose) * 100) <= UI_CONFIG.acceptableCents) state.attempt.insideMs += elapsed;
     }
   }
-  if (state.displayPitch != null || rawPitch != null) {
-    const previous = state.pitchSamples.at(-1);
-    const sample = { beat, trackedPitch: state.trackedPitch, displayPitch: state.displayPitch, rawPitch,
-      confirmationState: state.pitchConfirmationState,
-      confidence: estimate.confidence, clarity: estimate.clarity, takeId: state.pitchTakeId };
-    if (!running && previous?.takeId === state.pitchTakeId && Math.abs(beat - previous.beat) < .025) state.pitchSamples[state.pitchSamples.length - 1] = sample;
-    else if (!previous || previous.takeId !== state.pitchTakeId || beat - previous.beat >= .025) state.pitchSamples.push(sample);
-  }
-  // Keep a bounded session history: the director can pan back over earlier
-  // takes instead of losing the trace whenever playback is repositioned.
-  if (state.pitchSamples.length > 12000) state.pitchSamples.splice(0, state.pitchSamples.length - 12000);
 }
 
 function medianOf(values) {
@@ -552,7 +1072,7 @@ function resampleLiveCrepeFrame(samples, sourceRate) {
   return output;
 }
 
-function queueNeuralLiveInference(samples, sourceRate, beat) {
+function queueNeuralLiveInference(samples, sourceRate, beat, running) {
   const neural = state.neuralLive;
   const now = performance.now();
   if (!neural.enabled || neural.inFlight || now - neural.lastStartedMs < 50) return;
@@ -573,8 +1093,10 @@ function queueNeuralLiveInference(samples, sourceRate, beat) {
       if (neural.durationsMs.length > 80) neural.durationsMs.shift();
       neural.lastLatencyMs = elapsedMs;
       neural.latestPitch = Number.isFinite(result.hz) ? 69 + 12 * Math.log2(result.hz / 440) : null;
-      neural.samples.push({ beat, pitch: neural.latestPitch, takeId: state.pitchTakeId, salience: Float32Array.from(probabilities.subarray(0, 360)) });
-      if (neural.samples.length > 12000) neural.samples.splice(0, neural.samples.length - 12000);
+      if (running && state.clock?.running && beat >= state.scoringStartBeat) {
+        neural.samples.push({ beat, pitch: neural.latestPitch, takeId: state.pitchTakeId, salience: Float32Array.from(probabilities.subarray(0, 360)) });
+        if (neural.samples.length > 12000) neural.samples.splice(0, neural.samples.length - 12000);
+      }
     } catch (error) {
       if (generation === state.neuralLive.generation) {
         neural.error = 'inferenza non disponibile';
@@ -605,7 +1127,7 @@ async function toggleNeuralLive() {
     await crepeSession();
     if (generation !== neural.generation) return;
     neural.loading = false; neural.enabled = true;
-    showToast('CREPE live attivo: plume rosa, score invariato.');
+    showToast('Seconda analisi live attiva: traccia secondaria, score invariato.');
   } catch (error) {
     if (generation !== neural.generation) return;
     neural.loading = false; neural.enabled = false; neural.error = 'runtime non caricato';
@@ -659,74 +1181,61 @@ function drawStablePitchSegments(context, segments, xAt, yAt) {
   }
 }
 
-function drawLiveCrepePlume(context, samples, xAt, yAt, minPitch, maxPitch) {
-  context.save(); context.globalCompositeOperation = 'screen';
-  for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex += 1) {
-    const sample = samples[sampleIndex], salience = sample.salience;
-    if (!salience?.length) continue;
-    let peak = 0;
-    for (let index = 0; index < salience.length; index += 1) peak = Math.max(peak, salience[index]);
-    if (peak < .18) continue;
-    const x = xAt(sample), next = samples[sampleIndex + 1];
-    const halfWidth = Math.max(1, Math.min(5, next ? Math.abs(xAt(next) - x) / 2 : 2));
-    for (let index = 0; index < salience.length; index += 1) {
-      const pitch = crepeBinMidi(index);
-      if (pitch < minPitch || pitch > maxPitch) continue;
-      const relative = salience[index] / peak;
-      if (relative < .18) continue;
-      context.fillStyle = `rgba(243,166,208,${.18 * Math.pow(relative, .72)})`;
-      context.fillRect(x - halfWidth, yAt(pitch) - 3, halfWidth * 2, 6);
-    }
+function drawMelodicIntervalArrows(context, events, xAtBeat, yAtPitch, rowHeight, clip) {
+  const colour = '#438eaa';
+  context.save();
+  context.beginPath(); context.rect(clip.left, clip.top, clip.right - clip.left, clip.bottom - clip.top); context.clip();
+  context.strokeStyle = colour; context.lineWidth = 2;
+  context.lineCap = 'round'; context.lineJoin = 'round';
+  for (const interval of adjacentMelodicIntervals(events)) {
+    const x = Math.round(xAtBeat(interval.next.onsetBeat)) + .5;
+    if (x < clip.left || x > clip.right) continue;
+    const previousY = yAtPitch(interval.previous.midiPitch + state.transpose);
+    const nextY = yAtPitch(interval.next.midiPitch + state.transpose);
+    const startY = previousY - interval.direction * rowHeight / 2;
+    const endY = nextY + interval.direction * rowHeight / 2;
+    const canvasDirection = Math.sign(endY - startY);
+    context.beginPath(); context.moveTo(x, startY); context.lineTo(x, endY); context.stroke();
+    context.beginPath();
+    context.moveTo(x - 4, endY - canvasDirection * 6);
+    context.lineTo(x, endY);
+    context.lineTo(x + 4, endY - canvasDirection * 6);
+    context.stroke();
+
+    context.font = '700 10px Inter, sans-serif';
+    context.textAlign = 'left'; context.textBaseline = 'middle';
+    const labelWidth = context.measureText(interval.label).width;
+    // Syllables begin immediately to the right of a note onset, so prefer the
+    // preceding side of the join and avoid merging labels such as “2” with text.
+    const labelX = x - labelWidth - 12 >= clip.left ? x - labelWidth - 10 : x + 7;
+    const labelY = (startY + endY) / 2;
+    context.fillStyle = colour;
+    roundedRect(context, labelX - 3, labelY - 7, labelWidth + 6, 14, 4); context.fill();
+    context.fillStyle = '#071419'; context.fillText(interval.label, labelX, labelY + .5);
   }
   context.restore();
 }
 
-// v1 does not retain a full multi-candidate CMND surface in the live loop.
-// This is therefore an explicitly visual confidence plume around raw F0, not
-// a claim of a multimodal acoustic posterior. It costs only a few canvas fills.
-function drawLiveV1ConfidencePlume(context, samples, xAt, yAt, minPitch, maxPitch) {
-  const plumeWidth = state.plumeSettings.width;
-  const plumeIntensity = state.plumeSettings.intensity;
-  const colour = /^#([0-9a-f]{6})$/i.exec(state.plumeSettings.color)?.[1] ?? '63c8c2';
-  const red = Number.parseInt(colour.slice(0, 2), 16);
-  const green = Number.parseInt(colour.slice(2, 4), 16);
-  const blue = Number.parseInt(colour.slice(4, 6), 16);
-  context.save(); context.globalCompositeOperation = 'screen';
-  for (let sampleIndex = 0; sampleIndex < samples.length; sampleIndex += 1) {
-    const sample = samples[sampleIndex];
-    const provisional = sample.confirmationState === 'provisional';
-    if (provisional && sampleIndex % 2 === 1) continue;
-    const center = sample.displayPitch;
-    if (!Number.isFinite(center)) continue;
-    const confidence = Math.max(0, Math.min(1, sample.confidence ?? 0));
-    // This is an intentionally restrained display width: it communicates v1
-    // confidence without turning a single F0 estimate into a fictitious
-    // multi-semitone distribution.
-    const sigmaSemitones = (.08 + (1 - confidence) * .32) * plumeWidth;
-    const x = xAt(sample), next = samples[sampleIndex + 1];
-    // Span to the next frame rather than drawing isolated thin columns. The
-    // small overlap also makes the plume continuous when RAF cadence varies.
-    const width = Math.max(4, Math.min(18, next ? Math.abs(xAt(next) - x) + 2 : 8));
-    for (let offset = -3 * sigmaSemitones; offset <= 3 * sigmaSemitones; offset += .08) {
-      const pitch = center + offset;
-      if (pitch < minPitch || pitch > maxPitch) continue;
-      const relative = Math.exp(-.5 * (offset / sigmaSemitones) ** 2);
-      const alpha = Math.min(.55, (.025 + confidence * .1) * relative * plumeIntensity * (provisional ? .35 : 1));
-      context.fillStyle = `rgba(${red},${green},${blue},${alpha})`;
-      // 8px-high bands overlap at every practical piano-roll zoom: no black
-      // horizontal pinstripes between adjacent probability samples.
-      context.fillRect(x - width / 2, yAt(pitch) - 4, width, 8);
-    }
-  }
-  context.restore();
+function livePlumeSettings(displayBeat, inspecting, nowX, trailStartX) {
+  const speed = Math.max(.1, Number(els.playbackSpeed.value) || 1);
+  return { ...state.plumeSettings, nowX, trailStartX,
+    mode: inspecting ? 'review' : 'live', sortedTimeline: !inspecting,
+    retainHistory: !inspecting,
+    minConfidence: activeRecognitionSettings().minConfidence,
+    currentTime: state.runtime.secondsAtBeat(displayBeat) / speed,
+    timeAt: sample => state.runtime.secondsAtBeat(sample.beat) / speed };
 }
 
 function visuallyAdvancedPitchBeat(beat) {
-  const advanceMs = Math.max(0, Math.min(200, Number(state.plumeSettings.timeAdvanceMs) || 0));
+  const advanceMs = Math.max(0, Math.min(PitchShared.PLUME_ADVANCE_MAX_MS, Number(state.plumeSettings.timeAdvanceMs) || 0));
   if (!advanceMs || !state.runtime) return beat;
   const playbackSpeed = Math.max(.1, Number(els.playbackSpeed.value) || 1);
   const scoreSeconds = state.runtime.secondsAtBeat(beat) - advanceMs / 1000 * playbackSpeed;
   return state.runtime.beatAtSeconds(Math.max(0, scoreSeconds));
+}
+
+function currentPianoRollBeat(snapshot = playbackSnapshot()) {
+  return delayedVisualBeat(state.runtime, snapshot.performanceTime, snapshot.speed, state.pianoRollDelayMs);
 }
 
 function drawPitchLane(beat) {
@@ -740,6 +1249,7 @@ function drawPitchLane(beat) {
   const ctx = canvas.getContext('2d');
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   ctx.clearRect(0, 0, rect.width, rect.height);
+  let fluidLayerDrawn = false;
 
   const plot = { left: rect.width < 700 ? 48 : 58, right: rect.width - 8, top: rect.width < 700 ? 28 : 32, bottom: rect.height - 24 };
   const inspect = state.gridInspect;
@@ -750,10 +1260,20 @@ function drawPitchLane(beat) {
   const baseSpan = baseBounds.max - baseBounds.min;
   const pitchSpan = baseSpan / (inspecting ? inspect.pitchZoom : 1);
   const bounds = { min: baseCenter - pitchSpan / 2, max: baseCenter + pitchSpan / 2 };
-  const historyBeats = UI_CONFIG.historyBeats / (inspecting ? inspect.timeZoom : 1);
-  const futureBeats = UI_CONFIG.futureBeats / (inspecting ? inspect.timeZoom : 1);
+  const compactLayout = window.matchMedia('(max-width: 960px)').matches;
+  const baseHistoryBeats = compactLayout ? UI_CONFIG.mobileHistoryBeats : UI_CONFIG.historyBeats;
+  const baseFutureBeats = compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats;
+  let historyBeats = baseHistoryBeats / (inspecting ? inspect.timeZoom : 1);
+  let futureBeats = baseFutureBeats / (inspecting ? inspect.timeZoom : 1);
+  if (compactLayout) ({ historyBeats, futureBeats } = limitTimelineWindowToMeasures(
+    state.occurrenceMeasures, displayBeat, historyBeats, futureBeats, 4));
   const rowHeight = (plot.bottom - plot.top) / (bounds.max - bounds.min);
   const nowX = timeToX(displayBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
+  const noteLabelX = compactLayout ? 6 : nowX - UI_CONFIG.pitchNoteLabelOffsetPx;
+  const melodyHeadX = compactLayout ? nowX - UI_CONFIG.pitchHeadGapPx : noteLabelX - UI_CONFIG.pitchHeadGapPx;
+  const noteStripLeft = compactLayout ? 0 : noteLabelX - 4;
+  const noteStripRight = compactLayout ? plot.left - 4 : nowX - 1;
+  const voiceClipRight = compactLayout ? nowX - 2 : noteLabelX - 2;
   els.intonationReadout.style.left = `${nowX + 12}px`;
   els.intonationReadout.style.right = 'auto';
 
@@ -785,6 +1305,7 @@ function drawPitchLane(beat) {
   ctx.save();
   ctx.beginPath(); ctx.rect(plot.left, 0, plot.right - plot.left, plot.bottom); ctx.clip();
   rhythmGridLines(state.occurrenceMeasures, visibleStart, visibleEnd).forEach((line) => {
+    if (compactLayout && line.kind === 'subdivision') return;
     const x = timeToX(line.beat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
     if (line.kind === 'measure') {
       ctx.strokeStyle = 'rgba(226,180,101,.48)'; ctx.lineWidth = 1.4; ctx.setLineDash([]);
@@ -813,39 +1334,94 @@ function drawPitchLane(beat) {
     const toleranceHeight = rowHeight * (UI_CONFIG.targetToleranceCents / 50);
     ctx.fillStyle = 'rgba(217,168,91,.10)';
     roundedRect(ctx, x, y - toleranceHeight / 2, endX - x, toleranceHeight, 3); ctx.fill();
-    ctx.fillStyle = event.onsetBeat <= beat && beat < event.onsetBeat + event.durationBeats ? '#e4b665' : '#bd8e4c';
+    ctx.fillStyle = event.onsetBeat <= displayBeat && displayBeat < event.onsetBeat + event.durationBeats ? '#e4b665' : '#bd8e4c';
     roundedRect(ctx, x, y - blockHeight / 2, Math.max(2, endX - x - 2), blockHeight, 3); ctx.fill();
     const graceEnd = timeToX(event.onsetBeat + event.attackGraceBeats, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
     ctx.fillStyle = 'rgba(7,19,25,.24)'; ctx.fillRect(x, y - blockHeight / 2, Math.max(0, graceEnd - x), blockHeight);
     const lyric = event.lyric ?? '';
-    if (lyric && endX - x > 18) { ctx.fillStyle = '#d6cbb6'; ctx.textAlign = 'left'; ctx.font = `${rect.width < 700 ? 9 : 11}px Georgia, serif`; ctx.fillText(lyric, x + 2, y - Math.max(9, blockHeight)); }
+    if (lyric && endX - x > 18) {
+      const lyricFontSize = (rect.width < 700 ? 9 : 11) * state.lyricTextScale;
+      ctx.fillStyle = '#d6cbb6';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'bottom';
+      ctx.font = `${lyricFontSize}px Georgia, serif`;
+      ctx.fillText(lyric, x + 2, y - blockHeight / 2 - 2);
+    }
   });
+  if (state.showIntervals) {
+    drawMelodicIntervalArrows(ctx, state.runtime.targetEvents,
+      (eventBeat) => timeToX(eventBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats),
+      (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), rowHeight, plot);
+  }
 
   ctx.save();
   ctx.beginPath(); ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top); ctx.clip();
   if (state.pitchLayers.v1) {
-    const v1PlumeSamples = state.pitchSamples.filter((sample) => sample.beat >= visibleStart && sample.beat <= visibleEnd);
-    drawLiveV1ConfidencePlume(ctx, v1PlumeSamples,
-      (sample) => timeToX(visuallyAdvancedPitchBeat(sample.beat), displayBeat, plot.left, plot.right, historyBeats, futureBeats),
-      (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), bounds.min, bounds.max);
+    const v1PlumeSamples = state.pitchSamples.filter((sample) => (inspecting || sample.takeId === state.pitchTakeId) && sample.beat >= visibleStart && sample.beat <= visibleEnd);
+    const xAtVoice = (sample) => {
+      // Keep the detector-latency correction when switching from the live
+      // ribbon to the paused history view, including after zooming out.
+      // Do not clamp several observations to the same live-head coordinate:
+      // the renderer clips the single-valued graph at melodyHeadX instead.
+      return timeToX(visuallyAdvancedPitchBeat(sample.beat), displayBeat, plot.left, plot.right, historyBeats, futureBeats);
+    };
+    const yAtVoice = (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
+    const trailSettings = { ...livePlumeSettings(displayBeat, inspecting, inspecting ? plot.right : melodyHeadX, plot.left),
+      ribbonScale: state.plumeSettings.width, intensity: state.plumeSettings.intensity, dpr, width: rect.width, height: rect.height,
+      clip: { left: plot.left, top: plot.top, right: inspecting ? plot.right : voiceClipRight, bottom: plot.bottom },
+      showHeadMarker: false,
+      animationTime: state.clock.running ? performance.now() / 1000 : state.runtime.secondsAtBeat(displayBeat) };
+    fluidLayerDrawn = fluidTrailRenderer.render(v1PlumeSamples, xAtVoice, yAtVoice, trailSettings);
+    if (!fluidLayerDrawn)
+      FluidPitchTrail.drawFallback(ctx, v1PlumeSamples, xAtVoice, yAtVoice, trailSettings);
   }
   if (state.pitchLayers.crepe && (state.neuralLive.enabled || state.neuralLive.samples.length)) {
-    const plumeSamples = state.neuralLive.samples.filter((sample) => sample.beat >= visibleStart && sample.beat <= visibleEnd);
-    drawLiveCrepePlume(ctx, plumeSamples,
+    // CREPE salience is not a calibrated posterior. Keep its F0 trace separate
+    // and secondary, using the same density renderer rather than bin sprites.
+    const plumeSamples = state.neuralLive.samples.filter((sample) => (inspecting || sample.takeId === state.pitchTakeId) && sample.beat >= visibleStart && sample.beat <= visibleEnd)
+      .map(sample => ({ ...sample, displayPitch: sample.pitch, confidence: sample.salience?.length ? Math.max(...sample.salience) : 0 }));
+    PitchShared.drawConfidencePlume(ctx, plumeSamples,
       (sample) => timeToX(sample.beat, displayBeat, plot.left, plot.right, historyBeats, futureBeats),
-      (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), bounds.min, bounds.max);
+      (pitch) => pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom), bounds.min, bounds.max,
+      { ...livePlumeSettings(displayBeat, inspecting, inspecting ? plot.right : nowX, plot.left), intensity: state.plumeSettings.intensity * .55,
+        palette: [[147,207,211], [113,153,183], [83,104,137]] });
+  }
+  if (!fluidLayerDrawn) {
+    // Clear a previously rendered WebGL ribbon when its layer is disabled.
+    // Renderer.render already resizes and clears when the layer is active.
+    fluidTrailRenderer.resize(rect.width, rect.height, dpr);
+    fluidTrailRenderer.clear();
   }
   ctx.restore(); ctx.shadowBlur = 0;
 
-  const currentTarget = state.runtime.targetAt(beat);
-  ctx.fillStyle = '#0a181e'; ctx.fillRect(nowX - 48, plot.top - 8, 43, plot.bottom - plot.top + 16);
+  const currentTarget = state.runtime.targetAt(displayBeat);
+  const tonicPitchClass = state.runtime.tonicPitchClassAt(displayBeat, state.transpose);
+  const fifthPitchClass = tonicPitchClass == null ? null : (tonicPitchClass + 7) % 12;
+  const noteStripWidth = Math.max(0, noteStripRight - noteStripLeft);
+  ctx.fillStyle = '#0a181e'; ctx.fillRect(noteStripLeft, plot.top - 8, noteStripWidth, plot.bottom - plot.top + 16);
   for (let pitch = Math.ceil(bounds.min); pitch <= Math.floor(bounds.max); pitch += 1) {
     const y = pitchToY(pitch, bounds.min, bounds.max, plot.top, plot.bottom);
     const active = currentTarget && pitch === currentTarget.midiPitch + state.transpose;
-    ctx.fillStyle = active ? '#f0cf8f' : '#93a9a8';
-    ctx.font = `${active ? '700 ' : ''}${Math.max(8, Math.min(12, rowHeight * .8))}px Inter, sans-serif`;
-    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
-    ctx.fillText(noteLabel(pitch, beat), nowX - 8, y);
+    const pitchClass = ((pitch % 12) + 12) % 12;
+    const tonalColour = pitchClass === tonicPitchClass ? TONAL_ROLE_COLOURS.tonic
+      : pitchClass === fifthPitchClass ? TONAL_ROLE_COLOURS.fifth : null;
+    if (tonalColour) {
+      ctx.fillStyle = tonalColour;
+      ctx.fillRect(noteStripLeft, y - rowHeight / 2, noteStripWidth, rowHeight);
+    }
+    ctx.fillStyle = tonalColour ? '#fff' : (active ? '#f0cf8f' : '#93a9a8');
+    ctx.shadowColor = tonalColour ? 'rgba(0,0,0,.58)' : 'transparent';
+    ctx.shadowBlur = tonalColour ? 2 : 0;
+    ctx.shadowOffsetY = tonalColour ? 1 : 0;
+    ctx.font = `${active || tonalColour ? '700 ' : ''}${Math.max(8, Math.min(12, rowHeight * .8))}px Inter, sans-serif`;
+    ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+    ctx.fillText(noteLabel(pitch, displayBeat), noteLabelX, y);
+  }
+  ctx.shadowColor = 'transparent'; ctx.shadowBlur = 0; ctx.shadowOffsetY = 0;
+  if (Number.isFinite(state.displayPitch)) {
+    const markerY = Math.max(plot.top + 4, Math.min(plot.bottom - 4,
+      pitchToY(state.displayPitch, bounds.min, bounds.max, plot.top, plot.bottom)));
+    FluidPitchTrail.drawPitchMarker(ctx, nowX, markerY);
   }
   if (Number.isFinite(state.displayPitch) && (state.displayPitch < bounds.min || state.displayPitch > bounds.max)) {
     ctx.fillStyle = '#68d1cb'; ctx.textAlign = 'left';
@@ -853,45 +1429,45 @@ function drawPitchLane(beat) {
       state.displayPitch < bounds.min ? plot.bottom - 10 : plot.top + 10);
   }
 
-  ctx.strokeStyle = '#f0cf8f'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(Math.round(nowX) + .5, plot.top); ctx.lineTo(Math.round(nowX) + .5, plot.bottom); ctx.stroke();
-  if (Number.isFinite(state.displayPitch) && state.displayPitch >= bounds.min && state.displayPitch <= bounds.max) {
-    const markerY = pitchToY(state.displayPitch, bounds.min, bounds.max, plot.top, plot.bottom);
-    const colour = /^#[0-9a-f]{6}$/i.test(state.plumeSettings.color) ? state.plumeSettings.color : '#63c8c2';
-    ctx.save();
-    ctx.globalAlpha = state.pitchConfirmationState === 'provisional' ? .58 : 1;
-    ctx.shadowColor = colour; ctx.shadowBlur = 9;
-    ctx.fillStyle = colour; ctx.beginPath(); ctx.arc(nowX, markerY, 6, 0, Math.PI * 2); ctx.fill();
-    ctx.shadowBlur = 0; ctx.strokeStyle = '#eaf5f2'; ctx.lineWidth = 1.5; ctx.stroke();
-    ctx.restore();
+  if (inspecting && Number.isFinite(state.resumeCheckpointBeat)) {
+    const resumeX = timeToX(state.resumeCheckpointBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
+    if (resumeX >= plot.left && resumeX <= plot.right) {
+      ctx.strokeStyle = '#68d1cb'; ctx.lineWidth = 1.5; ctx.setLineDash([5, 4]);
+      ctx.beginPath(); ctx.moveTo(Math.round(resumeX) + .5, plot.top); ctx.lineTo(Math.round(resumeX) + .5, plot.bottom); ctx.stroke();
+      ctx.setLineDash([]); ctx.fillStyle = '#68d1cb'; ctx.font = '700 9px Inter, sans-serif';
+      ctx.textAlign = resumeX > plot.right - 70 ? 'right' : 'left'; ctx.textBaseline = 'top';
+      ctx.fillText('RIPRESA', resumeX + (resumeX > plot.right - 70 ? -5 : 5), plot.top + 4);
+    }
   }
-  ctx.fillStyle = '#f0cf8f'; ctx.font = '700 9px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'top'; ctx.fillText(inspecting ? 'VISTA' : 'ORA', nowX, 1);
-  ctx.fillStyle = '#718788'; ctx.font = '9px Inter, sans-serif'; ctx.textAlign = 'left'; ctx.fillText('PASSATO', plot.left + 3, plot.bottom + 8); ctx.textAlign = 'right'; ctx.fillText('PROSSIME NOTE', plot.right - 3, plot.bottom + 8);
+
+  ctx.strokeStyle = '#f0cf8f'; ctx.lineWidth = 1.5; ctx.beginPath(); ctx.moveTo(Math.round(nowX) + .5, plot.top); ctx.lineTo(Math.round(nowX) + .5, plot.bottom); ctx.stroke();
 }
 
 function renderReadout(beat, running) {
+  const update = (element, value) => { if (element.textContent !== value) element.textContent = value; };
+  const updateState = (value) => { if (els.intonationReadout.dataset.state !== value) els.intonationReadout.dataset.state = value; };
   const target = state.runtime.targetAt(beat);
   const singerPitch = state.displayPitch;
   if (!target && singerPitch != null) {
-    els.liveNote.textContent = noteLabel(singerPitch); els.liveCents.textContent = '— ¢';
-    els.liveState.textContent = 'voce rilevata · nessun target'; els.intonationReadout.dataset.state = ''; return;
+    update(els.liveNote, noteLabel(singerPitch)); update(els.liveCents, '— ¢');
+    update(els.liveState, 'voce rilevata · nessun target'); updateState(''); return;
   }
   if (!target || singerPitch == null) {
-    els.liveNote.textContent = target?.noteName ?? '—';
-    els.liveCents.textContent = '— ¢';
-    els.liveNote.textContent = '—';
-    els.liveState.textContent = state.microphoneStatus === 'active'
+    update(els.liveCents, '— ¢');
+    update(els.liveNote, '—');
+    update(els.liveState, state.microphoneStatus === 'active'
       ? state.microphoneRms < .001
         ? 'nessun segnale dal microfono'
         : 'segnale ricevuto: nota non riconosciuta'
-      : state.microphoneStatus === 'denied' ? 'permesso negato' : 'attiva il microfono';
-    els.intonationReadout.dataset.state = '';
+      : state.microphoneStatus === 'denied' ? 'permesso negato' : 'attiva il microfono');
+    updateState('');
     return;
   }
   if (state.pitchConfirmationState === 'provisional') {
-    els.liveNote.textContent = noteLabel(singerPitch);
-    els.liveCents.textContent = '— ¢';
-    els.liveState.textContent = 'transizione in verifica';
-    els.intonationReadout.dataset.state = 'provisional';
+    update(els.liveNote, noteLabel(singerPitch));
+    update(els.liveCents, '— ¢');
+    update(els.liveState, 'transizione in verifica');
+    updateState('provisional');
     return;
   }
   const cents = centsBetween(pitchToHz(singerPitch), pitchToHz(target.midiPitch + state.transpose));
@@ -902,10 +1478,10 @@ function renderReadout(beat, running) {
     : octaves && Math.abs(rounded - octaves * 1200) < 150
       ? `${Math.abs(octaves)} ottav${Math.abs(octaves) === 1 ? 'a' : 'e'} ${octaves > 0 ? 'sopra' : 'sotto'}`
       : `${abs <= UI_CONFIG.acceptableCents ? 'leggermente ' : ''}${rounded > 0 ? 'crescente' : 'calante'}`;
-  els.liveNote.textContent = noteLabel(singerPitch);
-  els.liveCents.textContent = `${rounded > 0 ? '+' : rounded < 0 ? '−' : ''}${Math.abs(rounded)} ¢`;
-  els.liveState.textContent = label;
-  els.intonationReadout.dataset.state = abs > UI_CONFIG.acceptableCents ? 'outside' : 'inside';
+  update(els.liveNote, noteLabel(singerPitch));
+  update(els.liveCents, `${rounded > 0 ? '+' : rounded < 0 ? '−' : ''}${Math.abs(rounded)} ¢`);
+  update(els.liveState, label);
+  updateState(abs > UI_CONFIG.acceptableCents ? 'outside' : 'inside');
   if (label !== state.lastAnnouncedState) state.lastAnnouncedState = label;
 }
 
@@ -913,14 +1489,11 @@ function render() {
   if (state.rafId) cancelAnimationFrame(state.rafId);
   state.rafId = null;
   if (!state.runtime) return;
-  let snapshot = state.clock.snapshot();
-  const endBeat = state.phrase ? state.occurrenceMeasures[state.phrase.end].endBeat : totalBeats();
+  let snapshot = playbackSnapshot();
+  const endBeat = totalBeats();
   if (state.attemptActive && snapshot.beat >= endBeat - .01) {
     state.clock.pause(); state.clock.seekBeat(endBeat); snapshot = state.clock.snapshot();
     finishAttempt(); updatePlaybackButton();
-    if (state.autoLoop && state.phrase) {
-      els.resultDialog.close(); seekToMeasure(state.phrase.start); togglePlayback(); return;
-    }
   }
   if (snapshot.beat >= totalBeats()) {
     state.clock.pause(); state.clock.seekBeat(totalBeats()); snapshot = state.clock.snapshot(); updatePlaybackButton();
@@ -931,10 +1504,14 @@ function render() {
   sampleMicrophone(snapshot.beat, snapshot.running);
   const index = measureIndexAt(snapshot.beat);
   const measure = state.occurrenceMeasures[index];
-  els.scoreMeasureLabel.textContent = `Battuta ${measure?.number ?? '—'}`;
-  els.measureCounter.textContent = `Battuta ${measure?.number ?? '—'} / ${state.occurrenceMeasures.length}`;
+  const scoreMeasureLabel = `Battuta ${measure?.number ?? '—'}`;
+  const measureCounter = `${scoreMeasureLabel} / ${state.occurrenceMeasures.length}`;
+  if (els.scoreMeasureLabel.textContent !== scoreMeasureLabel) els.scoreMeasureLabel.textContent = scoreMeasureLabel;
+  if (els.measureCounter.textContent !== measureCounter) els.measureCounter.textContent = measureCounter;
   renderScore(snapshot.beat);
-  drawPitchLane(snapshot.beat);
+  // Delay only the pitch-lane timeline. Audio, metronome and scoring continue
+  // to use the media clock; the plume advance remains relative to this lane.
+  drawPitchLane(currentPianoRollBeat(snapshot));
   renderReadout(snapshot.beat, snapshot.running);
   renderSyncDebug(snapshot);
   if (snapshot.running || state.microphoneStatus === 'active' || state.pitchViewport?.animating) state.rafId = requestAnimationFrame(render); else state.rafId = null;
@@ -968,16 +1545,20 @@ function playMetronomeClick(accented) {
 
 function renderMetronome(snapshot) {
   if (!snapshot.running) { state.lastMetronomeBeat = null; return; }
-  const measureIndex = measureIndexAt(snapshot.beat);
+  const offsetScoreSeconds = state.metronomeOffsetMs / 1000 * Math.max(.1, snapshot.speed || 1);
+  if (offsetScoreSeconds > 0 && snapshot.performanceTime < offsetScoreSeconds) return;
+  const metronomeTime = metronomePerformanceTime(snapshot.performanceTime, snapshot.speed, state.metronomeOffsetMs);
+  const metronomeBeat = Math.max(0, state.runtime.beatAtSeconds(metronomeTime));
+  const measureIndex = measureIndexAt(metronomeBeat);
   const measure = state.occurrenceMeasures[measureIndex];
   const metronomeBeatLength = 4 / (measure?.timeSignatureDenominator ?? 4);
-  const beatInMeasure = Math.max(0, Math.floor(((snapshot.beat - (measure?.startBeat ?? 0)) / metronomeBeatLength) + 0.015));
+  const beatInMeasure = Math.max(0, Math.floor((metronomeBeat - (measure?.startBeat ?? 0)) / metronomeBeatLength));
   const metricalBeatIndex = (measure?.beatOffset ?? 0) + beatInMeasure;
   const beatToken = `${measureIndex}:${metricalBeatIndex}`;
   if (state.lastMetronomeBeat == null) {
     state.lastMetronomeBeat = beatToken;
-    const nearestPulse = (measure?.startBeat ?? 0) + Math.round((snapshot.beat - (measure?.startBeat ?? 0)) / metronomeBeatLength) * metronomeBeatLength;
-    if (Math.abs(snapshot.beat - nearestPulse) < 0.06) {
+    const nearestPulse = (measure?.startBeat ?? 0) + Math.round((metronomeBeat - (measure?.startBeat ?? 0)) / metronomeBeatLength) * metronomeBeatLength;
+    if (Math.abs(metronomeBeat - nearestPulse) < 0.06) {
       playMetronomeClick(metricalBeatIndex === 0);
     }
     return;
@@ -1008,40 +1589,125 @@ function updatePlaybackButton() {
   els.togglePlayback.querySelector('span').textContent = running ? 'Ⅱ' : '▶';
   els.togglePlayback.setAttribute('aria-label', running ? 'Metti in pausa' : 'Avvia la prova');
   els.togglePlayback.setAttribute('aria-pressed', String(running));
+  els.showFeedback.hidden = running;
 }
 
-function seekToMeasure(index, autoPlay = false) {
+function updateTransposeControl() {
+  const semitones = Number(state.transpose) || 0;
+  els.transposeValue.textContent = semitones === 0 ? '±0' : `${semitones > 0 ? '+' : '−'}${Math.abs(semitones)}`;
+  els.transposeValue.setAttribute('aria-label', semitones === 0
+    ? 'Tonalità originale' : `${semitones > 0 ? 'Trasposto su' : 'Trasposto giù'} di ${Math.abs(semitones)} semitoni`);
+}
+
+function applyPendingAudioSeek() {
+  const target = state.pendingAudioTime;
+  if (target == null || !state.clock) return true;
+  state.clock.seekPerformanceTime(target);
+  const applied = Math.abs(state.clock.snapshot().performanceTime - target) < .05;
+  if (applied) {
+    state.pendingAudioTime = null;
+    for (const audio of state.voiceStemAudio.values()) audio.currentTime = els.backingAudio.currentTime;
+    render();
+  }
+  return applied;
+}
+
+function playbackSnapshot() {
+  const snapshot = state.clock.snapshot();
+  if (state.pendingAudioTime == null || snapshot.running) return snapshot;
+  const performanceTime = state.pendingAudioTime;
+  return { ...snapshot, performanceTime, beat: state.runtime.beatAtSeconds(performanceTime) };
+}
+
+function queueAudioSeek(performanceTime) {
+  state.pendingAudioTime = Math.max(0, Number(performanceTime) || 0);
+  const target = state.pendingAudioTime;
+  applyPendingAudioSeek();
+  // A freshly loaded MP3 may know its duration before it exposes a seekable
+  // range. Keep the user's destination and retry while that range settles.
+  [100, 300, 800, 1600].forEach((delay) => setTimeout(() => {
+    if (state.pendingAudioTime === target) applyPendingAudioSeek();
+  }, delay));
+}
+
+function seekToMeasure(index, autoPlay = false, preRoll = true) {
   state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
-  const seek = measureSeekState(state.occurrenceMeasures, index);
+  state.resumeCheckpointBeat = null;
+  state.gridInspect.active = false;
+  const seek = measureSeekState(state.occurrenceMeasures, index, { preRoll });
   state.selectedMeasureIndex = seek.selectedIndex;
   state.scoringStartBeat = seek.scoringStart;
-  state.clock.seekBeat(seek.playbackStart);
-  if (els.backingAudio.readyState === 0) state.pendingAudioTime = state.runtime.secondsAtBeat(seek.playbackStart);
+  queueAudioSeek(state.runtime.secondsAtBeat(seek.playbackStart));
   state.lastMetronomeBeat = null;
   beginPitchTake();
   const playbackNumber = state.occurrenceMeasures[Math.max(0, seek.selectedIndex - 1)]?.number ?? 1;
   const scoringNumber = state.occurrenceMeasures[seek.selectedIndex]?.number ?? 1;
   els.scoringCue.textContent = seek.playbackStart === seek.scoringStart ? `Ingresso da ${scoringNumber}` : `Preascolto ${playbackNumber} · ingresso ${scoringNumber}`;
-  if (autoPlay && !state.clock.running) state.clock.play().then(() => { updatePlaybackButton(); requestAnimationFrame(render); });
+  if (autoPlay && !state.clock.running) void togglePlayback();
   updatePlaybackButton(); render();
 }
 
+function rememberAttemptCheckpoint(beat) {
+  if (!state.attemptActive) return;
+  state.resumeCheckpointBeat = Math.max(0, Math.min(totalBeats(), Math.max(beat, state.scoringStartBeat)));
+  const measure = state.occurrenceMeasures[measureIndexAt(state.resumeCheckpointBeat)];
+  els.scoringCue.textContent = `In pausa · ripresa battuta ${measure?.number ?? 1}`;
+}
+
+function prepareAttemptResume() {
+  if (!state.attemptActive || !Number.isFinite(state.resumeCheckpointBeat)) return false;
+  const resume = attemptResumeState(state.occurrenceMeasures, state.resumeCheckpointBeat);
+  state.selectedMeasureIndex = resume.resumeIndex;
+  state.scoringStartBeat = resume.scoringStart;
+  state.lastSampleMs = null;
+  state.lastMetronomeBeat = null;
+  queueAudioSeek(state.runtime.secondsAtBeat(resume.playbackStart));
+  const playbackMeasure = state.occurrenceMeasures[Math.max(0, resume.resumeIndex - 1)];
+  const resumeMeasure = state.occurrenceMeasures[resume.resumeIndex];
+  els.scoringCue.textContent = resume.playbackStart === resume.scoringStart
+    ? `Ripresa battuta ${resumeMeasure?.number ?? 1}`
+    : `Preascolto ${playbackMeasure?.number ?? 1} · ripresa ${resumeMeasure?.number ?? 1}`;
+  return true;
+}
+
 async function togglePlayback() {
-  if (state.fullScore) { showToast('Torna a “Mia parte” per avviare la prova.'); return; }
   if (!state.bundleApproved) { showToast('Serve l’approvazione admin di questo bundle.'); return; }
-  if (els.accompanimentMode.value !== 'guide') { showToast('Questa modalità audio non è ancora disponibile.'); return; }
-  if (state.clock.snapshot().beat >= totalBeats()) state.clock.seekBeat(0);
+  if (state.playbackPlan?.kind === 'muted') { showToast('Attiva almeno una traccia nel Mixer.'); return; }
+  if (!state.clock.running && !restoreAudioOutputPreference()) {
+    openDetectorSettings();
+    els.settingsAudioOutputBluetooth.focus();
+    showToast('Prima di iniziare, conferma l’uscita audio in uso.');
+    return;
+  }
+  if (playbackSnapshot().beat >= totalBeats()) state.clock.seekBeat(0);
   if (state.clock.running) {
+    const checkpointBeat = playbackSnapshot().beat;
     state.clock.pause();
+    rememberAttemptCheckpoint(checkpointBeat);
     savePitchHistory();
   } else {
     state.gridInspect.active = false;
+    prepareAttemptResume();
+    if (state.pendingAudioTime != null) {
+      await waitForMediaReady(els.backingAudio, 3);
+      applyPendingAudioSeek();
+    }
+    try {
+      await state.playbackMixer.resume([els.backingAudio, ...state.voiceStemAudio.values()]);
+      syncBackingLevel();
+      syncVoiceStemLevels();
+    } catch (error) {
+      console.warn('Unable to start Web Audio mixer; using media fallback', error);
+      if (state.transpose) {
+        showToast('La trasposizione non è supportata da questo browser. Torna alla tonalità originale.');
+        updatePlaybackButton(); return;
+      }
+    }
     if (state.microphoneStatus !== 'active') await toggleMicrophone();
     if (!state.attemptActive) {
       state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
-      if (state.phrase && state.clock.snapshot().beat >= state.occurrenceMeasures[state.phrase.end].endBeat) seekToMeasure(state.phrase.start);
     }
-    try { await state.clock.play(); }
+    try { await state.clock.play(); applyPendingAudioSeek(); }
     catch (error) { console.error('Audio playback failed', error, els.backingAudio.error); showToast(`Audio non avviato: ${error?.message || 'sorgente non disponibile'}`); }
     state.attemptActive = state.clock.running;
   }
@@ -1051,9 +1717,9 @@ async function togglePlayback() {
 
 function bindGridInspection() {
   const canvas = els.pitchLane;
-  canvas.title = 'In pausa: trascina per esplorare; rotella = altezza; Shift+rotella = tempo; Ctrl/Cmd+rotella = zoom; doppio clic = ripristina.';
+  canvas.title = 'In pausa: trascina orizzontalmente per ispezionare. Play riprende dal punto memorizzato, con una battuta di preascolto.';
   const reset = () => {
-    state.gridInspect = { active: false, viewBeat: state.clock.snapshot().beat, pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null };
+    state.gridInspect = { active: false, viewBeat: currentPianoRollBeat(), pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null };
     render();
   };
   canvas.addEventListener('dblclick', () => { if (!state.clock.running) reset(); });
@@ -1061,11 +1727,12 @@ function bindGridInspection() {
     if (state.clock.running) return;
     event.preventDefault();
     const view = state.gridInspect;
-    if (!view.active) { view.active = true; view.viewBeat = state.clock.snapshot().beat; }
+    if (!view.active) { view.active = true; view.viewBeat = currentPianoRollBeat(); }
     const span = (state.pitchViewport?.bounds.max ?? 67) - (state.pitchViewport?.bounds.min ?? 55);
     if (event.ctrlKey || event.metaKey) {
       const zoom = Math.exp(-event.deltaY * .0025);
-      view.timeZoom = Math.max(.55, Math.min(5, view.timeZoom * zoom));
+      const minimumTimeZoom = matchMedia('(max-width: 960px)').matches ? 1 : .55;
+      view.timeZoom = Math.max(minimumTimeZoom, Math.min(5, view.timeZoom * zoom));
       view.pitchZoom = Math.max(.55, Math.min(5, view.pitchZoom * zoom));
     } else if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
       view.viewBeat = Math.max(0, Math.min(totalBeats(), view.viewBeat + (event.deltaX || event.deltaY) * .015 / view.timeZoom));
@@ -1074,29 +1741,60 @@ function bindGridInspection() {
     }
     render();
   }, { passive: false });
+  const horizontalSpan = () => {
+    const inspect = state.gridInspect;
+    const compactLayout = matchMedia('(max-width: 960px)').matches;
+    const baseHistory = compactLayout ? UI_CONFIG.mobileHistoryBeats : UI_CONFIG.historyBeats;
+    const baseFuture = compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats;
+    return (baseHistory + baseFuture) / (inspect.active ? inspect.timeZoom : 1);
+  };
+  const beatAtPointer = (clientX) => {
+    const rect = canvas.getBoundingClientRect();
+    const plot = { left: rect.width < 700 ? 48 : 58, right: rect.width - 8 };
+    const inspect = state.gridInspect;
+    const displayBeat = inspect.active ? inspect.viewBeat : currentPianoRollBeat();
+    const compactLayout = matchMedia('(max-width: 960px)').matches;
+    const historyBeats = (compactLayout ? UI_CONFIG.mobileHistoryBeats : UI_CONFIG.historyBeats)
+      / (inspect.active ? inspect.timeZoom : 1);
+    const futureBeats = (compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats)
+      / (inspect.active ? inspect.timeZoom : 1);
+    const nowX = timeToX(displayBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
+    const ratio = (clientX - rect.left - nowX) / Math.max(1, plot.right - plot.left);
+    return Math.max(0, Math.min(totalBeats(), displayBeat + ratio * (historyBeats + futureBeats)));
+  };
   canvas.addEventListener('pointerdown', (event) => {
     if (state.clock.running || event.button !== 0) return;
     const view = state.gridInspect;
-    if (!view.active) { view.active = true; view.viewBeat = state.clock.snapshot().beat; }
-    view.pointer = { x: event.clientX, y: event.clientY };
+    if (!view.active) { view.active = true; view.viewBeat = currentPianoRollBeat(); }
+    state.gridInspect.pointer = { id: event.pointerId, startX: event.clientX, startViewBeat: view.viewBeat, moved: false };
     canvas.setPointerCapture(event.pointerId);
-    canvas.classList.add('is-panning');
+    canvas.classList.add('is-inspecting');
+    event.preventDefault();
   });
   canvas.addEventListener('pointermove', (event) => {
-    const view = state.gridInspect;
-    if (!view.pointer || state.clock.running) return;
-    const dx = event.clientX - view.pointer.x;
-    const dy = event.clientY - view.pointer.y;
-    view.pointer = { x: event.clientX, y: event.clientY };
-    const timeSpan = (UI_CONFIG.historyBeats + UI_CONFIG.futureBeats) / view.timeZoom;
-    const pitchSpan = ((state.pitchViewport?.bounds.max ?? 67) - (state.pitchViewport?.bounds.min ?? 55)) / view.pitchZoom;
-    view.viewBeat = Math.max(0, Math.min(totalBeats(), view.viewBeat - dx * timeSpan / Math.max(1, canvas.clientWidth)));
-    view.pitchOffset += dy * pitchSpan / Math.max(1, canvas.clientHeight);
+    const pointer = state.gridInspect.pointer;
+    if (pointer?.id !== event.pointerId) return;
+    const rect = canvas.getBoundingClientRect();
+    const plotWidth = Math.max(1, rect.width - (rect.width < 700 ? 48 : 58) - 8);
+    const deltaX = event.clientX - pointer.startX;
+    if (Math.abs(deltaX) >= 3) pointer.moved = true;
+    state.gridInspect.viewBeat = Math.max(0, Math.min(totalBeats(),
+      pointer.startViewBeat - deltaX / plotWidth * horizontalSpan()));
     render();
+    event.preventDefault();
   });
-  const finishPan = () => { state.gridInspect.pointer = null; canvas.classList.remove('is-panning'); };
-  canvas.addEventListener('pointerup', finishPan);
-  canvas.addEventListener('pointercancel', finishPan);
+  const finishInspection = (event, cancelled = false) => {
+    const pointer = state.gridInspect.pointer;
+    if (!pointer || pointer.id !== event.pointerId) return;
+    state.gridInspect.pointer = null;
+    canvas.releasePointerCapture?.(event.pointerId);
+    canvas.classList.remove('is-inspecting');
+    if (cancelled || state.clock.running) return;
+    if (!pointer.moved) state.gridInspect.viewBeat = beatAtPointer(event.clientX);
+    render();
+  };
+  canvas.addEventListener('pointerup', finishInspection);
+  canvas.addEventListener('pointercancel', (event) => finishInspection(event, true));
 }
 
 function showToast(message) {
@@ -1105,20 +1803,17 @@ function showToast(message) {
 }
 
 function updateMicrophoneButton() {
-  const active = state.microphoneStatus === 'active';
-  els.microphone.setAttribute('aria-pressed', String(active));
-  els.microphone.disabled = state.microphoneStatus === 'requesting';
-  els.microphone.textContent = state.microphoneStatus === 'requesting' ? 'Connessione…' : active ? 'Mic attivo' : 'Microfono';
+  els.togglePlayback.disabled = state.microphoneStatus === 'requesting' || state.playbackPlan?.kind === 'muted';
 }
 
 async function stopMicrophone() {
   document.getElementById('microphone-level').value = 0;
-  document.getElementById('test-microphone-level').value = 0;
-  document.getElementById('microphone-help').textContent = 'Attiva il microfono e canta una nota per verificare il segnale.';
   state.microphoneStream?.getTracks().forEach((track) => track.stop());
   state.microphoneSource?.disconnect();
   state.microphoneAnalyser?.disconnect();
   state.microphoneSilencer?.disconnect();
+  stopPitchAnalysisLoop();
+  stopPitchWorker();
   if (state.microphoneContext && state.microphoneContext.state !== 'closed') await state.microphoneContext.close();
   state.microphoneStream = null; state.microphoneContext = null; state.microphoneSource = null; state.microphoneAnalyser = null; state.microphoneSilencer = null; state.microphoneBuffer = null;
   state.microphoneStatus = 'idle'; state.trackedPitch = null; state.displayPitch = null; state.pitchConfirmationState = null; state.microphoneRms = 0; state.pitchSmoother.reset(); state.displayPitchFilter.reset();
@@ -1130,22 +1825,32 @@ async function toggleMicrophone() {
   if (state.microphoneStatus === 'active') { await stopMicrophone(); return; }
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
     state.microphoneStatus = 'error'; updateMicrophoneButton();
-    showToast('Il microfono richiede localhost o HTTPS e un browser compatibile.'); render(); return;
+    showToast('Il microfono richiede un contesto sicuro (HTTPS) e un browser compatibile.'); render(); return;
   }
   state.microphoneStatus = 'requesting'; updateMicrophoneButton();
+  // Granting microphone permission can itself change the devices exposed by
+  // the browser. Do not mistake that privacy-related update for a real output
+  // switch and immediately ask the user the same question again.
+  state.ignoreAudioDeviceChangesUntil = Date.now() + 5000;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 }, video: false });
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     const context = new AudioContextClass({ latencyHint: 'interactive' }); await context.resume();
-    const analyser = context.createAnalyser(); analyser.fftSize = 4096; analyser.smoothingTimeConstant = 0;
+    // A 2048-sample window covers the practical choir range down to D2/E2
+    // while containing only ~43 ms of audio at 48 kHz. Combined with the
+    // 60 Hz worker cadence this reacts faster than the former 4096-sample
+    // main-thread detector and leaves ample CPU headroom for compositing.
+    const analyser = context.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0;
     const source = context.createMediaStreamSource(stream);
     // Audio nodes are pull-driven. Route the analyser to a muted sink so the
     // browser processes the microphone graph without feeding it back to the room.
     const silencer = context.createGain(); silencer.gain.value = 0;
     source.connect(analyser); analyser.connect(silencer); silencer.connect(context.destination);
     state.microphoneStream = stream; state.microphoneContext = context; state.microphoneSource = source; state.microphoneAnalyser = analyser; state.microphoneSilencer = silencer;
+    state.pitchWorkerDisabled = false; state.pitchWorkerInFlight = false;
     state.microphoneBuffer = new Float32Array(analyser.fftSize); state.pitchSmoother.reset(); beginPitchTake();
     state.microphoneStatus = 'active'; updateMicrophoneButton();
+    startPitchAnalysisLoop();
     showToast('Microfono attivo. Per risultati migliori usa le cuffie.');
     if (!state.rafId) state.rafId = requestAnimationFrame(render);
   } catch (error) {
@@ -1159,15 +1864,16 @@ function preferenceKey() {
 }
 
 const LAST_PRACTICE_PIECE_KEY = 'choir-last-practice-piece';
-const GLOBAL_DETECTOR_PREFERENCES_KEY = 'choir-detector-settings:v1';
+const GLOBAL_DETECTOR_PREFERENCES_KEY = PitchShared.PREFERENCE_KEY;
+const INTERVAL_ARROWS_PREFERENCE_KEY = 'choir-interval-arrows:v1';
 
 function pitchHistoryKey() { return `${preferenceKey()}:pitch-history`; }
 
 function savePitchHistory() {
   try {
-    const samples = state.pitchSamples.slice(-12000).filter((sample) => Number.isFinite(sample.displayPitch)).map((sample) => ({
+    const samples = state.pitchSamples.slice(-12000).map((sample) => ({
       beat: Number(sample.beat.toFixed(3)), trackedPitch: Number.isFinite(sample.trackedPitch) ? Number(sample.trackedPitch.toFixed(2)) : null,
-      displayPitch: Number(sample.displayPitch.toFixed(2)),
+      displayPitch: Number.isFinite(sample.displayPitch) ? Number(sample.displayPitch.toFixed(2)) : null,
       confirmationState: sample.confirmationState === 'provisional' ? 'provisional' : 'confirmed',
       confidence: Number((sample.confidence ?? 0).toFixed(2)), takeId: sample.takeId,
     }));
@@ -1182,7 +1888,7 @@ function restorePitchHistory() {
       trackedPitch: Number.isFinite(sample.trackedPitch) ? sample.trackedPitch : sample.pitch,
       displayPitch: Number.isFinite(sample.displayPitch) ? sample.displayPitch : sample.pitch,
     })).filter((sample) => Number.isFinite(sample.beat)
-      && Number.isFinite(sample.displayPitch) && Number.isInteger(sample.takeId)).slice(-12000) : [];
+      && Number.isInteger(sample.takeId)).slice(-12000) : [];
     state.pitchSamples = samples;
     state.pitchTakeId = Math.max(1, Number.isInteger(saved?.pitchTakeId) ? saved.pitchTakeId : 1,
       ...samples.map((sample) => sample.takeId + 1));
@@ -1192,6 +1898,7 @@ function restorePitchHistory() {
 function beginPitchTake() {
   savePitchHistory();
   state.pitchTakeId += 1;
+  state.pitchAnalysisGeneration += 1;
   state.lastSampleMs = null;
 }
 
@@ -1331,25 +2038,14 @@ function formatClock(seconds) {
 
 function benchmarkPitchBounds(take) {
   const targets = (take.targetEvents ?? []).filter((event) => Number.isFinite(event.midiPitch));
-  const frames = (take.frames ?? []).filter((frame) => Number.isFinite(frame.trackedHz) || Number.isFinite(frame.rawHz));
-  const pitches = [
-    ...targets.map((event) => event.midiPitch + (take.transpose ?? 0)),
-    ...frames.flatMap((frame) => [frame.trackedHz, frame.rawHz]
-      .filter(Number.isFinite)
-      .map((hz) => 69 + 12 * Math.log2(hz / 440))),
-    ...(take._v3Frames ?? []).map((frame) => frame.v3Hz)
-      .filter(Number.isFinite)
-      .map((hz) => 69 + 12 * Math.log2(hz / 440)),
-    ...(take._v4Frames ?? []).map((frame) => frame.v4Hz)
-      .filter(Number.isFinite)
-      .map((hz) => 69 + 12 * Math.log2(hz / 440)),
-    ...(take._v5Frames ?? []).map((frame) => frame.v5Hz)
-      .filter(Number.isFinite)
-      .map((hz) => 69 + 12 * Math.log2(hz / 440)),
-  ];
+  const targetPitches = targets.map((event) => event.midiPitch + (take.transpose ?? 0));
+  const targetMin = Math.min(...targetPitches, 57), targetMax = Math.max(...targetPitches, 62);
+  const observed = benchmarkDisplayFilteredFrames(take.frames ?? []).map((frame) => Number.isFinite(frame.displayHz) ? 69 + 12 * Math.log2(frame.displayHz / 440) : null)
+    .filter((pitch) => Number.isFinite(pitch) && pitch >= targetMin - 2 && pitch <= targetMax + 2);
+  const pitches = [...targetPitches, ...observed];
   return {
-    min: Math.floor(Math.min(...pitches, 57)) - 1,
-    max: Math.ceil(Math.max(...pitches, 62)) + 1,
+    min: Math.floor(Math.min(...pitches)) - 1,
+    max: Math.ceil(Math.max(...pitches)) + 1,
   };
 }
 
@@ -1533,9 +2229,25 @@ function ensureBenchmarkV4(take) {
 // v5 is deliberately an acoustic comparison, not a score-aware correction.
 // The model file is served with the app; ONNX Runtime is a pinned browser
 // dependency. Audio samples and derived frames remain in this browser.
-const CREPE_TINY_MODEL_URL = 'models/crepe_onnx_tiny.onnx';
-const CREPE_RUNTIME_BASE_URL = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.23.0/dist/';
+const CREPE_TINY_MODEL_URL = RUNTIME_CONFIG.crepeModelUrl;
+const CREPE_RUNTIME_BASE_URL = RUNTIME_CONFIG.crepeRuntimeBaseUrl;
 let crepeSessionPromise = null;
+let crepeRuntimePromise = null;
+
+function loadCrepeRuntime() {
+  if (window.ort) return Promise.resolve();
+  if (!RUNTIME_CONFIG.crepeRuntimeScriptUrl) return Promise.reject(new Error('runtime ONNX non disponibile'));
+  if (!crepeRuntimePromise) {
+    crepeRuntimePromise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = RUNTIME_CONFIG.crepeRuntimeScriptUrl;
+      script.onload = resolve;
+      script.onerror = () => reject(new Error('runtime ONNX non caricato: controlla la connessione'));
+      document.head.append(script);
+    });
+  }
+  return crepeRuntimePromise;
+}
 
 function normaliseCrepeFrame(samples) {
   let mean = 0;
@@ -1551,6 +2263,7 @@ function normaliseCrepeFrame(samples) {
 }
 
 async function crepeSession() {
+  await loadCrepeRuntime();
   const ort = window.ort;
   if (!ort?.InferenceSession || !ort?.Tensor) {
     throw new Error('runtime ONNX non caricato: controlla la connessione e ricarica la pagina');
@@ -1900,6 +2613,16 @@ function drawBenchmarkAnalysisRoll(take) {
     const y = yAt(event.midiPitch + (take.transpose ?? 0));
     const laneHeight = (plot.bottom - plot.top) / span;
     ctx.fillStyle = 'rgba(217,168,91,.72)'; ctx.fillRect(xAt(eventStart), y - laneHeight / 2 + 1, Math.max(1, xAt(eventEnd) - xAt(eventStart) - 1), Math.max(4, laneHeight - 2));
+    const feedback = take._vocalFeedback?.results?.find((item) => item.note.onsetBeat === event.onsetBeat && item.note.midiPitch === event.midiPitch);
+    if (feedback && feedback.category !== 'in-tune') {
+      const colours = { 'in-tune': '#91e6a7', 'stable-low': '#6faee8', 'stable-high': '#e8a56f', 'drifting-low': '#8d8be8', 'drifting-high': '#e88787', irregular: '#d7a2e8', uncertain: '#87999c' };
+      const icons = { 'in-tune': '✓', 'stable-low': '−', 'stable-high': '+', 'drifting-low': '↓', 'drifting-high': '↑', irregular: '≈', uncertain: '?' };
+      const colour = colours[feedback.category] ?? '#87999c', left = xAt(eventStart), noteWidth = Math.max(2, xAt(eventEnd) - left - 1), noteTop = y - laneHeight / 2 + 1, noteHeight = Math.max(4, laneHeight - 2);
+      ctx.fillStyle = `${colour}32`; ctx.fillRect(left, noteTop, noteWidth, noteHeight); ctx.strokeStyle = colour; ctx.lineWidth = 1.7; ctx.strokeRect(left + .5, noteTop + .5, Math.max(1, noteWidth - 1), Math.max(3, noteHeight - 1));
+      ctx.fillStyle = colour; ctx.fillRect(left, noteTop + noteHeight - 4, noteWidth, 4);
+      if (noteWidth >= 18) { ctx.fillStyle = '#071419'; ctx.font = '800 10px Inter, sans-serif'; ctx.textAlign = 'center'; ctx.textBaseline = 'middle'; ctx.fillText(icons[feedback.category], left + noteWidth / 2, y); ctx.textBaseline = 'alphabetic'; }
+      if (event.onsetBeat <= view.selectedBeat && view.selectedBeat < event.onsetBeat + event.durationBeats) { ctx.strokeStyle = '#f4f7f3'; ctx.lineWidth = 1.5; ctx.strokeRect(xAt(eventStart), y - laneHeight / 2, Math.max(2, xAt(eventEnd) - xAt(eventStart)), Math.max(5, laneHeight)); }
+    }
   }
   for (let beat = Math.ceil(viewStartBeat); beat < viewEndBeat; beat += 1) { ctx.strokeStyle = 'rgba(180,207,203,.12)'; ctx.setLineDash([3, 5]); ctx.beginPath(); ctx.moveTo(Math.round(xAt(beat)) + .5, plot.top); ctx.lineTo(Math.round(xAt(beat)) + .5, plot.bottom); ctx.stroke(); }
   const measures = [...new Map(targets.filter((event) => event.onsetBeat >= viewStartBeat && event.onsetBeat <= viewEndBeat)
@@ -1908,13 +2631,15 @@ function drawBenchmarkAnalysisRoll(take) {
   // The raw estimate stays visible separately from the tracker. This is what
   // lets an inspection distinguish an onset error of YIN itself from a
   // transition introduced by the continuity/smoothing heuristic.
-  ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(159,180,200,.74)'; ctx.lineWidth = 1.15;
-  drawStablePitchSegments(ctx, stableVisualPitchSegments(frames.filter((frame) => frame.beat >= viewStartBeat && frame.beat <= viewEndBeat), {
-    pitchAt: (frame) => Number.isFinite(frame.rawHz) ? 69 + 12 * Math.log2(frame.rawHz / 440) : null,
-    timeAt: (frame) => frame.audioTimeSec,
-    maxGap: .12,
-    minimumFrames: 2,
-  }), (frame) => xAt(frame.beat), (pitch) => yAt(pitch));
+  if (state.benchmark.analysisLayers.raw) {
+    ctx.setLineDash([3, 4]); ctx.strokeStyle = 'rgba(159,180,200,.74)'; ctx.lineWidth = 1.15;
+    drawStablePitchSegments(ctx, stableVisualPitchSegments(frames.filter((frame) => frame.beat >= viewStartBeat && frame.beat <= viewEndBeat), {
+      pitchAt: (frame) => Number.isFinite(frame.rawHz) ? 69 + 12 * Math.log2(frame.rawHz / 440) : null,
+      timeAt: (frame) => frame.audioTimeSec,
+      maxGap: .12,
+      minimumFrames: 2,
+    }), (frame) => xAt(frame.beat), (pitch) => yAt(pitch));
+  }
   if (state.benchmark.analysisLayers.v1) {
     ctx.setLineDash([]); ctx.strokeStyle = '#63c8c2'; ctx.lineWidth = 2.2; ctx.lineJoin = 'round'; ctx.lineCap = 'round'; ctx.shadowColor = 'rgba(99,200,194,.32)'; ctx.shadowBlur = 5;
     drawStablePitchSegments(ctx, stableVisualPitchSegments(frames.filter((frame) => frame.beat >= viewStartBeat && frame.beat <= viewEndBeat && frame.voicing === 'voiced'), {
@@ -1933,7 +2658,7 @@ function drawBenchmarkAnalysisRoll(take) {
       minimumFrames: 3,
     }), (frame) => xAt(frame.beat), (pitch) => yAt(pitch)); ctx.shadowBlur = 0;
   }
-  if (!take._v5Posteriors) {
+  if (state.benchmark.analysisLayers.raw && !take._v5Posteriors) {
     ctx.strokeStyle = '#f3a6d0'; ctx.lineWidth = 2; ctx.shadowColor = 'rgba(243,166,208,.25)'; ctx.shadowBlur = 4;
     drawStablePitchSegments(ctx, stableVisualPitchSegments(v5Frames.filter((frame) => frame.beat >= viewStartBeat && frame.beat <= viewEndBeat), {
       pitchAt: (frame) => Number.isFinite(frame.v5Hz) ? 69 + 12 * Math.log2(frame.v5Hz / 440) : null,
@@ -2051,7 +2776,7 @@ function resetBenchmarkAnalysisView(preserveSelection = true) {
   state.benchmark.analysisView = { timeZoom: 1, pitchZoom: 1, centerBeat: null, pitchOffset: 0, pointer: null, inspectBeat: null, selectedBeat };
   const take = selectedBenchmarkTake();
   if (take) drawBenchmarkAnalysisRoll(take);
-  els.benchmarkAnalysisInspect.textContent = 'Vista completa';
+  els.benchmarkAnalysisInspect.textContent = 'Panoramica completa';
 }
 
 function benchmarkBeatAtCanvasX(take, clientX) {
@@ -2079,6 +2804,7 @@ function selectBenchmarkAnalysisBeat(take, beat) {
   state.benchmark.analysisView.selectedBeat = selectedBeat;
   els.benchmarkAnalysisAudio.currentTime = benchmarkAudioTimeForBeat(take, selectedBeat);
   updateBenchmarkSelectionLabel(take);
+  renderFeedbackNote(take);
   drawBenchmarkAnalysisRoll(take);
 }
 
@@ -2127,8 +2853,10 @@ function updateBenchmarkInspection(take, event) {
   const beat = benchmarkBeatAtCanvasX(take, event.clientX);
   state.benchmark.analysisView.inspectBeat = beat;
   const active = (take.targetEvents ?? []).find((target) => target.onsetBeat <= beat && beat < target.onsetBeat + target.durationBeats);
+  const feedback = active && take._vocalFeedback?.results?.find((item) => item.note.onsetBeat === active.onsetBeat && item.note.midiPitch === active.midiPitch);
+  const feedbackDetail = feedback ? ` · ${feedback.message} · scarto ${Number.isFinite(feedback.metrics.medianCents) ? `${Math.round(feedback.metrics.medianCents)} cent` : 'incerto'}` : '';
   els.benchmarkAnalysisInspect.textContent = active
-    ? `Batt. ${active.measureNumber ?? '?'} · beat ${beat.toFixed(2)} · ${active.noteName ?? noteLabel(active.midiPitch + (take.transpose ?? 0))}`
+    ? `Batt. ${active.measureNumber ?? '?'} · ${active.noteName ?? noteLabel(active.midiPitch + (take.transpose ?? 0))}${feedbackDetail}`
     : `Beat ${beat.toFixed(2)} · nessun target`;
   return beat;
 }
@@ -2196,7 +2924,67 @@ function bindBenchmarkAnalysisCanvas() {
     if (event.code !== 'Space') return;
     event.preventDefault(); void toggleBenchmarkPlaybackFromSelection();
   });
-  canvas.addEventListener('pointerleave', () => { if (!state.benchmark.analysisView.pointer) { state.benchmark.analysisView.inspectBeat = null; els.benchmarkAnalysisInspect.textContent = 'Vista completa'; drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); } });
+  canvas.addEventListener('pointerleave', () => { if (!state.benchmark.analysisView.pointer) { state.benchmark.analysisView.inspectBeat = null; els.benchmarkAnalysisInspect.textContent = 'Panoramica completa'; drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); } });
+}
+
+function feedbackSignature(take) { return ['feedback-v3-musical', take.id, take.frames?.length ?? 0, take.targetEvents?.length ?? 0, take.stoppedAt ?? ''].join(':'); }
+function feedbackNotes(take) { return (take.targetEvents ?? []).filter((event) => Number.isFinite(event.midiPitch)).map((event, index) => ({ ...event, id: event.id ?? event.sourceEventId ?? `note-${index}`, targetHz: pitchToHz(event.midiPitch + (take.transpose ?? 0)) })); }
+function feedbackFrames(take) { const frames = benchmarkDisplayFilteredFrames(take.frames ?? []), origin = Number.isFinite(take.startAudioTimeSec) ? take.startAudioTimeSec : (frames[0]?.audioTimeSec ?? 0); return frames.map((frame) => ({ beat: frame.beat, time: (frame.audioTimeSec ?? origin) - origin, hz: Number.isFinite(frame.displayHz) ? frame.displayHz : null, confidence: frame.confidence ?? frame.clarity ?? 0 })); }
+function selectedFeedbackResult(take) { const beat = state.benchmark.analysisView.selectedBeat; return take?._vocalFeedback?.results?.find((result) => result.note.onsetBeat <= beat && beat < result.note.onsetBeat + result.note.durationBeats) ?? null; }
+function drawFeedbackCentChart(result) {
+  const canvas = els.feedbackCentChart, rect = canvas.getBoundingClientRect(); if (!result || rect.width < 2) return;
+  const dpr = Math.min(window.devicePixelRatio || 1, 2), width = rect.width, height = rect.height || 150; canvas.width = Math.round(width * dpr); canvas.height = Math.round(height * dpr);
+  const ctx = canvas.getContext('2d'), plot = { left: 36, right: width - 9, top: 10, bottom: height - 22 }, series = result.series; ctx.setTransform(dpr, 0, 0, dpr, 0, 0); ctx.clearRect(0, 0, width, height);
+  const extent = Math.max(40, Math.min(200, Math.ceil(Math.max(20, ...series.map((point) => Math.abs(point.cents))) / 20) * 20));
+  const x = (time) => plot.left + (time - (series[0]?.time ?? 0)) / Math.max(.01, (series.at(-1)?.time ?? 1) - (series[0]?.time ?? 0)) * (plot.right - plot.left), y = (cents) => plot.top + (extent - cents) / (extent * 2) * (plot.bottom - plot.top);
+  for (const cents of [-extent, 0, extent]) { ctx.strokeStyle = cents ? 'rgba(180,207,203,.12)' : 'rgba(217,168,91,.75)'; ctx.lineWidth = cents ? 1 : 1.5; ctx.beginPath(); ctx.moveTo(plot.left, y(cents)); ctx.lineTo(plot.right, y(cents)); ctx.stroke(); ctx.fillStyle = '#8da2a2'; ctx.font = '10px Inter'; ctx.textAlign = 'right'; ctx.fillText(`${cents > 0 ? '+' : ''}${cents}`, plot.left - 4, y(cents) + 3); }
+  const line = (key, colour, lineWidth) => { ctx.beginPath(); let active = false; for (const point of series) { if (!active) { ctx.moveTo(x(point.time), y(point[key])); active = true; } else ctx.lineTo(x(point.time), y(point[key])); } ctx.strokeStyle = colour; ctx.lineWidth = lineWidth; ctx.stroke(); }; line('cents', 'rgba(99,200,194,.55)', 1); line('centerCents', '#91e6a7', 2.2);
+}
+function renderFeedbackNote(take) {
+  els.feedbackNoteCard.hidden = true;
+  els.feedbackCorrected.disabled = !take?.audio || !(take._vocalFeedback?.results ?? []).some((item) => item.correctionAvailable);
+}
+function renderFeedbackPriorities(take) {
+  const analysis = take?._vocalFeedback?.signature === feedbackSignature(take) ? take._vocalFeedback : null;
+  const priorities = analysis?.priorities ?? []; els.feedbackPriorities.hidden = !analysis;
+  if (!priorities.length) { els.feedbackPriorityList.innerHTML = '<p class="analysis-empty">Non emergono passaggi che richiedano attenzione prioritaria.</p>'; return; }
+  els.feedbackPriorityList.replaceChildren(...priorities.map((priority, index) => {
+    const button = document.createElement('button'); button.type = 'button'; button.className = 'feedback-priority'; button.dataset.startBeat = priority.startBeat;
+    const measures = priority.measureEnd && priority.measureEnd !== priority.measureStart ? `Battute ${priority.measureStart}–${priority.measureEnd}` : `Battuta ${priority.measureStart ?? '?'}`;
+    button.innerHTML = `<small>${index + 1} · ${priority.kind === 'phrase' ? 'Frase musicale' : 'Passaggio'}</small><strong>${priority.title}</strong><span>${measures} · ${priority.message}</span>`;
+    return button;
+  }));
+}
+async function analyseBenchmarkFeedback() {
+  const take = selectedBenchmarkTake(); if (!take || !VocalFeedback) return; const signature = feedbackSignature(take); if (take._vocalFeedback?.signature === signature) { els.feedbackStatus.textContent = 'Analisi già disponibile per questa registrazione.'; renderFeedbackNote(take); renderFeedbackPriorities(take); return; }
+  els.feedbackAnalyse.disabled = true; els.feedbackStatus.textContent = 'Analisi della tenuta in corso…'; await new Promise((resolve) => setTimeout(resolve, 0));
+  try { const performance = VocalFeedback.analysePerformance(feedbackNotes(take), feedbackFrames(take)); take._vocalFeedback = { signature, ...performance }; els.feedbackStatus.textContent = performance.priorities.length ? `${performance.priorities.length} passaggi meritano un riascolto. Le piccole oscillazioni naturali non sono segnalate.` : 'Nessuna difficoltà prioritaria rilevata con sufficiente affidabilità.'; renderFeedbackNote(take); renderFeedbackPriorities(take); drawBenchmarkAnalysisRoll(take); } catch (error) { els.feedbackStatus.textContent = `Analisi non riuscita: ${error.message}`; } finally { els.feedbackAnalyse.disabled = false; }
+}
+function selectAdjacentFeedbackNote(direction) { const take = selectedBenchmarkTake(), results = take?._vocalFeedback?.results ?? []; if (!results.length) return; const index = Math.max(0, results.indexOf(selectedFeedbackResult(take))), next = results[Math.max(0, Math.min(results.length - 1, index + direction))]; selectBenchmarkAnalysisBeat(take, next.note.onsetBeat + Math.min(next.note.durationBeats / 2, .05)); renderFeedbackNote(take); }
+function audioBufferWavBlob(buffer) {
+  const channels = buffer.numberOfChannels, frames = buffer.length, bytesPerSample = 2, blockAlign = channels * bytesPerSample;
+  const data = new ArrayBuffer(44 + frames * blockAlign), view = new DataView(data), write = (offset, text) => { for (let index = 0; index < text.length; index += 1) view.setUint8(offset + index, text.charCodeAt(index)); };
+  write(0, 'RIFF'); view.setUint32(4, 36 + frames * blockAlign, true); write(8, 'WAVE'); write(12, 'fmt '); view.setUint32(16, 16, true); view.setUint16(20, 1, true); view.setUint16(22, channels, true); view.setUint32(24, buffer.sampleRate, true); view.setUint32(28, buffer.sampleRate * blockAlign, true); view.setUint16(32, blockAlign, true); view.setUint16(34, 16, true); write(36, 'data'); view.setUint32(40, frames * blockAlign, true);
+  const samples = Array.from({ length: channels }, (_, channel) => buffer.getChannelData(channel)); let offset = 44;
+  for (let frame = 0; frame < frames; frame += 1) for (let channel = 0; channel < channels; channel += 1) { const sample = Math.max(-1, Math.min(1, samples[channel][frame])); view.setInt16(offset, sample < 0 ? sample * 32768 : sample * 32767, true); offset += 2; }
+  return new Blob([data], { type: 'audio/wav' });
+}
+async function switchFeedbackPlayback(url, variant) {
+  const take = selectedBenchmarkTake(), audio = els.benchmarkAnalysisAudio; if (!take || !url) return;
+  const position = audio.ended ? 0 : audio.currentTime; state.benchmark.analysisView.selectedBeat = benchmarkBeatForAudioTime(take, position); audio.pause(); audio.src = url; audio.load();
+  if (audio.readyState < 1) await new Promise((resolve) => audio.addEventListener('loadedmetadata', resolve, { once: true }));
+  audio.currentTime = Math.min(position, Math.max(0, audio.duration - .01)); state.benchmark.audioVariant = variant; els.feedbackPlaybackKind.textContent = variant === 'corrected' ? 'Versione corretta' : 'Registrazione originale'; updateBenchmarkSelectionLabel(take); await audio.play();
+}
+function playFeedbackOriginal() { const take = selectedBenchmarkTake(); if (!take?.audio) return; void switchFeedbackPlayback(state.benchmark.analysisAudioUrl, 'original'); els.feedbackStatus.textContent = 'Riproduzione della registrazione originale dalla posizione del cursore.'; }
+async function playFeedbackCorrected() {
+  const take = selectedBenchmarkTake(), results = take?._vocalFeedback?.results?.filter((result) => result.correctionAvailable) ?? []; if (!take?.audio || !results.length) return; els.feedbackCorrected.disabled = true; els.feedbackStatus.textContent = 'Preparazione dell’intera take corretta…';
+  try { const strength = Number(els.feedbackStrength.value) / 100, key = `${feedbackSignature(take)}:${strength}`;
+    if (state.benchmark.correctedAudioKey !== key || !state.benchmark.correctedAudioUrl) { const context = new AudioContext(), decoded = await context.decodeAudioData(await take.audio.arrayBuffer()), output = context.createBuffer(decoded.numberOfChannels, decoded.length, decoded.sampleRate), regions = results.map((result) => ({ startSample: benchmarkAudioTimeForBeat(take, result.note.onsetBeat) * decoded.sampleRate, endSample: benchmarkAudioTimeForBeat(take, result.note.onsetBeat + result.note.durationBeats) * decoded.sampleRate, ratio: 2 ** (-(result.metrics.medianCents ?? 0) * strength / 1200) }));
+      for (let channel = 0; channel < decoded.numberOfChannels; channel += 1) output.copyToChannel(VocalFeedback.pitchShiftRegions(decoded.getChannelData(channel), regions, { fadeSamples: Math.round(decoded.sampleRate * .04) }), channel);
+      if (state.benchmark.correctedAudioUrl) URL.revokeObjectURL(state.benchmark.correctedAudioUrl); state.benchmark.correctedAudioUrl = URL.createObjectURL(audioBufferWavBlob(output)); state.benchmark.correctedAudioKey = key; await context.close();
+    }
+    await switchFeedbackPlayback(state.benchmark.correctedAudioUrl, 'corrected'); els.feedbackStatus.textContent = `Versione corretta al ${Math.round(strength * 100)}% · ${results.length} note elaborate; le altre regioni sono originali.`;
+  } catch (error) { els.feedbackStatus.textContent = `Audio corretto non disponibile: ${error.message}`; } finally { els.feedbackCorrected.disabled = false; }
 }
 
 function renderBenchmarkArchive() {
@@ -2213,7 +3001,7 @@ function renderBenchmarkArchive() {
   if (!take) return;
   const seconds = Math.max(0, (take.endAudioTimeSec ?? 0) - (take.startAudioTimeSec ?? 0));
   els.benchmarkTakeSummary.textContent = `${benchmarkScenarioLabel(take.scenarioId)} · ${take.frames?.length ?? 0} frame · ${seconds.toFixed(1)} s · ${take.partId ?? 'parte non disponibile'}.`;
-  els.benchmarkAlgorithmLabel.textContent = take.configuration?.estimator?.id === 'yin-style-js' ? 'v1 · YIN' : 'v1';
+  els.benchmarkAlgorithmLabel.textContent = 'Analisi vocale';
 }
 
 function renderBenchmarkAnalysis() {
@@ -2230,15 +3018,22 @@ function renderBenchmarkAnalysis() {
   els.benchmarkAnalysisMeta.textContent = `${benchmarkScenarioLabel(take.scenarioId)} · ${take.partId ?? 'parte'} · ${new Date(take.acceptedAt ?? take.startedAt).toLocaleString('it-IT')}`;
   renderBenchmarkAnalysisMetrics(take);
   if (state.benchmark.analysisAudioUrl) URL.revokeObjectURL(state.benchmark.analysisAudioUrl);
+  if (state.benchmark.correctedAudioUrl) URL.revokeObjectURL(state.benchmark.correctedAudioUrl);
+  state.benchmark.correctedAudioUrl = null; state.benchmark.correctedAudioKey = null; state.benchmark.audioVariant = 'original';
   state.benchmark.analysisAudioUrl = take.audio ? URL.createObjectURL(take.audio) : null;
   els.benchmarkAnalysisAudio.src = state.benchmark.analysisAudioUrl ?? '';
+  els.feedbackPlaybackKind.textContent = 'Registrazione originale';
+  els.feedbackScoreImage.src = els.scoreImage.currentSrc || els.scoreImage.src || '';
   const duration = Math.max(0, (take.endAudioTimeSec ?? 0) - (take.startAudioTimeSec ?? 0));
   els.benchmarkAnalysisTime.textContent = `${formatClock(0)} / ${formatClock(duration)}`;
   state.benchmark.analysisView.selectedBeat ??= Number(take.startBeat) || 0;
   updateBenchmarkSelectionLabel(take);
   updateBenchmarkAnalysisPlayButton();
+  els.feedbackNoteCard.hidden = true;
+  renderFeedbackPriorities(take);
+  els.feedbackStatus.textContent = take._vocalFeedback?.signature === feedbackSignature(take) ? 'Analisi disponibile: colori e simboli sono mostrati direttamente sulle note.' : 'Premi “Analizza esecuzione” per visualizzare il feedback sulla traccia.';
+  if (take._vocalFeedback?.signature === feedbackSignature(take)) renderFeedbackNote(take);
   requestAnimationFrame(() => drawBenchmarkAnalysisRoll(take));
-  void ensureBenchmarkV5(take);
 }
 
 function openBenchmarkAnalysis() {
@@ -2288,12 +3083,6 @@ async function openBenchmarkDialog() {
   }
   state.benchmark.sessionId ??= crypto.randomUUID();
   if (state.clock.running) state.clock.pause();
-  if (state.fullScore) {
-    state.fullScore = false;
-    els.scoreMode.setAttribute('aria-pressed', 'false');
-    els.scoreMode.textContent = 'Partitura';
-    document.querySelector('.score-region').classList.remove('full-score');
-  }
   // A benchmark take must start from an empty pitch lane. This only clears
   // transient Practice history for the selected part; accepted recordings in
   // IndexedDB are not touched.
@@ -2333,7 +3122,8 @@ function appendBenchmarkFrame(estimate, beat) {
 }
 
 function reportBenchmarkEvent(action, details = {}) {
-  fetch('/api/benchmark-event', {
+  if (!RUNTIME_CONFIG.benchmarkEventUrl) return;
+  fetch(RUNTIME_CONFIG.benchmarkEventUrl, {
     method: 'POST', keepalive: true, headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ action, at: new Date().toISOString(), ...details }),
   }).catch(() => { /* The diagnostic endpoint is optional and never blocks recording. */ });
@@ -2373,9 +3163,12 @@ async function startBenchmarkCapture() {
 }
 
 function benchmarkConfiguration() {
+  const recognition = activeRecognitionSettings();
   return {
-    estimator: { id: 'yin-style-js', minHz: 70, maxHz: 1000, cmndThreshold: 0.42 },
-    tracker: { id: 'PitchSmoother', minClarity: 0.45, minConfidence: 0.30,
+    estimator: { id: 'yin-style-js', minHz: 70, maxHz: 1000, cmndThreshold: recognition.yinThreshold,
+      rmsThreshold: recognition.rmsThreshold },
+    tracker: { id: 'PitchSmoother', minClarity: recognition.minClarity, minConfidence: recognition.minConfidence,
+      weakSignalHoldFrames: recognition.weakSignalHoldFrames,
       fastAlpha: state.detectorSettings.fastAlpha, slowAlpha: state.detectorSettings.slowAlpha,
       medianWindowFrames: state.detectorSettings.medianWindowFrames },
     capture: { channelCount: 1, echoCancellation: false, noiseSuppression: false, autoGainControl: true },
@@ -2477,39 +3270,57 @@ function listenToBenchmarkTake(take = state.benchmark.pending) {
   });
 }
 
-function finishAttempt() {
-  state.attemptActive = false;
-  els.nextPhrase.disabled = !state.phrase || state.phrase.end >= state.occurrenceMeasures.length - 1;
+function showAttemptResult({ preliminary = false } = {}) {
+  els.resultDialog.dataset.preliminary = String(preliminary);
+  els.resultHeading.textContent = preliminary ? 'Risultati preliminari' : 'Prova completata';
+  els.retry.textContent = preliminary ? 'Ricomincia' : 'Riprova';
+  els.resultResume.hidden = !preliminary;
   els.resultProgress.textContent = '';
+  if (preliminary) {
+    const measure = state.occurrenceMeasures[measureIndexAt(playbackSnapshot().beat)];
+    els.resultProgress.textContent = `Calcolato fino alla battuta ${measure?.number ?? 'corrente'}. Puoi riprendere dallo stesso punto senza perdere i dati raccolti.`;
+  }
   if (state.attempt.voicedMs < 1000) {
     els.resultText.textContent = 'Voce riconosciuta per meno di un secondo: dati insufficienti per valutare questa prova.';
   } else {
     const score = Math.round(state.attempt.insideMs / state.attempt.voicedMs * 100);
-    els.resultText.textContent = `${score}% del tempo di voce riconosciuta entro ±${UI_CONFIG.acceptableCents} cent dal target. Silenzio e segnale incerto sono esclusi.`;
-    const key = `${preferenceKey()}:result:${state.runtime.scoreVersionId}:${state.phrase?.start ?? 0}:${state.phrase?.end ?? 'all'}:${state.transpose}:${els.playbackSpeed.value}`;
-    try {
-      const previous = JSON.parse(localStorage.getItem(key));
-      if (previous && Number.isFinite(previous.score)) {
-        const delta = score - previous.score;
-        els.resultProgress.textContent = delta === 0 ? 'Stesso risultato del tentativo precedente.' : `${delta > 0 ? '+' : ''}${delta} punti percentuali rispetto al tentativo precedente.`;
-      }
-      localStorage.setItem(key, JSON.stringify({ score }));
-    } catch (_) {}
+    const prefix = preliminary ? 'Finora, ' : '';
+    els.resultText.textContent = `${prefix}${score}% del tempo di voce riconosciuta entro ±${UI_CONFIG.acceptableCents} cent dal target. Silenzio e segnale incerto sono esclusi.`;
+    if (!preliminary) {
+      const key = `${preferenceKey()}:result:${state.runtime.scoreVersionId}:complete:${state.transpose}:${els.playbackSpeed.value}`;
+      try {
+        const previous = JSON.parse(localStorage.getItem(key));
+        if (previous && Number.isFinite(previous.score)) {
+          const delta = score - previous.score;
+          els.resultProgress.textContent = delta === 0 ? 'Stesso risultato del tentativo precedente.' : `${delta > 0 ? '+' : ''}${delta} punti percentuali rispetto al tentativo precedente.`;
+        }
+        localStorage.setItem(key, JSON.stringify({ score }));
+      } catch (_) {}
+    }
   }
   if (!els.resultDialog.open) els.resultDialog.showModal();
 }
 
+function finishAttempt() {
+  state.attemptActive = false;
+  state.resumeCheckpointBeat = null;
+  showAttemptResult();
+}
+
 function globalDetectorPreferences() {
   return {
+    settingsDefaultsVersion: PitchShared.SETTINGS_DEFAULTS_VERSION,
+    pianoRollDelayMs: state.pianoRollDelayMs,
     v1RmsThreshold: state.detectorSettings.rmsThreshold,
+    v1WeakVoiceMode: state.detectorSettings.weakVoiceMode,
     v1FastAlpha: state.detectorSettings.fastAlpha,
     v1SlowAlpha: state.detectorSettings.slowAlpha,
     v1MedianWindowFrames: state.detectorSettings.medianWindowFrames,
     v1PlumeWidth: state.plumeSettings.width,
+    plumeWidthPreferenceVersion: PitchShared.PLUME_WIDTH_PREFERENCE_VERSION,
     v1PlumeIntensity: state.plumeSettings.intensity,
     v1PlumeColor: state.plumeSettings.color,
     v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
-    displayPitchAlgorithm: state.displayPitchAlgorithm,
     pitchLayerV1: state.pitchLayers.v1,
     pitchLayerCrepe: state.pitchLayers.crepe,
   };
@@ -2523,21 +3334,29 @@ function savePreferences() {
   try {
     localStorage.setItem(preferenceKey(), JSON.stringify({ transpose: state.transpose,
       speed: els.playbackSpeed.value, volume: els.volume.value, metronome: els.metronomeVolume.value,
-      measure: measureIndexAt(state.clock.snapshot().beat), phrase: state.phrase,
-      autoLoop: state.autoLoop, noteNames: state.noteNames, noteNamesPreferenceVersion: 2,
-      scoreHeight: Math.round(els.scoreViewport.clientHeight), v1RmsThreshold: state.detectorSettings.rmsThreshold,
+      settingsDefaultsVersion: PitchShared.SETTINGS_DEFAULTS_VERSION,
+      pianoRollDelayMs: state.pianoRollDelayMs,
+      selectedVoiceIds: [...state.selectedVoiceIds], voiceLevels: Object.fromEntries(state.voiceLevels),
+      accompanimentEnabled: state.accompanimentEnabled, accompanimentLevel: state.accompanimentLevel,
+      noteNames: state.noteNames, noteNamesPreferenceVersion: 2, showIntervals: state.showIntervals,
+      scoreHeight: Math.round(els.scoreViewport.clientHeight), scoreHeightPreferenceVersion: 4,
+      v1RmsThreshold: state.detectorSettings.rmsThreshold,
+      v1WeakVoiceMode: state.detectorSettings.weakVoiceMode,
       v1FastAlpha: state.detectorSettings.fastAlpha, v1SlowAlpha: state.detectorSettings.slowAlpha,
       v1MedianWindowFrames: state.detectorSettings.medianWindowFrames,
-      v1PlumeWidth: state.plumeSettings.width, v1PlumeIntensity: state.plumeSettings.intensity,
+      v1PlumeWidth: state.plumeSettings.width, plumeWidthPreferenceVersion: PitchShared.PLUME_WIDTH_PREFERENCE_VERSION,
+      v1PlumeIntensity: state.plumeSettings.intensity,
       v1PlumeColor: state.plumeSettings.color, v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
-      displayPitchAlgorithm: state.displayPitchAlgorithm, pitchLayerV1: state.pitchLayers.v1,
+      pitchLayerV1: state.pitchLayers.v1,
       pitchLayerCrepe: state.pitchLayers.crepe }));
+    localStorage.setItem(INTERVAL_ARROWS_PREFERENCE_KEY, String(state.showIntervals));
     saveGlobalDetectorPreferences();
     localStorage.setItem(`choir-part:${state.bundleManifest.piece_id ?? state.runtime.title}`, state.runtime.selectedPartId);
   } catch (_) { /* Practice remains usable when storage is unavailable. */ }
 }
 
 function restorePreferences() {
+  state.lyricTextScale = UiPreferences.apply(UiPreferences.read());
   let saved = {};
   try { saved = JSON.parse(localStorage.getItem(preferenceKey())) ?? {}; } catch (_) {}
   let detectorSaved = null;
@@ -2547,46 +3366,79 @@ function restorePreferences() {
   detectorSaved = detectorSaved && typeof detectorSaved === 'object' ? detectorSaved : saved;
   state.transpose = Number.isInteger(saved.transpose) && Math.abs(saved.transpose) <= 12 ? saved.transpose : 0;
   els.transpose.value = String(state.transpose);
-  state.autoLoop = saved.autoLoop === true; els.phraseLoop.checked = state.autoLoop;
-  // Existing preferences used English as the implicit default. Migrate those
-  // users to Italian while preserving any deliberate choice made from now on.
-  state.noteNames = saved.noteNamesPreferenceVersion === 2 && saved.noteNames === 'international' ? 'international' : 'italian';
+  const availableVoiceIds = Object.keys(state.backingManifest?.voice_stems ?? {});
+  if (Array.isArray(saved.selectedVoiceIds)) {
+    state.selectedVoiceIds = new Set(saved.selectedVoiceIds.filter((partId) => availableVoiceIds.includes(partId)));
+  }
+  state.voiceLevels = new Map(availableVoiceIds.map((partId) => {
+    const level = Number(saved.voiceLevels?.[partId]);
+    return [partId, Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 1];
+  }));
+  state.accompanimentEnabled = Boolean(state.backingManifest?.accompaniment_file) && saved.accompanimentEnabled !== false;
+  state.accompanimentLevel = Number.isFinite(Number(saved.accompanimentLevel))
+    ? Math.max(0, Math.min(1, Number(saved.accompanimentLevel))) : 1;
+  // Note names follow the current Italian interface. Language selection will
+  // return only as a single global application preference.
+  state.noteNames = 'italian';
   els.noteNames.value = state.noteNames;
-  const measures = buildOccurrenceMeasures(state.runtime);
-  state.selectedMeasureIndex = Number.isInteger(saved.measure) ? Math.max(0, Math.min(measures.length - 1, saved.measure)) : 0;
-  state.phrase = saved.phrase && Number.isInteger(saved.phrase.start) && Number.isInteger(saved.phrase.end)
-    && saved.phrase.start >= 0 && saved.phrase.start <= saved.phrase.end && saved.phrase.end < measures.length ? saved.phrase : null;
+  try {
+    const intervalArrows = localStorage.getItem(INTERVAL_ARROWS_PREFERENCE_KEY);
+    state.showIntervals = intervalArrows == null ? saved.showIntervals === true : intervalArrows === 'true';
+  } catch (_) { state.showIntervals = saved.showIntervals === true; }
+  // Playback position is session-only. Opening a piece must always begin at
+  // the first measure instead of restoring a stale position from localStorage.
+  state.selectedMeasureIndex = 0;
   els.playbackSpeed.value = ['0.5', '0.75', '1'].includes(saved.speed) ? saved.speed : '1';
   els.volume.value = Number.isFinite(Number(saved.volume)) ? Math.max(0, Math.min(100, Number(saved.volume))) : 62;
   els.metronomeVolume.value = Number.isFinite(Number(saved.metronome)) ? Math.max(0, Math.min(100, Number(saved.metronome))) : 0;
-  state.detectorSettings.rmsThreshold = Number.isFinite(Number(detectorSaved.v1RmsThreshold))
-    ? Math.max(V1_RMS_THRESHOLD.min, Math.min(V1_RMS_THRESHOLD.max, Number(detectorSaved.v1RmsThreshold)))
-    : V1_RMS_THRESHOLD.default;
-  state.detectorSettings.fastAlpha = Number.isFinite(Number(detectorSaved.v1FastAlpha))
-    ? Math.max(.05, Math.min(.95, Number(detectorSaved.v1FastAlpha))) : V1_TRACKER_DEFAULTS.fastAlpha;
-  state.detectorSettings.slowAlpha = Number.isFinite(Number(detectorSaved.v1SlowAlpha))
-    ? Math.max(.05, Math.min(.95, Number(detectorSaved.v1SlowAlpha))) : V1_TRACKER_DEFAULTS.slowAlpha;
-  const savedMedian = Number(detectorSaved.v1MedianWindowFrames);
-  state.detectorSettings.medianWindowFrames = Number.isFinite(savedMedian)
-    ? Math.max(1, Math.min(7, Math.round(savedMedian / 2) * 2 - 1)) : V1_TRACKER_DEFAULTS.medianWindowFrames;
-  state.plumeSettings.width = Number.isFinite(Number(detectorSaved.v1PlumeWidth))
-    ? Math.max(.35, Math.min(2.2, Number(detectorSaved.v1PlumeWidth))) : 1;
-  state.plumeSettings.intensity = Number.isFinite(Number(detectorSaved.v1PlumeIntensity))
-    ? Math.max(.15, Math.min(2, Number(detectorSaved.v1PlumeIntensity))) : 1;
-  state.plumeSettings.color = /^#[0-9a-f]{6}$/i.test(detectorSaved.v1PlumeColor ?? '')
-    ? detectorSaved.v1PlumeColor : '#63c8c2';
-  state.plumeSettings.timeAdvanceMs = Number.isFinite(Number(detectorSaved.v1PlumeAdvanceMs))
-    ? Math.round(Math.max(0, Math.min(200, Number(detectorSaved.v1PlumeAdvanceMs))) / 10) * 10 : 200;
-  state.displayPitchAlgorithm = detectorSaved.displayPitchAlgorithm === 'v1' ? 'v1' : 'v1+display-filter';
+  // The click timing is deliberately fixed: legacy saved values must not
+  // override the application-wide 50 ms offset.
+  state.metronomeOffsetMs = METRONOME_OFFSET_MS;
+  const sharedPitchPreferences = PitchShared.readPreferences({
+    getItem: () => JSON.stringify(detectorSaved),
+  });
+  const savedPianoRollDelay = Number(detectorSaved.pianoRollDelayMs ?? saved.pianoRollDelayMs);
+  const previousPianoRollDefaults = detectorSaved.settingsDefaultsVersion === 2
+    ? [330, 500] : detectorSaved.settingsDefaultsVersion === 1 ? [270] : [150];
+  const legacyPianoRollDefault = detectorSaved.settingsDefaultsVersion !== PitchShared.SETTINGS_DEFAULTS_VERSION
+    && previousPianoRollDefaults.some((value) => Math.abs(savedPianoRollDelay - value) < 1e-9);
+  state.pianoRollDelayMs = Number.isFinite(savedPianoRollDelay) && !legacyPianoRollDefault
+    ? Math.round(Math.max(0, Math.min(PIANO_ROLL_DELAY_MAX_MS, savedPianoRollDelay)) / 10) * 10
+    : PIANO_ROLL_DELAY_DEFAULT_MS;
+  state.detectorSettings.rmsThreshold = Math.max(V1_RMS_THRESHOLD.min,
+    Math.min(V1_RMS_THRESHOLD.max, sharedPitchPreferences.detector.rmsThreshold));
+  state.detectorSettings.weakVoiceMode = sharedPitchPreferences.detector.weakVoiceMode;
+  state.detectorSettings.fastAlpha = Math.max(.05, Math.min(.95, sharedPitchPreferences.detector.fastAlpha));
+  state.detectorSettings.slowAlpha = Math.max(.05, Math.min(.95, sharedPitchPreferences.detector.slowAlpha));
+  const savedMedian = sharedPitchPreferences.detector.medianWindowFrames;
+  state.detectorSettings.medianWindowFrames = Math.max(1, Math.min(7, Math.round(savedMedian / 2) * 2 - 1));
+  state.plumeSettings.width = Math.max(.35, Math.min(2.5, sharedPitchPreferences.plume.width));
+  state.plumeSettings.intensity = Math.max(.15, Math.min(2, sharedPitchPreferences.plume.intensity));
+  state.plumeSettings.color = '#72e0d2';
+  state.plumeSettings.timeAdvanceMs = Math.round(sharedPitchPreferences.plume.timeAdvanceMs / 10) * 10;
   state.displayPitchFilter.reset();
   state.pitchLayers.v1 = detectorSaved.pitchLayerV1 !== false;
   state.pitchLayers.crepe = detectorSaved.pitchLayerCrepe !== false;
   els.pitchLayerV1.checked = state.pitchLayers.v1;
   els.pitchLayerCrepe.checked = state.pitchLayers.crepe;
   applyLiveTrackerSettings();
+  restoreAudioOutputPreference();
+  state.plumeSettings.timeAdvanceMs = state.audioOutputType === 'bluetooth'
+    ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
   updateDetectorSettingsUi();
   try { saveGlobalDetectorPreferences(); } catch (_) { /* Storage is optional. */ }
-  if (Number.isFinite(saved.scoreHeight)) setScoreHeight(saved.scoreHeight);
+  const mobileLayout = matchMedia('(max-width: 960px)').matches;
+  const compatibleScoreHeight = saved.scoreHeightPreferenceVersion === 4
+    || (!mobileLayout && [2, 3].includes(saved.scoreHeightPreferenceVersion));
+  if (compatibleScoreHeight && Number.isFinite(saved.scoreHeight)) setScoreHeight(saved.scoreHeight);
+  else if (mobileLayout) setScoreHeight(defaultMobileScoreHeight());
+}
+
+function defaultMobileScoreHeight() {
+  if (matchMedia('(orientation: landscape)').matches) {
+    return Math.max(105, Math.min(128, innerHeight * .3));
+  }
+  return innerHeight * .3;
 }
 
 function scoreHeightLimits() {
@@ -2604,6 +3456,10 @@ function setScoreHeight(height) {
   document.documentElement.style.setProperty('--score-h', `${value}px`);
   els.scorePitchDivider.setAttribute('aria-valuemax', String(Math.round(maximum)));
   els.scorePitchDivider.setAttribute('aria-valuenow', String(value));
+  // The piano roll is a bitmap canvas. When its CSS height changes, redraw it
+  // before the next paint so the browser never stretches the old frame and
+  // deforms lyrics or note labels vertically while the divider is dragged.
+  if (state.runtime && !state.rafId) state.rafId = requestAnimationFrame(render);
 }
 
 function bindScorePitchDivider() {
@@ -2642,9 +3498,11 @@ function bindScorePitchDivider() {
 
 function changePart(partId) {
   state.attemptActive = false;
+  state.resumeCheckpointBeat = null;
   if (state.clock.running) state.clock.pause();
   savePitchHistory();
   state.runtime.selectPart(partId);
+  state.selectedVoiceIds = new Set([partId]);
   restorePreferences();
   restorePitchHistory();
   const part = state.runtime.parts.find((item) => item.id === partId);
@@ -2660,57 +3518,89 @@ function changePart(partId) {
 }
 
 function bindControls() {
+  updateMobileChrome();
+  els.mobileToolbarToggle.addEventListener('click', () => {
+    mobileChrome.topCollapsed = !mobileChrome.topCollapsed;
+    updateMobileChrome(); redrawAfterChromeChange();
+  });
+  els.mobileTransportToggle.addEventListener('click', () => {
+    mobileChrome.bottomCollapsed = !mobileChrome.bottomCollapsed;
+    updateMobileChrome(); redrawAfterChromeChange();
+  });
   bindGridInspection();
   bindScorePitchDivider();
   bindBenchmarkAnalysisCanvas();
-  document.querySelector('.toolbar-more').addEventListener('click', (event) => {
-    if (event.target.closest('button')) event.currentTarget.removeAttribute('open');
+  els.accompanimentMode.addEventListener('click', () => {
+    // Opening the mixer is an intentional pause point.  Keep this flag so
+    // applying a new routing resumes the same musical instant afterwards.
+    if (state.clock.running) {
+      state.voiceMixResumeRequested = true;
+      state.clock.pause();
+      updatePlaybackButton();
+      render();
+    }
+    renderVoiceMixer();
+    if (!els.voiceMixerDialog.open) els.voiceMixerDialog.showModal();
   });
-  document.getElementById('test-microphone').addEventListener('click', toggleMicrophone);
+  els.voiceMixerClose.addEventListener('click', () => els.voiceMixerDialog.close());
+  els.voiceMixerDialog.addEventListener('click', closeVoiceMixerFromBackdrop);
+  els.voiceMixerAccompanimentEnabled.addEventListener('click', () => {
+    state.accompanimentEnabled = !state.accompanimentEnabled;
+    void applyVoiceSelection(state.selectedVoiceIds); savePreferences();
+  });
+  els.voiceMixerAccompanimentLevel.addEventListener('input', () => {
+    state.accompanimentLevel = Number(els.voiceMixerAccompanimentLevel.value) / 100;
+    els.voiceMixerAccompanimentValue.value = `${els.voiceMixerAccompanimentLevel.value}%`;
+    if (state.playbackPlan?.kind !== 'full-mix') syncBackingLevel();
+  });
+  els.voiceMixerAccompanimentLevel.addEventListener('change', () => {
+    void applyVoiceSelection(state.selectedVoiceIds); savePreferences();
+  });
+  els.voiceMixerOwn.addEventListener('click', () => {
+    state.accompanimentEnabled = false;
+    void applyVoiceSelection([state.runtime.selectedPartId]);
+    savePreferences();
+  });
+  els.voiceMixerAll.addEventListener('click', () => {
+    state.accompanimentEnabled = false;
+    void applyVoiceSelection(Object.keys(state.backingManifest?.voice_stems ?? {}));
+    savePreferences();
+  });
   window.addEventListener('pagehide', savePreferences);
-  els.exercise.addEventListener('click', () => {
-    state.clock.pause(); updatePlaybackButton();
-    const options = () => state.occurrenceMeasures.map((measure, index) => new Option(`${index + 1} · battuta ${measure.number}`, String(index)));
-    els.phraseStart.replaceChildren(...options()); els.phraseEnd.replaceChildren(...options());
-    els.phraseStart.value = String(state.phrase?.start ?? measureIndexAt(state.clock.snapshot().beat));
-    els.phraseEnd.value = String(state.phrase?.end ?? Math.min(state.occurrenceMeasures.length - 1, Number(els.phraseStart.value) + 3));
-    els.exerciseDialog.showModal();
-  });
-  els.exerciseClose.addEventListener('click', () => els.exerciseDialog.close());
-  els.phraseApply.addEventListener('click', () => {
-    const start = Number(els.phraseStart.value), end = Number(els.phraseEnd.value);
-    if (end < start) { showToast('La battuta finale deve seguire quella iniziale.'); return; }
-    state.phrase = { start, end }; state.autoLoop = els.phraseLoop.checked; state.attemptActive = false;
-    seekToMeasure(start); savePreferences(); els.exerciseDialog.close();
-  });
-  els.phraseClear.addEventListener('click', () => { state.phrase = null; state.attemptActive = false; savePreferences(); els.exerciseDialog.close(); });
   els.resultClose.addEventListener('click', () => els.resultDialog.close());
+  els.resultResume.addEventListener('click', () => {
+    els.resultDialog.close();
+    if (!state.clock.running) void togglePlayback();
+  });
   els.noteNames.addEventListener('change', () => { state.noteNames = els.noteNames.value; savePreferences(); render(); });
-  els.retry.addEventListener('click', () => { els.resultDialog.close(); seekToMeasure(state.phrase?.start ?? 0); togglePlayback(); });
-  els.nextPhrase.addEventListener('click', () => {
-    if (!state.phrase) return;
-    const length = state.phrase.end - state.phrase.start + 1, start = state.phrase.end + 1;
-    state.phrase = { start, end: Math.min(state.occurrenceMeasures.length - 1, start + length - 1) };
-    els.resultDialog.close(); seekToMeasure(start); savePreferences(); togglePlayback();
+  els.retry.addEventListener('click', () => { state.attemptActive = false; els.resultDialog.close(); seekToMeasure(0); togglePlayback(); });
+  for (const eventName of ['loadedmetadata', 'durationchange', 'canplay', 'progress', 'seeked']) {
+    els.backingAudio.addEventListener(eventName, applyPendingAudioSeek);
+  }
+  els.backingAudio.addEventListener('play', () => { void playVoiceStems(); });
+  els.backingAudio.addEventListener('pause', pauseVoiceStems);
+  els.backingAudio.addEventListener('seeking', () => {
+    for (const audio of state.voiceStemAudio.values()) audio.currentTime = els.backingAudio.currentTime;
   });
-  els.backingAudio.addEventListener('loadedmetadata', () => {
-    if (state.pendingAudioTime != null) { state.clock.seekPerformanceTime(state.pendingAudioTime); state.pendingAudioTime = null; render(); }
+  els.backingAudio.addEventListener('timeupdate', () => {
+    for (const audio of state.voiceStemAudio.values()) {
+      if (Math.abs(audio.currentTime - els.backingAudio.currentTime) > .08) audio.currentTime = els.backingAudio.currentTime;
+    }
   });
-  els.transpose.addEventListener('change', () => {
-    const snapshot = state.clock.snapshot();
-    state.clock.pause();
+  els.transpose.addEventListener('change', async () => {
     state.transpose = Number(els.transpose.value);
-    state.attemptActive = false;
+    updateTransposeControl();
+    state.attemptActive = false; state.resumeCheckpointBeat = null;
     state.pitchViewport = null; beginPitchTake();
-    configureBacking();
-    state.pendingAudioTime = snapshot.performanceTime;
-    state.clock.seekPerformanceTime(snapshot.performanceTime);
+    state.playbackMixer.setTranspose(state.transpose);
+    await applyVoiceSelection(state.selectedVoiceIds);
     savePreferences(); updatePlaybackButton(); render();
     showToast(state.transpose ? `Trasposizione ${state.transpose > 0 ? '+' : ''}${state.transpose} semitoni. Spartito originale.` : 'Tonalità originale');
   });
   for (const control of [els.playbackSpeed, els.volume, els.metronomeVolume]) {
     control.addEventListener('change', savePreferences);
   }
+  els.volume.addEventListener('input', syncVoiceStemLevels);
   [['v1', els.pitchLayerV1], ['crepe', els.pitchLayerCrepe]].forEach(([layer, control]) => {
     control.addEventListener('change', () => {
       state.pitchLayers[layer] = control.checked;
@@ -2718,7 +3608,8 @@ function bindControls() {
     });
   });
   els.togglePlayback.addEventListener('click', togglePlayback);
-  els.restartPractice.addEventListener('click', restartPractice);
+  els.showFeedback.addEventListener('click', () => showAttemptResult({ preliminary: true }));
+  els.restartPractice?.addEventListener('click', restartPractice);
   els.restartTransport.addEventListener('click', restartPractice);
   els.groundTruth.addEventListener('click', openGroundTruthDialog);
   els.groundTruthStart.addEventListener('click', startGroundTruthCapture);
@@ -2750,6 +3641,16 @@ function bindControls() {
   });
   els.benchmarkAnalysisReset.addEventListener('click', () => resetBenchmarkAnalysisView());
   els.benchmarkAnalysisPlaySelection.addEventListener('click', () => { void toggleBenchmarkPlaybackFromSelection(); });
+  els.feedbackAnalyse.addEventListener('click', () => { void analyseBenchmarkFeedback(); });
+  els.feedbackPrevious.addEventListener('click', () => selectAdjacentFeedbackNote(-1));
+  els.feedbackNext.addEventListener('click', () => selectAdjacentFeedbackNote(1));
+  els.feedbackOriginal.addEventListener('click', playFeedbackOriginal);
+  els.feedbackCorrected.addEventListener('click', () => { void playFeedbackCorrected(); });
+  els.feedbackStrength.addEventListener('input', () => { els.feedbackStrengthValue.value = `${els.feedbackStrength.value}%`; });
+  els.feedbackPriorityList.addEventListener('click', (event) => {
+    const item = event.target.closest('.feedback-priority'); const take = selectedBenchmarkTake(), beat = Number(item?.dataset.startBeat);
+    if (!take || !Number.isFinite(beat)) return; selectBenchmarkAnalysisBeat(take, beat); state.benchmark.analysisView.centerBeat = beat; state.benchmark.analysisView.timeZoom = Math.max(2, state.benchmark.analysisView.timeZoom); drawBenchmarkAnalysisRoll(take);
+  });
   [['v1', els.benchmarkAnalysisLayerV1], ['display', els.benchmarkAnalysisLayerDisplay], ['raw', els.benchmarkAnalysisLayerRaw], ['audio', els.benchmarkAnalysisLayerAudio], ['score', els.benchmarkAnalysisLayerScore]].forEach(([layer, control]) => {
     control.addEventListener('change', () => {
       state.benchmark.analysisLayers[layer] = control.checked;
@@ -2787,41 +3688,25 @@ function bindControls() {
   els.benchmarkDialog.addEventListener('cancel', (event) => {
     if (state.benchmark.capture) { event.preventDefault(); els.benchmarkStatus.textContent = 'Interrompi o scarta prima la registrazione attiva.'; }
   });
-  els.microphone.addEventListener('click', toggleMicrophone);
   els.neuralLive.addEventListener('click', toggleNeuralLive);
-  els.previousMeasure.addEventListener('click', () => seekToMeasure(Math.max(0, measureIndexAt(state.clock.snapshot().beat) - 1)));
-  els.nextMeasure.addEventListener('click', () => seekToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(state.clock.snapshot().beat) + 1)));
+  els.previousMeasure.addEventListener('click', () => seekToMeasure(Math.max(0, measureIndexAt(playbackSnapshot().beat) - 1), false, false));
+  els.nextMeasure.addEventListener('click', () => seekToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(playbackSnapshot().beat) + 1), false, false));
   els.partSelector.addEventListener('change', () => changePart(els.partSelector.value));
   els.playbackSpeed.addEventListener('change', async () => {
-    const speed = Number(els.playbackSpeed.value);
-    const snapshot = state.clock.snapshot();
-    const wasRunning = state.clock.running;
-    state.attemptActive = false; state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
-    state.clock.pause();
-    configureBacking();
-    if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(speed); else state.clock.setSpeed(speed);
-    state.clock.seekPerformanceTime(snapshot.performanceTime);
-    state.pendingAudioTime = snapshot.performanceTime;
+    state.attemptActive = false; state.resumeCheckpointBeat = null; state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
+    await applyVoiceSelection(state.selectedVoiceIds);
     state.lastMetronomeBeat = null;
-    if (wasRunning) await state.clock.play();
     state.attemptActive = state.clock.running;
+    savePreferences();
     updatePlaybackButton();
     render();
-  });
-  els.scoreMode.addEventListener('click', () => {
-    if (state.clock.running) { showToast('Metti in pausa per consultare la partitura completa.'); return; }
-    state.fullScore = !state.fullScore;
-    els.scoreMode.setAttribute('aria-pressed', String(state.fullScore));
-    els.scoreMode.textContent = state.fullScore ? 'Mia parte' : 'Partitura';
-    document.querySelector('.score-region').classList.toggle('full-score', state.fullScore);
-    state.scorePage = 0; render();
   });
   els.accompanimentMode.addEventListener('change', () => {
     if (state.clock.running) { state.clock.pause(); updatePlaybackButton(); }
     showToast('Guida melodica derivata dallo score selezionato.');
     render();
   });
-  els.volume.addEventListener('input', () => { els.backingAudio.volume = Number(els.volume.value) / 100; });
+  els.volume.addEventListener('input', syncBackingLevel);
   els.metronomeVolume.addEventListener('input', () => {
     const value = Number(els.metronomeVolume.value);
     if (value > 0) state.rememberedMetronomeVolume = value;
@@ -2836,11 +3721,37 @@ function bindControls() {
   els.backingAudio.addEventListener('ended', () => { updatePlaybackButton(); render(); });
   els.backingAudio.addEventListener('pause', () => { updatePlaybackButton(); if (!state.clock.running) render(); });
   els.backingAudio.addEventListener('error', () => showToast(`Errore audio (${els.backingAudio.error?.code ?? 'sconosciuto'}).`));
-  els.settings.addEventListener('click', openDetectorSettings);
-  els.settingsDisplayPitchAlgorithm.addEventListener('change', () => {
-    state.displayPitchAlgorithm = els.settingsDisplayPitchAlgorithm.value === 'v1' ? 'v1' : 'v1+display-filter';
-    state.displayPitchFilter.reset(); savePreferences(); render();
-    showToast(state.displayPitchAlgorithm === 'v1' ? 'Visualizzazione v1 pura.' : 'Filtro adattivo attivo solo sulla visualizzazione.');
+  els.settings.addEventListener('click', (event) => { event.stopPropagation(); toggleSettingsMenu(); });
+  els.settingsMenuBasic.addEventListener('click', () => openDetectorSettings('basic'));
+  els.settingsMenuAdvanced.addEventListener('click', () => openDetectorSettings('advanced'));
+  document.addEventListener('click', (event) => {
+    if (!els.settingsMenuWrap.contains(event.target)) closeSettingsMenu();
+  });
+  for (const control of [els.settingsAudioOutputStandard, els.settingsAudioOutputBluetooth]) {
+    control.addEventListener('change', () => {
+      if (!control.checked) return;
+      saveAudioOutputPreference(control.value);
+      state.plumeSettings.timeAdvanceMs = control.value === 'bluetooth'
+        ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
+      updateDetectorSettingsUi(); savePreferences(); render();
+      showToast(control.value === 'bluetooth'
+        ? 'Bluetooth confermato: anticipo traccia vocale 550 ms.'
+        : 'Uscita non Bluetooth: anticipo traccia vocale 270 ms.');
+    });
+  }
+  els.settingsTextScale.addEventListener('input', () => {
+    state.lyricTextScale = UiPreferences.apply(Number(els.settingsTextScale.value) / 100);
+    els.settingsTextScaleValue.textContent = `${Math.round(state.lyricTextScale * 100)}%`;
+    render();
+  });
+  els.settingsTextScale.addEventListener('change', () => {
+    state.lyricTextScale = UiPreferences.write(Number(els.settingsTextScale.value) / 100);
+    showToast(`Testo del piano roll: ${Math.round(state.lyricTextScale * 100)}%.`);
+  });
+  els.settingsShowIntervals.addEventListener('change', () => {
+    state.showIntervals = els.settingsShowIntervals.checked;
+    savePreferences(); render();
+    showToast(state.showIntervals ? 'Frecce degli intervalli attive.' : 'Frecce degli intervalli nascoste.');
   });
   els.settingsV1Rms.addEventListener('input', () => {
     state.detectorSettings.rmsThreshold = rmsThresholdFromSlider(els.settingsV1Rms.value);
@@ -2849,6 +3760,13 @@ function bindControls() {
   els.settingsV1Rms.addEventListener('change', () => {
     savePreferences();
     showToast(`Soglia v1 aggiornata: ${formatRmsThreshold(state.detectorSettings.rmsThreshold)} RMS.`);
+  });
+  els.settingsWeakVoiceMode.addEventListener('change', () => {
+    state.detectorSettings.weakVoiceMode = els.settingsWeakVoiceMode.checked;
+    applyLiveTrackerSettings(); updateDetectorSettingsUi(); savePreferences();
+    showToast(state.detectorSettings.weakVoiceMode
+      ? 'Voce debole attiva: volume, periodicità e confidenza sono più permissivi.'
+      : 'Modalità voce debole disattivata: confidence minima 30%.');
   });
   const updateTrackerSettings = () => {
     state.detectorSettings.fastAlpha = Number(els.settingsV1FastAlpha.value) / 100;
@@ -2866,74 +3784,128 @@ function bindControls() {
   const updatePlumeSettings = () => {
     state.plumeSettings.width = Number(els.settingsV1PlumeWidth.value) / 100;
     state.plumeSettings.intensity = Number(els.settingsV1PlumeIntensity.value) / 100;
-    state.plumeSettings.color = els.settingsV1PlumeColor.value;
+    state.plumeSettings.color = '#72e0d2';
     state.plumeSettings.timeAdvanceMs = Number(els.settingsV1PlumeAdvance.value);
     updateDetectorSettingsUi(); render();
   };
-  for (const control of [els.settingsV1PlumeWidth, els.settingsV1PlumeIntensity, els.settingsV1PlumeColor, els.settingsV1PlumeAdvance]) {
+  for (const control of [els.settingsV1PlumeWidth, els.settingsV1PlumeIntensity, els.settingsV1PlumeAdvance]) {
     control.addEventListener('input', updatePlumeSettings);
     control.addEventListener('change', () => {
       savePreferences();
       showToast('Aspetto della plume v1 salvato.');
     });
   }
+  els.settingsPianoRollDelay.addEventListener('input', () => {
+    state.pianoRollDelayMs = Number(els.settingsPianoRollDelay.value);
+    updateDetectorSettingsUi(); render();
+  });
+  els.settingsPianoRollDelay.addEventListener('change', savePreferences);
   els.settingsReset.addEventListener('click', () => {
+    state.lyricTextScale = UiPreferences.write(UiPreferences.DEFAULT_LYRIC_SCALE);
+    state.showIntervals = false;
+    state.metronomeOffsetMs = METRONOME_OFFSET_MS;
+    state.pianoRollDelayMs = PIANO_ROLL_DELAY_DEFAULT_MS;
     state.detectorSettings.rmsThreshold = V1_RMS_THRESHOLD.default;
+    state.detectorSettings.weakVoiceMode = false;
     Object.assign(state.detectorSettings, V1_TRACKER_DEFAULTS);
-    state.plumeSettings = { width: 1, intensity: 1, color: '#63c8c2', timeAdvanceMs: 200 };
-    state.displayPitchAlgorithm = 'v1+display-filter'; state.displayPitchFilter.reset();
+    state.plumeSettings = { ...PitchShared.PLUME_DEFAULTS,
+      timeAdvanceMs: state.audioOutputType === 'bluetooth' ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS };
+    state.displayPitchFilter.reset();
     applyLiveTrackerSettings(); updateDetectorSettingsUi(); savePreferences();
     render(); showToast('Impostazioni v1 ripristinate ai valori predefiniti.');
   });
-  els.settingsClose.addEventListener('click', () => els.settingsDialog.close());
+  els.settingsDialog.addEventListener('click', (event) => {
+    const selected = event.target.closest('.setting-info');
+    const shouldOpen = selected && !selected.classList.contains('is-open');
+    els.settingsDialog.querySelectorAll('.setting-info.is-open').forEach((button) => button.classList.remove('is-open'));
+    if (shouldOpen) selected.classList.add('is-open');
+  });
+  els.settingsDialog.addEventListener('close', () => {
+    els.settingsDialog.querySelectorAll('.setting-info.is-open').forEach((button) => button.classList.remove('is-open'));
+  });
+  els.settingsDialog.addEventListener('click', closeSettingsFromBackdrop);
+  navigator.mediaDevices?.addEventListener('devicechange', () => {
+    if (Date.now() < state.ignoreAudioDeviceChangesUntil) return;
+    invalidateAudioOutputPreference(true);
+  });
   document.getElementById('admin-review').addEventListener('click', () => window.open('admin-review.html', 'choir-admin-review'));
   document.getElementById('exit-practice').addEventListener('click', openLibraryPicker);
-  window.addEventListener('resize', () => { state.activeScoreSegment = null; render(); });
+  window.addEventListener('resize', () => { updateMobileChrome(); state.activeScoreSegment = null; render(); });
   window.addEventListener('resize', () => { if (!els.benchmarkAnalysis.hidden) drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); });
   window.addEventListener('beforeunload', () => { savePitchHistory(); state.microphoneStream?.getTracks().forEach((track) => track.stop()); });
   document.addEventListener('keydown', (event) => {
-    if (event.code === 'Space' && !['SELECT', 'INPUT', 'BUTTON'].includes(document.activeElement?.tagName)) { event.preventDefault(); togglePlayback(); }
-    if (event.code === 'ArrowLeft' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) - 1);
-    if (event.code === 'ArrowRight' && event.altKey) seekToMeasure(measureIndexAt(state.clock.snapshot().beat) + 1);
+    if (event.key === 'Escape' && !els.settingsMenu.hidden) {
+      closeSettingsMenu(); els.settings.focus(); event.preventDefault(); return;
+    }
+    const targetTag = event.target?.tagName;
+    const editingText = event.target?.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(targetTag);
+    if (event.code === 'Space' && !editingText) {
+      event.preventDefault();
+      event.stopPropagation();
+      void togglePlayback();
+      return;
+    }
+    if (event.code === 'ArrowLeft' && event.altKey) seekToMeasure(measureIndexAt(playbackSnapshot().beat) - 1, false, false);
+    if (event.code === 'ArrowRight' && event.altKey) seekToMeasure(measureIndexAt(playbackSnapshot().beat) + 1, false, false);
   });
   els.scoreImage.addEventListener('load', () => { state.activeScoreSegment = null; els.scoreLoading.hidden = true; render(); });
   els.scoreImage.addEventListener('error', () => { els.scoreLoading.hidden = false; els.scoreLoading.textContent = 'Spartito non disponibile'; });
 }
 
 async function initialize() {
-  const libraryResponse = await fetch('/api/library', { cache: 'no-store' });
+  const diagnosticsEnabled = RUNTIME_CONFIG.features?.diagnostics !== false;
+  const crepeEnabled = diagnosticsEnabled && RUNTIME_CONFIG.features?.crepe !== false;
+  for (const element of [els.benchmark, document.getElementById('admin-review')]) {
+    if (element) element.hidden = !diagnosticsEnabled;
+  }
+  for (const element of [els.neuralLive, document.querySelector('.plume-key')]) {
+    if (element) element.hidden = !crepeEnabled;
+  }
+  const buildVersion = document.getElementById('build-version');
+  if (RUNTIME_CONFIG.buildVersion && buildVersion) {
+    buildVersion.textContent = `Build ${RUNTIME_CONFIG.buildVersion}`;
+    buildVersion.hidden = false;
+  }
+  const libraryResponse = await fetch(RUNTIME_CONFIG.libraryUrl, { cache: 'no-store' });
   if (!libraryResponse.ok) throw new Error('Libreria dei brani non disponibile');
   state.library = (await libraryResponse.json()).pieces ?? [];
   if (!state.library.length) throw new Error('Non ci sono brani MuseScore nella cartella sheets');
   bindLibraryPicker();
   const requestedPiece = new URLSearchParams(window.location.search).get('piece');
-  let rememberedPiece = null;
-  try { rememberedPiece = localStorage.getItem(LAST_PRACTICE_PIECE_KEY); } catch (_) { /* Optional convenience only. */ }
-  const selectedPiece = [requestedPiece, rememberedPiece, state.library[0]?.piece_id]
-    .find((pieceId) => pieceId && state.library.some((piece) => piece.piece_id === pieceId));
-  await loadPracticePiece(selectedPiece);
+  const requestedPieceExists = requestedPiece
+    && state.library.some((piece) => piece.piece_id === requestedPiece);
+  if (requestedPieceExists) {
+    await loadPracticePiece(requestedPiece);
+    return;
+  }
+  openLibraryPicker();
 }
 
 function openLibraryPicker() {
   if (state.clock?.running) state.clock.pause();
   if (state.clock) updatePlaybackButton();
   const requested = new URLSearchParams(window.location.search).get('piece');
-  populateLibraryPieces(requested);
+  let remembered = null;
+  try { remembered = localStorage.getItem(LAST_PRACTICE_PIECE_KEY); } catch (_) { /* Optional convenience only. */ }
+  const selectedPiece = [requested, state.bundleManifest?.piece_id, remembered, state.library[0]?.piece_id]
+    .find((pieceId) => pieceId && state.library.some((piece) => piece.piece_id === pieceId));
+  populateLibraryPieces(selectedPiece);
+  const returnButton = els.piecePickerDialog.querySelector('.studio-return');
+  if (returnButton) returnButton.hidden = !state.runtime;
   updateLibraryParts();
   if (!els.piecePickerDialog.open) els.piecePickerDialog.showModal();
 }
 
 async function updateLibraryParts() {
   const piece = state.library.find((item) => item.piece_id === els.libraryPiece.value);
-  els.libraryTitle.value = piece ? pieceDisplayTitle(piece) : '';
   if (piece && !piece.parts?.length && !piece.loading) {
     piece.loading = true;
     els.libraryOpen.disabled = true;
     els.libraryPart.replaceChildren(new Option('Preparazione parti…', ''));
     els.libraryNote.hidden = false;
-    els.libraryNote.textContent = 'Lettura del file MuseScore in corso…';
+    els.libraryNote.textContent = 'Preparo le parti vocali…';
     try {
-      const response = await fetch(`/api/library/${encodeURIComponent(piece.piece_id)}/bundle`, { cache: 'no-store' });
+      const response = await fetch(libraryBundleUrl(piece.piece_id), { cache: 'no-store' });
       if (!response.ok) throw new Error('Impossibile leggere il brano selezionato');
       const bundle = await response.json();
       piece.parts = bundle.parts ?? [];
@@ -2946,6 +3918,11 @@ async function updateLibraryParts() {
   if (els.libraryPiece.value !== piece?.piece_id) return;
   const parts = piece?.parts?.length ? piece.parts : [];
   els.libraryPart.replaceChildren(...parts.map((part) => new Option(part.name, part.id)));
+  let rememberedPart;
+  try { rememberedPart = localStorage.getItem(`choir-part:${piece?.piece_id}`); } catch (_) {}
+  const preferredPart = parts.find(part => part.id === rememberedPart)
+    ?? parts.find(part => part.id === state.runtime?.selectedPartId);
+  if (preferredPart) els.libraryPart.value = preferredPart.id;
   const message = piece?.monodic ? 'Brano monodico: Soprano e Contralto usano la melodia scritta; Tenore e Basso la cantano un’ottava sotto.' : (!parts.length ? 'Nessuna parte vocale disponibile nel file MuseScore.' : '');
   els.libraryNote.hidden = !message;
   els.libraryNote.textContent = message;
@@ -2953,25 +3930,18 @@ async function updateLibraryParts() {
 
 function bindLibraryPicker() {
   els.piecePicker.addEventListener('click', openLibraryPicker);
-  els.library.addEventListener('click', openLibraryPicker);
-  els.libraryPiece.addEventListener('change', updateLibraryParts);
-  els.libraryTitleSave.addEventListener('click', () => {
-    const piece = state.library.find((item) => item.piece_id === els.libraryPiece.value);
-    if (!piece) return;
-    const title = els.libraryTitle.value.trim();
-    try {
-      if (title) localStorage.setItem(pieceTitleKey(piece.piece_id), title);
-      else localStorage.removeItem(pieceTitleKey(piece.piece_id));
-    } catch (_) { showToast('Il browser non può salvare il nome del brano.'); return; }
-    populateLibraryPieces(piece.piece_id);
-    els.libraryTitle.value = pieceDisplayTitle(piece);
-    if (state.bundleManifest?.piece_id === piece.piece_id) els.pieceTitle.textContent = pieceDisplayTitle(piece);
-    showToast(title ? 'Nome del brano salvato.' : 'Nome del brano ripristinato.');
+  els.library?.addEventListener('click', openLibraryPicker);
+  els.piecePickerDialog.addEventListener('cancel', (event) => {
+    if (!state.runtime) event.preventDefault();
   });
+  els.libraryPiece.addEventListener('change', updateLibraryParts);
   els.libraryOpen.addEventListener('click', () => {
     const query = new URLSearchParams({ piece: els.libraryPiece.value });
     if (els.libraryPart.value) query.set('part', els.libraryPart.value);
     window.location.search = query.toString();
+  });
+  els.libraryScore.addEventListener('click', () => {
+    window.location.href = `score-viewer.html?piece=${encodeURIComponent(els.libraryPiece.value)}`;
   });
 }
 
@@ -2979,6 +3949,7 @@ function restartPractice() {
   state.clock.pause();
   clearPitchHistory();
   state.attemptActive = false;
+  state.resumeCheckpointBeat = null;
   state.attempt = { voicedMs: 0, insideMs: 0 };
   state.lastSampleMs = null;
   if (els.resultDialog.open) els.resultDialog.close();
@@ -2989,7 +3960,7 @@ function restartPractice() {
 }
 
 async function loadPracticePiece(pieceId) {
-  const bundleResponse = await fetch(`/api/library/${encodeURIComponent(pieceId)}/bundle`, { cache: 'no-store' });
+  const bundleResponse = await fetch(libraryBundleUrl(pieceId), { cache: 'no-store' });
   if (!bundleResponse.ok) throw new Error('Manifest del brano non disponibile');
   const bundleManifest = await bundleResponse.json();
   try { localStorage.setItem(LAST_PRACTICE_PIECE_KEY, pieceId); } catch (_) { /* Optional convenience only. */ }
@@ -3015,6 +3986,7 @@ async function loadPracticePiece(pieceId) {
       && Boolean(approval?.reviewer)
       && bundleManifest.checks.every((check) => approval?.checks?.includes(check.id));
   } catch (_) { state.bundleApproved = false; }
+  if (bundleManifest.published) state.bundleApproved = true;
   els.assetStatus.textContent = state.bundleApproved
     ? 'APPROVATO LOCALMENTE · bundle coerente'
     : 'PENDING REVIEW · apri la revisione admin dal menu ⋯';
@@ -3022,16 +3994,20 @@ async function loadPracticePiece(pieceId) {
   els.assetStatus.textContent = bundleManifest.local_source
     ? 'SORGENTE MUSESCORE LOCALE · derivati pronti per la prova'
     : els.assetStatus.textContent;
+  if (bundleManifest.published) els.assetStatus.textContent = 'VERSIONE PUBBLICATA · bundle verificato';
+  els.assetStatus.hidden = state.bundleApproved;
+  if (!state.bundleApproved) els.assetStatus.textContent = 'Questo spartito è ancora in revisione.';
   const parts = vocalParts(state.runtime);
   els.partSelector.replaceChildren(...parts.map((part) => new Option(part.name, part.id)));
   let savedPart;
   try { savedPart = new URLSearchParams(window.location.search).get('part') ?? localStorage.getItem(`choir-part:${bundleManifest.piece_id ?? state.runtime.title}`); } catch (_) {}
   state.runtime.selectPart(parts.find((part) => part.id === savedPart)?.id ?? parts.find((part) => part.name.toLowerCase().includes('tenor'))?.id ?? parts[0]?.id);
+  state.selectedVoiceIds = new Set([state.runtime.selectedPartId]);
   els.partSelector.value = state.runtime.selectedPartId;
-  els.transpose.replaceChildren(...Array.from({ length: 25 }, (_, index) => {
-    const offset = index - 12;
-    const label = offset === 0 ? 'Originale' : Math.abs(offset) === 12
-      ? `${offset > 0 ? '+' : '−'}1 ottava` : `${offset > 0 ? '+' : ''}${offset} semitoni`;
+  const transposeValues = RUNTIME_CONFIG.features?.transpose === false
+    ? [0] : Array.from({ length: 25 }, (_, index) => index - 12);
+  els.transpose.replaceChildren(...transposeValues.map((offset) => {
+    const label = offset === 0 ? '0' : `${offset > 0 ? '+' : '−'}${Math.abs(offset)}`;
     return new Option(label, String(offset));
   }));
   restorePreferences();
@@ -3039,6 +4015,7 @@ async function loadPracticePiece(pieceId) {
   // newly opened piece, even if that piece has older saved preferences.
   state.transpose = 0;
   els.transpose.value = '0';
+  updateTransposeControl();
   restorePitchHistory();
   state.occurrenceMeasures = buildOccurrenceMeasures(state.runtime);
   configureBacking();
@@ -3055,9 +4032,9 @@ async function loadPracticePiece(pieceId) {
   }
   const libraryPiece = state.library.find((piece) => piece.piece_id === bundleManifest.piece_id);
   els.pieceTitle.textContent = libraryPiece ? pieceDisplayTitle(libraryPiece) : state.runtime.title.split('·')[0].trim();
+  els.scoreViewerLink.href = `score-viewer.html?piece=${encodeURIComponent(bundleManifest.piece_id)}`;
   els.scorePartLabel.textContent = parts.find((part) => part.id === state.runtime.selectedPartId)?.name ?? 'Parte';
-  const restoredMeasure = state.selectedMeasureIndex;
-  bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(restoredMeasure); updatePlaybackButton();
+  bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(0); updatePlaybackButton();
   window.addEventListener('message', (event) => {
     if (event.origin === location.origin && event.data?.type === 'choir-bundle-approval') location.reload();
   });
