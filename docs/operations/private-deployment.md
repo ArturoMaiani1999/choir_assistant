@@ -46,6 +46,22 @@ genera una nuova build e si ripete l'intero collaudo. Le URL di anteprima sono
 disabilitate in `wrangler.jsonc`; Access deve proteggere l'intero Worker prima
 di caricarvi repertorio reale.
 
+Le preferenze dell'app sono salvate dal browser per origine: quelle di
+`http://127.0.0.1:5173` non sono condivise con
+`https://choir-assistant.choir-assistant.workers.dev`. Una differenza visiva
+non prova quindi che il deploy sia vecchio. Per confrontare i valori effettivi
+in due profili temporanei e privi di preferenze salvate:
+
+```powershell
+python scripts/browser_settings_snapshot.py `
+  "http://127.0.0.1:5173/?piece=ave-verum&part=P3" `
+  "https://127.0.0.1:8788/?piece=ave-verum&part=P3"
+```
+
+Avviare prima il server locale e `wrangler dev` della stessa `dist/`. In un
+browser reale, **Ripristina predefinito** riallinea l'origine corrente senza
+toccare le preferenze conservate sull'altra origine.
+
 ---
 
 ## 1. Obiettivo e architettura
