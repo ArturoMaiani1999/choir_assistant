@@ -96,6 +96,17 @@
       else gain.value = level;
     }
 
+    _setPitchRatio(parameter, ratio) {
+      const now = this.context?.currentTime ?? 0;
+      if (typeof parameter.cancelScheduledValues === 'function') parameter.cancelScheduledValues(now);
+      // Keep the intrinsic value in sync as well as the automation timeline.
+      // Chromium can otherwise expose the worklet parameter's default value
+      // until the next render quantum, even though an event was scheduled at
+      // the current context time.
+      parameter.value = ratio;
+      if (typeof parameter.setValueAtTime === 'function') parameter.setValueAtTime(ratio, now);
+    }
+
     _attach(media) {
       if (!this.context || this.channels.has(media) || this.unroutable.has(media)) {
         return this.channels.get(media) ?? null;
@@ -165,8 +176,7 @@
       for (const channel of this.channels.values()) {
         const parameter = channel.pitch?.parameters?.get?.('ratio');
         if (!parameter) continue;
-        if (typeof parameter.setValueAtTime === 'function') parameter.setValueAtTime(ratio, this.context?.currentTime ?? 0);
-        else parameter.value = ratio;
+        this._setPitchRatio(parameter, ratio);
       }
       return this.transposeSemitones;
     }

@@ -43,6 +43,21 @@ class FakeAudioContext {
   async resume() { this.state = 'running'; }
 }
 
+class FakeAudioWorkletNode {
+  constructor(_context, _name, options) {
+    const ratio = {
+      value: 1, cancelledAt: null, setAt: null,
+      cancelScheduledValues(time) { this.cancelledAt = time; },
+      setValueAtTime(value, time) { this.value = value; this.setAt = time; },
+    };
+    ratio.value = options.parameterData.ratio;
+    this.parameters = new Map([['ratio', ratio]]);
+  }
+
+  connect() {}
+  disconnect() {}
+}
+
 async function run() {
   const manifest = {
     mixFile: 'score.mp3',
@@ -116,6 +131,21 @@ async function run() {
   const unsupportedTranspose = new MediaElementMixer({ AudioContextClass: FakeAudioContext });
   unsupportedTranspose.setTranspose(3);
   await assert.rejects(() => unsupportedTranspose.resume([fakeMedia()]), /transposition is unavailable/);
+
+  const transposedMedia = fakeMedia();
+  const transposedMixer = new MediaElementMixer({
+    AudioContextClass: FakeAudioContext,
+    AudioWorkletNodeClass: FakeAudioWorkletNode,
+  });
+  transposedMixer.context = new FakeAudioContext();
+  transposedMixer.workletReady = true;
+  transposedMixer.setTranspose(3);
+  transposedMixer.setLevel(transposedMedia, 1);
+  const ratio = transposedMixer.channels.get(transposedMedia).pitch.parameters.get('ratio');
+  transposedMixer.setTranspose(7);
+  assert.ok(Math.abs(ratio.value - 2 ** (7 / 12)) < 1e-12);
+  assert.equal(ratio.cancelledAt, transposedMixer.context.currentTime);
+  assert.equal(ratio.setAt, transposedMixer.context.currentTime);
 
   const source = mixer.context.sources[0];
   const gain = mixer.context.gains[0];
