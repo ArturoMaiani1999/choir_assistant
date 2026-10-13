@@ -37,19 +37,36 @@
       return this;
     }
 
-    keyFifthsAt(beat) {
+    keyAt(beat) {
       const safeBeat = Math.max(0, beat);
       const occurrence = this.performanceOccurrences.find(
         (item) => item.startBeat <= safeBeat && safeBeat < item.endBeat,
       );
-      if (occurrence) return this.measures.find((measure) => measure.id === occurrence.writtenMeasureId)?.keyFifths ?? 0;
+      if (occurrence) {
+        const measure = this.measures.find((item) => item.id === occurrence.writtenMeasureId);
+        return { fifths: measure?.keyFifths ?? 0, mode: measure?.keyMode ?? null };
+      }
       let startBeat = 0;
       for (const measure of this.measures) {
         const duration = measure.timeSignatureNumerator * (4 / measure.timeSignatureDenominator);
-        if (safeBeat < startBeat + duration) return measure.keyFifths ?? 0;
+        if (safeBeat < startBeat + duration) {
+          return { fifths: measure.keyFifths ?? 0, mode: measure.keyMode ?? null };
+        }
         startBeat += duration;
       }
-      return this.measures.at(-1)?.keyFifths ?? 0;
+      const finalMeasure = this.measures.at(-1);
+      return { fifths: finalMeasure?.keyFifths ?? 0, mode: finalMeasure?.keyMode ?? null };
+    }
+
+    keyFifthsAt(beat) {
+      return this.keyAt(beat).fifths;
+    }
+
+    tonicPitchClassAt(beat, transpose = 0) {
+      const key = this.keyAt(beat);
+      const modeOffset = key.mode === 'major' ? 0 : key.mode === 'minor' ? 9 : null;
+      if (modeOffset == null) return null;
+      return ((key.fifths * 7 + modeOffset + transpose) % 12 + 12) % 12;
     }
 
     targetAt(beat) {
@@ -127,6 +144,7 @@
         timeSignatureDenominator: measure.time_signature_denominator,
         beatOffset: measure.beat_offset ?? 0,
         keyFifths: measure.key_fifths ?? 0,
+        keyMode: measure.key_mode ?? null,
       }));
       const beatsPerMeasure = measures[0]?.timeSignatureNumerator ?? 4;
       const parts = (payload.parts ?? []).map((part) => ({

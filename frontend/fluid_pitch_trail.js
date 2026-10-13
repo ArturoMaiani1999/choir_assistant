@@ -41,10 +41,13 @@
       const segment = model.segments[index];
       const previous = result.at(-1), a = previous?.at(-1), b = segment[0];
       const c = model.segments[index + 1]?.[0];
-      if (segment.length === 1 && a && c && a.takeId === b.takeId && b.takeId === c.takeId
+      if (segment.length === 1 && a && c && c.x > a.x && a.takeId === b.takeId && b.takeId === c.takeId
           && c.time - a.time <= maxGap && Math.abs(c.pitch - a.pitch) <= .55
           && Math.abs(b.pitch - (a.pitch + c.pitch) / 2) > .75) continue;
-      if (a && b && a.takeId === b.takeId && b.time > a.time
+      // Time and screen space must advance together. In particular, never
+      // undo plumeSegments' split when several live observations reach the
+      // same capped x coordinate.
+      if (a && b && a.takeId === b.takeId && b.time > a.time && b.x > a.x
           && b.time - a.time <= maxGap && Math.abs(b.pitch - a.pitch) <= config.bridgeSemitones)
         previous.push(...segment);
       else result.push(segment.slice());
@@ -96,6 +99,53 @@
     return result;
   }
 
+  function interpolatePoint(a, b, x) {
+    const amount = (x - a.x) / (b.x - a.x);
+    return {
+      x,
+      y: a.y + (b.y - a.y) * amount,
+      time: a.time + (b.time - a.time) * amount,
+      confidence: a.confidence + (b.confidence - a.confidence) * amount,
+    };
+  }
+
+  // The pitch trail is a graph y=f(x), not a free parametric curve. Sampling
+  // it once per physical pixel column makes that property structural: no
+  // smoothing pass or GPU join can put two centre pitches at the same x.
+  function sampleGraphColumns(points, dpr = 1, left = -Infinity, right = Infinity) {
+    if (points.length < 2) return [];
+    const ratio = Math.max(1, Number.isFinite(dpr) ? dpr : 1);
+    const start = Math.max(left, points[0].x);
+    const end = Math.min(right, points.at(-1).x);
+    if (!(end > start)) return [];
+    const firstColumn = Math.ceil(start * ratio - 1e-7);
+    const lastColumn = Math.floor(end * ratio + 1e-7);
+    if (lastColumn <= firstColumn) return [];
+    const result = [];
+    let pair = 1;
+    for (let column = firstColumn; column <= lastColumn; column += 1) {
+      const x = column / ratio;
+      while (pair < points.length - 1 && points[pair].x < x) pair += 1;
+      const a = points[pair - 1], b = points[pair];
+      if (!(b.x > a.x) || x < a.x - 1e-7 || x > b.x + 1e-7) continue;
+      result.push(interpolatePoint(a, b, x));
+    }
+    return result;
+  }
+
+  function graphPoints(source, yAt, config, options = {}) {
+    const mapped = softenPitchSpikes(source).map(point => ({
+      x: point.x,
+      y: yAt(point.pitch),
+      time: point.time,
+      confidence: point.confidence,
+    }));
+    const smoothed = smoothPoints(mapped, config.smoothingPasses);
+    return sampleGraphColumns(smoothed, options.dpr,
+      Number.isFinite(options.trailStartX) ? options.trailStartX : -Infinity,
+      Number.isFinite(options.nowX) ? options.nowX : Infinity);
+  }
+
   function unitDirection(from, to) {
     const x = to.x - from.x, y = to.y - from.y, length = Math.hypot(x, y);
     return length > 1e-5 ? { x: x / length, y: y / length } : null;
@@ -129,6 +179,8 @@
     const review = options.mode === 'review';
     const model = PitchShared.plumeSegments(samples, xAt, {
       ...options, currentTime, timeAt, mode: options.mode,
+      viewportLeft: options.viewportLeft ?? options.trailStartX,
+      viewportRight: options.viewportRight ?? options.nowX,
     });
     const halfWidth = config.ribbonWidth * Math.max(.4, Math.min(3, options.ribbonScale ?? 1)) / 2;
     const vertices = [];
@@ -137,8 +189,7 @@
     const push = (x, y, edge, s, fluidEnergy, coreEnergy, head, cap) => vertices.push(x, y, edge, s, fluidEnergy, coreEnergy, head, cap);
     for (const source of reconcileSegments(model, config)) {
       const visible = source.filter(point => review || currentTime - point.time <= config.centerlineHistorySeconds);
-      const points = smoothPoints(softenPitchSpikes(visible).map(point => ({ x: point.x, y: yAt(point.pitch), time: point.time,
-        confidence: point.confidence })), config.smoothingPasses);
+      const points = graphPoints(visible, yAt, config, options);
       if (points.length < 2) continue;
       const strip = [];
       let distance = 0;
@@ -152,7 +203,9 @@
         const startFade = smoothstep((x - firstX) / config.capFadePixels);
         const endFade = liveHead ? 1 : smoothstep((lastX - x) / config.capFadePixels);
         const cap = Math.min(startFade, endFade);
-        const offset = joinOffset(points, index, halfWidth * (.45 + .55 * Math.sqrt(cap)), config.joinLimit);
+        // Vertical edges preserve the graph invariant even through a steep
+        // pitch transition. A normal-offset ribbon can fold backwards in x.
+        const verticalHalfWidth = halfWidth * (.45 + .55 * Math.sqrt(cap));
         const age = Math.max(0, currentTime - point.time);
         const confidence = clamp01(point.confidence);
         const fluidAgeEnergy = review ? .72 : clamp01(1 - age / config.historySeconds);
@@ -162,8 +215,8 @@
         const head = review ? 0 : 1 - clamp01(age / config.headSeconds);
         const s = point.time + distance * .0025;
         strip.push([
-          x + offset.x, y + offset.y, 1, s, fluidEnergy, coreEnergy, head, cap,
-          x - offset.x, y - offset.y, -1, s, fluidEnergy, coreEnergy, head, cap,
+          x, y - verticalHalfWidth, 1, s, fluidEnergy, coreEnergy, head, cap,
+          x, y + verticalHalfWidth, -1, s, fluidEnergy, coreEnergy, head, cap,
         ]);
       }
       if (vertices.length) {
@@ -178,16 +231,15 @@
       strips, currentTime, halfWidth, config };
   }
 
-  function smoothCanvasPath(context, points, yAt) {
+  function graphBandPath(context, points, halfWidth) {
     if (points.length < 2) return;
     context.beginPath();
-    context.moveTo(points[0].x, yAt(points[0].pitch));
-    for (let index = 1; index < points.length - 1; index += 1) {
-      const point = points[index], next = points[index + 1];
-      context.quadraticCurveTo(point.x, yAt(point.pitch), (point.x + next.x) / 2, (yAt(point.pitch) + yAt(next.pitch)) / 2);
-    }
-    const last = points.at(-1);
-    context.lineTo(last.x, yAt(last.pitch));
+    context.moveTo(points[0].x, points[0].y - halfWidth);
+    for (let index = 1; index < points.length; index += 1)
+      context.lineTo(points[index].x, points[index].y - halfWidth);
+    for (let index = points.length - 1; index >= 0; index -= 1)
+      context.lineTo(points[index].x, points[index].y + halfWidth);
+    context.closePath();
   }
 
   function liveHeadPoint(samples, xAt, yAt, options = {}) {
@@ -195,18 +247,23 @@
     const config = { ...CONFIG, ...(options.config || {}) };
     const timeAt = options.timeAt || (sample => sample.time ?? sample.audioTimeSec);
     const currentTime = Number.isFinite(options.currentTime) ? options.currentTime : timeAt(samples.at(-1) || {});
-    const model = PitchShared.plumeSegments(samples, xAt, { ...options, currentTime, timeAt });
+    const model = PitchShared.plumeSegments(samples, xAt, {
+      ...options, currentTime, timeAt,
+      viewportLeft: options.viewportLeft ?? options.trailStartX,
+      viewportRight: options.viewportRight ?? options.nowX,
+    });
     const segments = reconcileSegments(model, config);
     let segment = null;
     for (let index = segments.length - 1; index >= 0; index -= 1) {
       if (segments[index].length >= 2) { segment = segments[index]; break; }
     }
-    const last = segment?.at(-1);
+    const visible = segment?.filter(point => currentTime - point.time <= config.centerlineHistorySeconds) ?? [];
+    const last = graphPoints(visible, yAt, config, options).at(-1);
     if (!last || currentTime - last.time > config.headSeconds * 1.5) return null;
     const scale = Math.max(.4, Math.min(3, options.ribbonScale ?? 1));
     // Radius equals the rendered core thickness, so the marker diameter is
     // exactly twice the thickness of the melodic centerline.
-    return { x: last.x, y: yAt(last.pitch), radius: config.coreWidth * scale };
+    return { x: last.x, y: last.y, radius: config.coreWidth * scale };
   }
 
   function paintHeadMarker(context, head) {
@@ -257,14 +314,19 @@
     const timeAt = options.timeAt || (sample => sample.time ?? sample.audioTimeSec);
     const currentTime = Number.isFinite(options.currentTime) ? options.currentTime : timeAt(samples.at(-1) || {});
     const review = options.mode === 'review';
-    const model = PitchShared.plumeSegments(samples, xAt, { ...options, currentTime, timeAt });
+    const model = PitchShared.plumeSegments(samples, xAt, {
+      ...options, currentTime, timeAt,
+      viewportLeft: options.viewportLeft ?? options.trailStartX,
+      viewportRight: options.viewportRight ?? options.nowX,
+    });
     context.save();
     if (options.clip) {
       context.beginPath(); context.rect(options.clip.left, options.clip.top,
         options.clip.right - options.clip.left, options.clip.bottom - options.clip.top); context.clip();
     }
     for (const source of reconcileSegments(model, config)) {
-      const points = softenPitchSpikes(source.filter(point => review || currentTime - point.time <= config.centerlineHistorySeconds));
+      const visible = source.filter(point => review || currentTime - point.time <= config.centerlineHistorySeconds);
+      const points = graphPoints(visible, yAt, config, options);
       if (points.length < 2) continue;
       const liveHead = !review && currentTime - points.at(-1).time <= model.cadence * 1.5;
       const span = Math.max(1, points.at(-1).x - points[0].x);
@@ -275,21 +337,19 @@
       gradient.addColorStop(fadeFraction, `rgba(114,224,210,${.22 * firstEnergy})`);
       if (!liveHead) gradient.addColorStop(1 - fadeFraction, 'rgba(114,224,210,.22)');
       gradient.addColorStop(1, liveHead ? 'rgba(114,224,210,.22)' : 'rgba(114,224,210,0)');
-      smoothCanvasPath(context, points, yAt);
-      context.strokeStyle = gradient; context.lineWidth = config.ribbonWidth * (options.ribbonScale ?? 1);
-      context.lineCap = 'round'; context.lineJoin = 'round'; context.stroke();
+      const scale = Math.max(.4, Math.min(3, options.ribbonScale ?? 1));
+      graphBandPath(context, points, config.ribbonWidth * scale / 2);
+      context.fillStyle = gradient; context.fill();
       const coreGradient = context.createLinearGradient(points[0].x, 0, points.at(-1).x, 0);
       coreGradient.addColorStop(0, 'rgba(151,244,232,0)');
       coreGradient.addColorStop(fadeFraction, `rgba(151,244,232,${.18 + .45 * firstEnergy})`);
       if (!liveHead) coreGradient.addColorStop(1 - fadeFraction, 'rgba(169,255,244,.96)');
       coreGradient.addColorStop(1, liveHead ? 'rgba(169,255,244,.96)' : 'rgba(169,255,244,0)');
-      smoothCanvasPath(context, points, yAt);
-      const scale = Math.max(.4, Math.min(3, options.ribbonScale ?? 1));
-      context.strokeStyle = coreGradient; context.lineWidth = config.coreWidth * scale;
-      context.stroke();
+      graphBandPath(context, points, config.coreWidth * scale / 2);
+      context.fillStyle = coreGradient; context.fill();
       if (options.showHeadMarker !== false && !review && currentTime - points.at(-1).time < config.headSeconds * 1.5) {
         const last = points.at(-1);
-        paintHeadMarker(context, { x: last.x, y: yAt(last.pitch), radius: config.coreWidth * scale });
+        paintHeadMarker(context, { x: last.x, y: last.y, radius: config.coreWidth * scale });
       }
     }
     context.restore();
@@ -449,5 +509,5 @@
     }
   }
 
-  return { CONFIG, smoothPoints, joinOffset, trailGeometry, liveHeadPoint, drawLiveHead, drawPitchMarker, drawFallback, Renderer };
+  return { CONFIG, smoothPoints, sampleGraphColumns, joinOffset, trailGeometry, liveHeadPoint, drawLiveHead, drawPitchMarker, drawFallback, Renderer };
 });

@@ -21,6 +21,11 @@ python scripts/serve_frontend.py
 
 Open `http://127.0.0.1:5173`. Use this environment for score generation,
 administrative review, benchmark analysis and optional CREPE diagnostics.
+At startup the local server checks repertoire `.mscz` files and atomically
+refreshes adjacent MusicXML files whose source changed. MusicXML is not edited independently except
+for explicit metadata unsupported by a reliable MuseScore round trip; existing
+`key/mode` values are merged into every new export. The same synchronization is
+available without the server through `python scripts/sync_score_sources.py`.
 
 ## Required checks
 

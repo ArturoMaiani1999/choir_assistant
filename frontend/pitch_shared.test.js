@@ -2,7 +2,10 @@ const assert = require('node:assert/strict');
 const shared = require('./pitch_shared.js');
 
 assert.equal(shared.PREFERENCE_KEY, 'choir-detector-settings:v1');
-assert.equal(shared.PLUME_DEFAULTS.width, 2.5, 'the default plume width is 250%');
+assert.equal(shared.SETTINGS_DEFAULTS_VERSION, 2, 'advanced-setting defaults carry an explicit version');
+assert.deepEqual(shared.DETECTOR_DEFAULTS,
+  { rmsThreshold: .000002, weakVoiceMode: false, fastAlpha: .65, slowAlpha: .65, medianWindowFrames: 3 });
+assert.deepEqual(shared.PLUME_DEFAULTS, { width: 2.5, intensity: 1.75, color: '#72e0d2', timeAdvanceMs: 280 });
 assert.equal(shared.PLUME_WIDTH_PREFERENCE_VERSION, 2, 'plume width preferences carry an explicit default version');
 assert.equal(shared.PLUME_ADVANCE_MAX_MS, 400, 'visual advance supports high-latency headphones');
 const preferences = shared.readPreferences({ getItem: () => JSON.stringify({
@@ -12,9 +15,29 @@ const preferences = shared.readPreferences({ getItem: () => JSON.stringify({
 assert.deepEqual(preferences.detector, { rmsThreshold: .002, weakVoiceMode: true, fastAlpha: .7, slowAlpha: .25, medianWindowFrames: 5 });
 assert.deepEqual(preferences.plume, { width: 1.4, intensity: .8, color: '#72e0d2', timeAdvanceMs: 120 });
 assert.equal(shared.readPreferences({ getItem: () => JSON.stringify({ v1PlumeWidth: 1 }) }).plume.width, 2.5,
-  'the legacy 100% default migrates to the new 250% default');
+  'the legacy 100% default migrates to the current 250% default');
 assert.equal(shared.readPreferences({ getItem: () => JSON.stringify({ v1PlumeWidth: 1, plumeWidthPreferenceVersion: 2 }) }).plume.width, 1,
   'an explicit 100% choice made after the migration is preserved');
+const migratedDefaults = shared.readPreferences({ getItem: () => JSON.stringify({
+  v1RmsThreshold: .001, v1FastAlpha: .65, v1SlowAlpha: .3, v1MedianWindowFrames: 3,
+  v1PlumeWidth: 2.5, v1PlumeIntensity: 1, v1PlumeAdvanceMs: 200,
+}) });
+assert.deepEqual(migratedDefaults.detector, shared.DETECTOR_DEFAULTS, 'the previous detector defaults migrate once');
+assert.deepEqual(migratedDefaults.plume, shared.PLUME_DEFAULTS, 'the previous plume defaults migrate once');
+const migratedVersion1Defaults = shared.readPreferences({ getItem: () => JSON.stringify({
+  settingsDefaultsVersion: 1,
+  v1RmsThreshold: .0001, v1FastAlpha: .6, v1SlowAlpha: .65, v1MedianWindowFrames: 3,
+  v1PlumeWidth: 2.05, v1PlumeIntensity: 1.75, v1PlumeAdvanceMs: 310,
+}) });
+assert.deepEqual(migratedVersion1Defaults.detector, shared.DETECTOR_DEFAULTS, 'version 1 detector defaults migrate once');
+assert.deepEqual(migratedVersion1Defaults.plume, shared.PLUME_DEFAULTS, 'version 1 plume defaults migrate once');
+const explicitLegacyValues = shared.readPreferences({ getItem: () => JSON.stringify({
+  settingsDefaultsVersion: shared.SETTINGS_DEFAULTS_VERSION,
+  v1RmsThreshold: .001, v1FastAlpha: .65, v1SlowAlpha: .3, v1MedianWindowFrames: 3,
+  v1PlumeWidth: 2.5, v1PlumeIntensity: 1, v1PlumeAdvanceMs: 200,
+}) });
+assert.equal(explicitLegacyValues.detector.rmsThreshold, .001, 'explicit choices are preserved after migration');
+assert.equal(explicitLegacyValues.plume.width, 2.5, 'explicit plume choices are preserved after migration');
 assert.equal(shared.readPreferences({ getItem: () => JSON.stringify({ v1PlumeAdvanceMs: 900 }) }).plume.timeAdvanceMs, 400,
   'saved visual advance is capped at the supported maximum');
 const weakRecognition = shared.recognitionSettings(preferences.detector);

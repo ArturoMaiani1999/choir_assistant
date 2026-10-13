@@ -54,7 +54,12 @@ def main():
                         break
                     time.sleep(.1)
                 else:
-                    loading = evaluate(socket, 3, "document.querySelector('#score-loading')?.textContent")
+                    loading = evaluate(socket, 3, """({
+                      loading: document.querySelector('#score-loading')?.textContent,
+                      title: document.querySelector('#piece-title')?.textContent,
+                      stateType: typeof state,
+                      appLoaded: performance.getEntriesByType('resource').some(entry => entry.name.includes('/app.js'))
+                    })""")
                     raise RuntimeError(f"Practice initialization timed out: {loading}")
                 results = []
                 call_id = 10
@@ -99,9 +104,10 @@ def main():
                         assert metrics["fabricatedLyrics"] == 0 and metrics["missingProvenance"] == 0
                     assert metrics["metronomeControl"] is True
                     assert metrics["portraitHint"] == "none"
+                    assert metrics["readoutDisplay"] == "none"
                     if width <= 960:
                         assert metrics["topCollapsed"] is True
-                        assert metrics["readoutDisplay"] == "none" and metrics["buildDisplay"] == "none"
+                        assert metrics["buildDisplay"] == "none"
                         assert metrics["topToggleDisplay"] == "grid"
                         if width > height:
                             assert metrics["bottomCollapsed"] is True and metrics["bottomToggleDisplay"] == "grid"
@@ -186,7 +192,31 @@ def main():
                 time.sleep(.2)
                 running_shot = command(socket, call_id + 4, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
                 (ARTIFACTS / "practice-1440x900-trajectory.png").write_bytes(base64.b64decode(running_shot["data"]))
-                print(json.dumps({"viewports": results, "interaction": interaction}, ensure_ascii=False, indent=2))
+                settings_levels = evaluate(socket, call_id + 5, """(() => {
+                  if (els.settingsDialog.open) els.settingsDialog.close();
+                  els.settings.click();
+                  const menu = {open:!els.settingsMenu.hidden, expanded:els.settings.getAttribute('aria-expanded')};
+                  els.settingsMenuBasic.click();
+                  const basic = {open:els.settingsDialog.open, basicHidden:els.settingsBasicPanel.hidden,
+                    advancedHidden:els.settingsAdvancedPanel.hidden, paper:Boolean(document.querySelector('#score-paper-color')),
+                    visibleDescriptions:[...els.settingsBasicPanel.querySelectorAll('p')].filter(item=>!item.hidden).length};
+                  els.settingsDialog.close(); els.settings.click(); els.settingsMenuAdvanced.click();
+                  const advanced = {basicHidden:els.settingsBasicPanel.hidden,
+                    advancedHidden:els.settingsAdvancedPanel.hidden, title:els.settingsHeading.textContent,
+                    displayAlgorithm:Boolean(document.querySelector('#settings-display-pitch-algorithm')),
+                    pianoRollDelayMax:els.settingsPianoRollDelay.max};
+                  els.settingsDialog.close();
+                  return {menu,basic,advanced};
+                })()""")
+                assert settings_levels == {
+                    "menu": {"open": True, "expanded": "true"},
+                    "basic": {"open": True, "basicHidden": False, "advancedHidden": True,
+                              "paper": True, "visibleDescriptions": 0},
+                    "advanced": {"basicHidden": True, "advancedHidden": False,
+                                 "title": "Impostazioni avanzate", "displayAlgorithm": False,
+                                 "pianoRollDelayMax": "600"},
+                }, settings_levels
+                print(json.dumps({"viewports": results, "interaction": interaction, "settings": settings_levels}, ensure_ascii=False, indent=2))
             finally:
                 socket.close()
         finally:

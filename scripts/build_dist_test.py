@@ -56,10 +56,28 @@ class BuildDistTest(unittest.TestCase):
     def test_practice_toolbar_exposes_settings_without_redundant_menu_actions(self) -> None:
         html = (build_dist.FRONTEND / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn('id="settings" type="button">Impostazioni</button>', html)
+        self.assertIn('id="settings" type="button" aria-haspopup="menu"', html)
+        self.assertIn('id="settings-menu-basic"', html)
+        self.assertIn('id="settings-menu-advanced"', html)
         self.assertNotIn("toolbar-more", html)
         self.assertNotIn('id="library"', html)
         self.assertNotIn('id="restart-practice"', html)
+
+    def test_audio_output_choice_is_first_and_bluetooth_supports_500_ms(self) -> None:
+        html = (build_dist.FRONTEND / "index.html").read_text(encoding="utf-8")
+
+        dialog = html[html.index('id="settings-dialog"'):]
+        self.assertLess(dialog.index('id="settings-audio-output-heading"'), dialog.index('id="settings-text-scale-heading"'))
+        self.assertIn('id="settings-audio-output-bluetooth"', dialog)
+        self.assertIn('id="settings-basic-panel"', dialog)
+        self.assertIn('id="settings-advanced-panel"', dialog)
+        self.assertIn('id="note-names" hidden', dialog)
+        self.assertIn('id="settings-piano-roll-delay" type="range" min="0" max="600"', dialog)
+        self.assertNotIn('settings-display-pitch-algorithm', dialog)
+        self.assertNotIn('Come mostrare la tua intonazione', dialog)
+        self.assertIn('id="settings-v1-plume-advance" type="range" min="0" max="400"', dialog)
+        score_appearance = (build_dist.FRONTEND / "score_appearance.js").read_text(encoding="utf-8")
+        self.assertIn("basicPanel.appendChild(section)", score_appearance)
 
     def test_piece_picker_uses_compact_mode_and_section_labels(self) -> None:
         html = (build_dist.FRONTEND / "index.html").read_text(encoding="utf-8")

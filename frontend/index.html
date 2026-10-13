@@ -6,20 +6,20 @@
     <meta name="theme-color" content="#081419" />
     <title>Choir Assistant · Il tuo studio</title>
     <script src="ui_preferences.js?v=2-lyrics-only"></script>
-    <link rel="stylesheet" href="styles.css?v=20261010-mobile-practice" />
-    <link rel="stylesheet" href="studio.css?v=20261010-mobile-practice" />
-    <script src="score_appearance.js?v=2"></script>
+    <link rel="stylesheet" href="styles.css?v=20261013-continuous-score" />
+    <link rel="stylesheet" href="studio.css?v=20261013-hide-readout" />
+    <script src="score_appearance.js?v=3-settings-groups"></script>
     <script src="runtime-config.js" defer></script>
-    <script src="practice_math.js?v=20261003-interval-arrows" defer></script>
-    <script src="score_runtime.js?v=20260927-pickup-timing" defer></script>
+    <script src="practice_math.js?v=20261013-mobile-four-measures" defer></script>
+    <script src="score_runtime.js?v=20261012-tonal-roles" defer></script>
     <script src="pitch_detector.js?v=20261003-weak-voice" defer></script>
-    <script src="pitch_shared.js?v=20261004-plume-advance-400" defer></script>
-    <script src="fluid_pitch_trail.js?v=20261010-clean-plume-head" defer></script>
+    <script src="pitch_shared.js?v=20261013-settings-defaults-v2" defer></script>
+    <script src="fluid_pitch_trail.js?v=20261012-single-valued" defer></script>
     <script src="vocal_feedback.js?v=20260928-feedback-v1" defer></script>
     <script src="one_euro_filter.js?v=20260927-phase2" defer></script>
     <script src="media_mixer.js?v=20261008-mixer-transpose" defer></script>
     <script src="pitch_test_harness.js?v=20260927-phase0" defer></script>
-    <script src="app.js?v=20261010-mobile-practice" defer></script>
+    <script src="app.js?v=20261013-mobile-layout-v2" defer></script>
   </head>
   <body>
     <main class="practice-shell" id="practice-shell" aria-label="Strumento di prova">
@@ -31,17 +31,23 @@
           <label class="part-control"><span class="sr-only">Parte vocale</span><select id="part-selector" aria-label="Parte vocale"></select></label>
         </div>
         <div class="toolbar-actions">
-          <label class="compact-select transpose-control"><span>Transpose</span><select id="transpose" aria-label="Trasposizione"></select><output id="transpose-value" aria-live="polite">±0</output></label>
+          <label class="compact-select transpose-control"><span>Transp</span><select id="transpose" aria-label="Trasposizione"></select><output id="transpose-value" aria-live="polite">±0</output></label>
           <label class="compact-select"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
           <button class="mode-button accompaniment-select" id="accompaniment-mode" type="button">Voci</button>
           <a class="mode-button score-viewer-link" id="score-viewer-link" href="score-viewer.html">Mostra partitura</a>
           <button class="mode-button" id="benchmark" type="button" hidden>Le mie registrazioni</button>
-          <button class="mode-button" id="settings" type="button">Impostazioni</button>
+          <div class="settings-menu-wrap" id="settings-menu-wrap">
+            <button class="mode-button" id="settings" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-menu">Impostazioni</button>
+            <div class="settings-menu" id="settings-menu" role="menu" hidden>
+              <button id="settings-menu-basic" type="button" role="menuitem"><strong>Base</strong><small>Audio, testo e colore carta</small></button>
+              <button id="settings-menu-advanced" type="button" role="menuitem"><strong>Avanzate</strong><small>Microfono e sincronizzazione</small></button>
+            </div>
+          </div>
           <div hidden aria-hidden="true"><button id="ground-truth" type="button"></button><button id="neural-live" type="button"></button><button id="admin-review" type="button"></button></div>
         </div>
       </header>
 
-      <button class="mobile-chrome-toggle mobile-toolbar-toggle" id="mobile-toolbar-toggle" type="button" aria-controls="practice-toolbar" aria-expanded="true" aria-label="Nascondi i comandi superiori" title="Nascondi i comandi superiori"><span aria-hidden="true">⌃</span></button>
+      <button class="mobile-chrome-toggle mobile-toolbar-toggle" id="mobile-toolbar-toggle" type="button" aria-controls="practice-toolbar" aria-expanded="true" aria-label="Nascondi i comandi superiori" title="Nascondi i comandi superiori"><span class="mobile-chrome-chevron" aria-hidden="true"></span></button>
 
       <aside class="asset-status" id="asset-status" role="alert" hidden></aside>
 
@@ -61,7 +67,7 @@
         <canvas id="pitch-lane" role="img" aria-describedby="pitch-description"></canvas>
         <canvas id="pitch-fluid-layer" aria-hidden="true"></canvas>
         <p class="sr-only" id="pitch-description">In pausa, trascina orizzontalmente il piano roll per ispezionare liberamente il tentativo. Il punto di ripresa non cambia: premendo play, la traccia parte una battuta prima e la registrazione riprende dal punto in cui era stata messa in pausa. La traiettoria mostra l’intonazione rilevata dal microfono.</p>
-        <div class="intonation-readout" id="intonation-readout" aria-live="polite"><strong id="live-note">—</strong><span id="live-cents">— ¢</span><small id="live-state">in attesa</small></div>
+        <div class="intonation-readout" id="intonation-readout" aria-live="polite" hidden><strong id="live-note">—</strong><span id="live-cents">— ¢</span><small id="live-state">in attesa</small></div>
         <div class="lane-legend" aria-label="Tracce visibili nel piano roll">
           <label class="pitch-layer-toggle voice-key"><input id="pitch-layer-v1" type="checkbox" checked /> La tua voce</label>
           <label class="pitch-layer-toggle plume-key"><input id="pitch-layer-crepe" type="checkbox" checked /> Seconda analisi</label>
@@ -80,14 +86,14 @@
           <label class="volume-control metronome-control"><button id="metronome-toggle" type="button" aria-label="Attiva metronomo" aria-pressed="false" title="Metronomo">♩</button><span class="sr-only">Volume metronomo</span><input id="metronome-volume" type="range" min="0" max="100" value="0" aria-label="Volume metronomo" /></label>
         </div>
       </footer>
-      <button class="mobile-chrome-toggle mobile-transport-toggle" id="mobile-transport-toggle" type="button" aria-controls="practice-transport" aria-expanded="true" aria-label="Nascondi i controlli di riproduzione" title="Nascondi i controlli di riproduzione"><span aria-hidden="true">⌄</span></button>
+      <button class="mobile-chrome-toggle mobile-transport-toggle" id="mobile-transport-toggle" type="button" aria-controls="practice-transport" aria-expanded="true" aria-label="Nascondi i controlli di riproduzione" title="Nascondi i controlli di riproduzione"><span class="mobile-chrome-chevron is-down" aria-hidden="true"></span></button>
       <audio id="backing-audio" preload="auto"></audio>
       <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
       <aside class="benchmark-recording" id="benchmark-recording" aria-live="assertive" hidden><span><b>● Registrazione benchmark</b><small id="benchmark-live-scenario"></small></span><button id="benchmark-stop-live" type="button" onclick="window.ChoirBenchmarkStop?.()">Interrompi take</button></aside>
     </main>
     <dialog id="voice-mixer-dialog" class="practice-dialog" aria-labelledby="voice-mixer-heading">
       <h2 id="voice-mixer-heading">Voci da ascoltare</h2>
-      <p>Regola separatamente ogni traccia con i fader verticali. Usa Mute per silenziarla senza perdere il livello impostato.</p>
+      <p>Regola ogni traccia. Usa Mute per silenziarla senza perdere il livello impostato.</p>
       <div class="mixer-console">
         <section class="mixer-channel mixer-accompaniment" id="voice-mixer-accompaniment" aria-label="Canale organo">
           <div class="mixer-channel-heading"><strong>Organo</strong><span>accompagnamento</span></div>
@@ -100,44 +106,45 @@
       <div class="dialog-actions"><button id="voice-mixer-own" type="button">Solo la mia parte</button><button id="voice-mixer-all" type="button">Tutte le voci</button><button id="voice-mixer-close" type="button">Chiudi</button></div>
     </dialog>
     <dialog id="settings-dialog" class="practice-dialog detector-settings-dialog" aria-labelledby="settings-heading">
-      <h2 id="settings-heading">La tua voce, sullo schermo</h2>
-      <p>Personalizza il piano roll e regola la sensibilità se il microfono fatica a sentirti. Le modifiche vengono applicate e salvate subito; clicca o tocca fuori dalla finestra per tornare al brano.</p>
+      <h2 id="settings-heading">Impostazioni</h2>
+      <section id="settings-basic-panel" class="settings-panel" data-settings-panel="basic">
+      <section class="detector-setting audio-output-setting" aria-labelledby="settings-audio-output-heading">
+        <div><h3 id="settings-audio-output-heading">Uscita audio in uso <button class="setting-info" type="button" aria-label="Informazioni sull’uscita audio" data-tooltip="La scelta vale 30 minuti. Con Bluetooth il ritardo del piano roll viene impostato automaticamente a 500 ms.">i</button></h3><output id="settings-audio-output-status">Da confermare</output></div>
+        <div class="audio-output-choices" role="radiogroup" aria-label="Uscita audio in uso">
+          <label class="audio-output-choice" for="settings-audio-output-standard">
+            <input id="settings-audio-output-standard" name="settings-audio-output" type="radio" value="standard" />
+            <span><strong>Cavo o altoparlanti del dispositivo</strong></span>
+          </label>
+          <label class="audio-output-choice" for="settings-audio-output-bluetooth">
+            <input id="settings-audio-output-bluetooth" name="settings-audio-output" type="radio" value="bluetooth" />
+            <span><strong>Cuffie o altoparlante Bluetooth</strong></span>
+          </label>
+        </div>
+        <p id="settings-audio-output-description" hidden>La scelta vale per 30 minuti in questa scheda e verrà richiesta di nuovo se cambia un dispositivo audio.</p>
+      </section>
       <section class="detector-setting" aria-labelledby="settings-text-scale-heading">
-        <div><h3 id="settings-text-scale-heading">Testo sul piano roll</h3><output id="settings-text-scale-value">150%</output></div>
+        <div><h3 id="settings-text-scale-heading">Dimensione testo sul piano roll <button class="setting-info" type="button" aria-label="Informazioni sulla dimensione del testo" data-tooltip="Regola la dimensione delle sillabe sopra le note. Il valore predefinito è 150%.">i</button></h3><output id="settings-text-scale-value">150%</output></div>
         <input id="settings-text-scale" type="range" min="100" max="200" step="10" value="150" />
         <div class="detector-setting-scale"><span>100% · normale</span><span>200% · molto grande</span></div>
-        <p>Regola solo la dimensione delle sillabe sopra le note. Il valore predefinito è 150%.</p>
       </section>
-      <label>Nomi delle note <select id="note-names"><option value="italian">Do, Re, Mi…</option><option value="international">C, D, E…</option></select></label>
+      </section>
+      <select id="note-names" hidden aria-hidden="true"><option value="italian">Do, Re, Mi…</option><option value="international">C, D, E…</option></select>
+      <section id="settings-advanced-panel" class="settings-panel settings-advanced" data-settings-panel="advanced" hidden>
       <section class="detector-setting" aria-labelledby="settings-intervals-heading">
-        <div><h3 id="settings-intervals-heading">Intervalli tra le note</h3></div>
+        <div><h3 id="settings-intervals-heading">Intervalli tra le note <button class="setting-info" type="button" aria-label="Informazioni sugli intervalli" data-tooltip="Mostra 2, 3m, 3M, 4 e 5 tra note consecutive. Il semitono non viene mostrato.">i</button></h3></div>
         <label class="weak-voice-toggle" for="settings-show-intervals">
           <input id="settings-show-intervals" type="checkbox" />
-          <span><strong>Mostra le frecce degli intervalli</strong><small>Indica 2, 3m, 3M, 4 e 5 tra note consecutive. Il semitono non viene mostrato.</small></span>
+          <span><strong>Mostra le frecce degli intervalli</strong></span>
         </label>
       </section>
-      <section class="settings-advanced" aria-labelledby="settings-advanced-heading">
-        <div class="settings-advanced-heading"><span>Per chi vuole personalizzare di più</span><h3 id="settings-advanced-heading">Regolazioni avanzate</h3><p>Non servono nella maggior parte dei casi: usale solo se vuoi affinare il comportamento dell'ascolto.</p></div>
-      <section class="detector-setting" aria-labelledby="settings-metronome-offset-heading">
-        <div><h3 id="settings-metronome-offset-heading">Sincronizzazione del metronomo <button class="setting-info" type="button" aria-label="Informazioni sulla sincronizzazione" data-tooltip="Sposta leggermente il click per compensare il naturale ritardo nell'attacco di voce e strumenti.">i</button></h3><output id="settings-metronome-offset-value">+30 ms</output></div>
-        <input id="settings-metronome-offset" type="range" min="-100" max="200" step="5" value="30" />
-        <div class="detector-setting-scale"><span>−100 ms · prima</span><span>+200 ms · dopo</span></div>
-        <p>Compensa l'attacco più lento di voci e archi. Il valore predefinito fa suonare il click 30 ms dopo il tempo matematico.</p>
-      </section>
-      <section class="detector-setting" aria-labelledby="settings-display-pitch-heading">
-        <div><h3 id="settings-display-pitch-heading">Come mostrare la tua intonazione <button class="setting-info" type="button" aria-label="Informazioni sulla traccia visualizzata" data-tooltip="Il filtro rende più morbida la linea che vedi. La valutazione della tua esecuzione non cambia.">i</button></h3></div>
-        <label for="settings-display-pitch-algorithm">Algoritmo display</label>
-        <select id="settings-display-pitch-algorithm"><option value="v1+display-filter" selected>v1 + filtro adattivo</option><option value="v1">v1 puro (baseline)</option></select>
-        <p>Il filtro agisce solo sulla plume. Pitch di scoring e valutazione restano quelli di v1 puro.</p>
-      </section>
       <section class="detector-setting" aria-labelledby="settings-v1-rms-heading">
-        <div><h3 id="settings-v1-rms-heading">Soglia volume d’ingresso</h3><output id="settings-v1-rms-value">0,0010 RMS</output></div>
-        <input id="settings-v1-rms" type="range" min="0" max="100" step="1" value="50" aria-describedby="settings-v1-rms-description" />
+        <div><h3 id="settings-v1-rms-heading">Soglia volume d’ingresso <button class="setting-info" type="button" aria-label="Informazioni sulla soglia del microfono" data-tooltip="Riduci la soglia se il microfono fatica a rilevare una voce debole; aumentala se rileva troppo rumore.">i</button></h3><output id="settings-v1-rms-value">0,000002 RMS</output></div>
+        <input id="settings-v1-rms" type="range" min="0" max="100" step="1" value="8" aria-describedby="settings-v1-rms-description" />
         <div class="detector-setting-scale"><span>Più sensibile</span><span>Più selettiva</span></div>
-        <p id="settings-v1-rms-description">Valore predefinito: filtra silenzio e rumore debole.</p>
+        <p id="settings-v1-rms-description" hidden>Valore predefinito: filtra silenzio e rumore debole.</p>
         <label class="weak-voice-toggle" for="settings-weak-voice-mode">
           <input id="settings-weak-voice-mode" type="checkbox" />
-          <span><strong>Modalità voce debole</strong><small>Rende più permissivi volume, periodicità e confidenza; raccorda inoltre circa un decimo di secondo di segnale incerto.</small></span>
+          <span><strong>Modalità voce debole</strong></span>
         </label>
       </section>
       <section class="detector-setting" aria-labelledby="settings-v1-tracker-heading">
@@ -145,33 +152,29 @@
         <label class="detector-setting-label tracker-setting-label" for="settings-v1-fast-alpha">Reattività in attacco <output id="settings-v1-fast-alpha-value">65%</output></label>
         <input id="settings-v1-fast-alpha" type="range" min="5" max="95" step="5" value="65" />
         <div class="detector-setting-scale"><span>Più filtrata</span><span>Più reattiva</span></div>
-        <label class="detector-setting-label tracker-setting-label" for="settings-v1-slow-alpha">Reattività stabile <output id="settings-v1-slow-alpha-value">30%</output></label>
-        <input id="settings-v1-slow-alpha" type="range" min="5" max="95" step="5" value="30" />
+        <label class="detector-setting-label tracker-setting-label" for="settings-v1-slow-alpha">Reattività stabile <output id="settings-v1-slow-alpha-value">65%</output></label>
+        <input id="settings-v1-slow-alpha" type="range" min="5" max="95" step="5" value="65" />
         <div class="detector-setting-scale"><span>Più filtrata</span><span>Più reattiva</span></div>
         <label class="detector-setting-label" for="settings-v1-median-frames">Finestra mediana</label>
         <input id="settings-v1-median-frames" type="range" min="1" max="7" step="2" value="3" />
         <div class="detector-setting-scale"><span>1 · reattiva</span><span>7 · robusta</span></div>
-        <p>Reattività alta e una mediana corta riducono il ritardo, ma lasciano passare più instabilità e salti brevi.</p>
       </section>
       <section class="detector-setting" aria-labelledby="settings-v1-plume-heading">
-        <div><h3 id="settings-v1-plume-heading">Aspetto plume v1</h3><output id="settings-v1-plume-width-value">250%</output></div>
+        <div><h3 id="settings-v1-plume-heading">Aspetto plume v1 <button class="setting-info" type="button" aria-label="Informazioni sulla plume" data-tooltip="L’anticipo della traccia vocale compensa il ritardo del microfono; il ritardo piano roll compensa l’uscita audio. Queste regolazioni non cambiano il punteggio.">i</button></h3><output id="settings-v1-plume-width-value">250%</output></div>
         <label class="detector-setting-label" for="settings-v1-plume-width">Larghezza</label>
         <input id="settings-v1-plume-width" type="range" min="35" max="250" step="5" value="250" />
         <div class="detector-setting-scale"><span>Più stretta</span><span>Più ampia</span></div>
-        <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-intensity">Intensità <output id="settings-v1-plume-intensity-value">100%</output></label>
-        <input id="settings-v1-plume-intensity" type="range" min="15" max="200" step="5" value="100" />
-        <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-advance">Anticipo temporale <output id="settings-v1-plume-advance-value">200 ms</output></label>
-        <input id="settings-v1-plume-advance" type="range" min="0" max="400" step="10" value="200" />
+        <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-intensity">Intensità <output id="settings-v1-plume-intensity-value">175%</output></label>
+        <input id="settings-v1-plume-intensity" type="range" min="15" max="200" step="5" value="175" />
+        <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-advance">Anticipo della traccia vocale <output id="settings-v1-plume-advance-value">280 ms</output></label>
+        <input id="settings-v1-plume-advance" type="range" min="0" max="400" step="10" value="280" />
         <div class="detector-setting-scale"><span>0 ms · timestamp reale</span><span>400 ms · più anticipata</span></div>
-        <label class="detector-setting-label tracker-setting-label" for="settings-piano-roll-delay">Ritardo piano roll <output id="settings-piano-roll-delay-value">150 ms</output></label>
-        <input id="settings-piano-roll-delay" type="range" min="0" max="400" step="10" value="150" />
-        <div class="detector-setting-scale"><span>0 ms · tempo reale</span><span>400 ms · più ritardato</span></div>
-        <p>Ritarda insieme le note del piano roll e la traccia della voce rispetto all’audio. È indipendente dall’anticipo della plume e non cambia il punteggio.</p>
-        <p>La linea cyan mostra il pitch; il flusso interno dà vita alla ribbon senza deformare il dato. L’anticipo temporale aiuta a compensare visivamente la latenza, anche con cuffie Bluetooth. Queste regolazioni non cambiano il punteggio.</p>
+        <label class="detector-setting-label tracker-setting-label" for="settings-piano-roll-delay">Ritardo piano roll rispetto all’audio <output id="settings-piano-roll-delay-value">330 ms</output></label>
+        <input id="settings-piano-roll-delay" type="range" min="0" max="600" step="10" value="330" />
+        <div class="detector-setting-scale"><span>0 ms · tempo reale</span><span>600 ms · più ritardato</span></div>
       </section>
-      </section>
-      <p class="library-note">Usa le cuffie per distinguere meglio la tua voce dall’accompagnamento.</p>
       <div class="dialog-actions"><button id="settings-reset" type="button">Ripristina predefinito</button></div>
+      </section>
     </dialog>
     <dialog id="result-dialog" class="practice-dialog" aria-labelledby="result-heading">
       <h2 id="result-heading">Prova completata</h2><p id="result-text"></p><p id="result-progress"></p>
