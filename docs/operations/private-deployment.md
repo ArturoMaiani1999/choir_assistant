@@ -111,6 +111,13 @@ Obiettivo: una cartella `dist/` che contiene **solo** ciò che il corista deve s
 - [x] Inclusione degli SVG continui per ogni parte nel bundle di produzione;
   `python scripts/browser_score_sync_smoke.py` verifica geometria, ripetizioni e
   visibilità del cursore sia a 1440 px sia a 390 px.
+- [x] Navigazione fra brani senza ricaricare la shell, cache in memoria limitata
+  a due brani, prefetch del solo spartito selezionato e preload audio limitato ai
+  metadati. `library.json` e `library-assets/*` sono immutabili ma ogni richiesta
+  include la versione di build come cache key.
+- [x] `python scripts/browser_score_viewer_layout_smoke.py` verifica che ogni
+  sistema della partitura completa inizi dal primo simbolo musicale e che il
+  blocco SATB/accompagnamento attivo sia centrato nell'area visibile.
 - [x] Versione di build visibile nel footer (per capire cosa hanno i coristi).
 - [ ] Se servirà la trasposizione online, pre-generare le basi autorizzate nelle tonalità ammesse: la build statica iniziale la limita intenzionalmente a `Originale` perché l'endpoint locale di trasposizione non viene pubblicato.
 

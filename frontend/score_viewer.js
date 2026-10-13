@@ -13,15 +13,19 @@
   const mixer = new MediaElementMixer();
   let library = [], pageObserver = null, zoom = 960, loadGeneration = 0;
   let runtime = null, audioManifest = null, bundle = null, activeElements = [], voiceElements = new Map(), raf = 0, playbackPosition = 0;
-  let selections = { accompaniment: true, voices: new Set() }, pageCount = 0, lastCursorPage = -1, fullScoreSlots = [];
+  let selections = { accompaniment: true, voices: new Set() }, pageCount = 0, lastCursorPage = -1, lastCursorSystem = null, fullScoreSlots = [];
   let transportStartedAt = null, transportStartedPosition = 0;
   const seekableAudioUrls = new Map();
   const paperPreferenceKey = 'choir-score-paper:v1';
   const paperColors = new Set(['#c3c0b6', '#e3e8e6', '#ffffff']);
 
+  function releaseAssetUrl(path) {
+    if (!path || !config.buildVersion) return path;
+    const url = new URL(path, location.href); url.searchParams.set('v', config.buildVersion); return url.href;
+  }
   function bundleUrl(pieceId) {
     if (!config.bundleUrlTemplate) throw new Error('Configurazione della libreria incompleta');
-    return config.bundleUrlTemplate.replace('{pieceId}', encodeURIComponent(pieceId));
+    return releaseAssetUrl(config.bundleUrlTemplate.replace('{pieceId}', encodeURIComponent(pieceId)));
   }
   function normalizeSlug(value) { return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, ''); }
   function proposedTitle(piece) {
@@ -46,8 +50,8 @@
   }
   function makeAudio(file) {
     if (!file) return null;
-    const audio = document.createElement('audio'); audio.preload = 'auto';
-    audio.src = new URL(file, `${new URL(bundle.assets.audio_root, location.href).href.replace(/\/$/, '')}/`).href;
+    const audio = document.createElement('audio'); audio.preload = 'metadata';
+    audio.src = releaseAssetUrl(new URL(file, `${new URL(bundle.assets.audio_root, location.href).href.replace(/\/$/, '')}/`).href);
     return audio;
   }
   function selectedPlan() {
@@ -154,6 +158,12 @@
     const rawStaffLines = [...document.querySelectorAll('.StaffLines')].map((element)=>points(element)).filter((value)=>value.length>=4);
     const barLines = [...document.querySelectorAll('.BarLine')].map((element)=>points(element)).filter((value)=>value.length>=4)
       .map((value)=>({x:value[0],y1:value[1],y2:value[3]}));
+    const symbols = [...document.querySelectorAll('.Note, .Rest')].map((element) => {
+      const matrix=(element.getAttribute('transform')??'').match(/matrix\([^,]+,[^,]+,[^,]+,[^,]+,\s*([-+\d.eE]+),\s*([-+\d.eE]+)\)/);
+      const path=(element.getAttribute('d')??'').match(/^\s*M\s*([-+\d.eE]+)[,\s]+([-+\d.eE]+)/);
+      const anchor=matrix??path;
+      return anchor ? { x:Number(anchor[1]), y:Number(anchor[2]), kind:element.classList.contains('Note')?'note':'rest' } : null;
+    }).filter((symbol)=>symbol&&Number.isFinite(symbol.x)&&Number.isFinite(symbol.y));
     const staffs = [];
     for(let index=0;index+4<rawStaffLines.length;index+=5){
       const lines=rawStaffLines.slice(index,index+5);
@@ -162,7 +172,7 @@
       staff.barXs=clusterBarXs(barLines.filter((bar)=>Math.abs(bar.y1-staff.topY)<35&&bar.x>=staff.startX-50&&bar.x<=staff.endX+50).map((bar)=>bar.x));
       staff.signature=staff.barXs.map((value)=>Math.round(value/10)*10).join(':'); staffs.push(staff);
     }
-    return {page,width,height,staffs};
+    return {page,width,height,staffs,symbols};
   }
   async function buildFullScoreSlots(sources) {
     const pages = await Promise.all(sources.map(async (source,index)=>{
@@ -183,8 +193,18 @@
         const first=system[0],last=system.at(-1),barXs=first.barXs;
         for(let boundary=0;boundary+1<barXs.length;boundary+=1){
           if(barXs[boundary+1]-barXs[boundary]<140)continue;
-          slots.push({page:page.page,startX:barXs[boundary]/page.width*100,endX:barXs[boundary+1]/page.width*100,
-            topY:first.topY/page.height*100,bottomY:last.bottomY/page.height*100});
+          let startX=barXs[boundary];
+          if(boundary===0){
+            const inFirstMeasure=(symbol)=>symbol.y>=first.topY-500&&symbol.y<=last.bottomY+500
+              &&symbol.x>startX+20&&symbol.x<barXs[boundary+1];
+            const notes=page.symbols.filter((symbol)=>symbol.kind==='note'&&inFirstMeasure(symbol));
+            const rests=page.symbols.filter((symbol)=>symbol.kind==='rest'&&inFirstMeasure(symbol));
+            const firstSymbolX=Math.min(...(notes.length?notes:rests).map((symbol)=>symbol.x));
+            if(Number.isFinite(firstSymbolX))startX=firstSymbolX;
+          }
+          slots.push({page:page.page,startX:startX/page.width*100,barStartX:barXs[boundary]/page.width*100,endX:barXs[boundary+1]/page.width*100,
+            topY:first.topY/page.height*100,bottomY:last.bottomY/page.height*100,
+            systemId:`p${page.page}-s${Math.floor(index/staffsPerSystem)+1}`});
         }
       }
     });
@@ -193,7 +213,11 @@
   function scorePositionAtBeat(beat) {
     if(!runtime||!fullScoreSlots.length)return null;
     const safeBeat=Math.max(0,beat),occurrences=runtime.performanceOccurrences??[];
-    const occurrence=occurrences.find((item)=>item.startBeat<=safeBeat&&safeBeat<item.endBeat)??occurrences.at(-1);
+    // secondsAtBeat()/beatAtSeconds() may return a value a few ulps before an
+    // exact measure boundary. Prefer that boundary so a seek cannot leave the
+    // cursor at the final glyph of the preceding system.
+    const boundary=occurrences.find((item)=>Math.abs(item.startBeat-safeBeat)<1e-4);
+    const occurrence=boundary??occurrences.find((item)=>item.startBeat<=safeBeat&&safeBeat<item.endBeat)??occurrences.at(-1);
     if(!occurrence)return null;
     const measureIndex=runtime.measures.findIndex((measure)=>measure.id===occurrence.writtenMeasureId),slot=fullScoreSlots[measureIndex];
     if(!slot)return null;
@@ -216,7 +240,7 @@
       try { audio.currentTime = safeSeconds; } catch (_) { /* Metadata retry occurs when playback starts. */ }
     }
     try { els.audio.currentTime = safeSeconds; } catch (_) {}
-    lastCursorPage = -1; updateCursor();
+    lastCursorPage = -1; lastCursorSystem = null; updateCursor();
   }
   async function startFromBeat(beat) {
     if (!runtime) return;
@@ -238,7 +262,8 @@
       const target = document.createElement('button'); target.type = 'button'; target.className = 'viewer-measure-hit';
       const measureNumber = runtime.measures[measureIndex]?.number ?? measureIndex + 1;
       target.setAttribute('aria-label', `Riproduci dalla battuta ${measureNumber}`); target.title = `Riproduci dalla battuta ${measureNumber}`;
-      target.dataset.measureIndex = String(measureIndex); target.style.left = `${slot.startX}%`; target.style.top = `${slot.topY}%`;
+      target.dataset.measureIndex = String(measureIndex); target.dataset.systemId=slot.systemId; target.dataset.barStartX=String(slot.barStartX);
+      target.style.left = `${slot.startX}%`; target.style.top = `${slot.topY}%`;
       target.style.width = `${slot.endX-slot.startX}%`; target.style.height = `${slot.bottomY-slot.topY}%`;
       target.addEventListener('click',(event)=>{
         const rect=target.getBoundingClientRect();
@@ -247,6 +272,17 @@
       });
       page.append(target);
     }
+  }
+  function centerActiveSystem(page, position) {
+    if (!position || !page.getBoundingClientRect().height) return;
+    const pageRect=page.getBoundingClientRect(),toolbar=document.querySelector('.viewer-toolbar')?.getBoundingClientRect();
+    const transport=document.querySelector('.viewer-transport')?.getBoundingClientRect();
+    const chromeGap=8;
+    const visibleTop=Math.max(0,toolbar?.bottom??0)+chromeGap;
+    const visibleBottom=Math.max(visibleTop+80,Math.min(innerHeight,(transport?.top??innerHeight)-chromeGap));
+    const systemCenter=pageRect.top+pageRect.height*(position.topY+position.bottomY)/200;
+    const viewportCenter=(visibleTop+visibleBottom)/2;
+    window.scrollTo({top:window.scrollY+systemCenter-viewportCenter,behavior:'auto'});
   }
   function updateCursor() {
     if (!runtime || !pageCount) return;
@@ -261,7 +297,8 @@
       if(position){line.style.left=`${position.x}%`;line.style.top=`${position.topY}%`;line.style.height=`${position.bottomY-position.topY}%`;line.dataset.measure=String(position.measureNumber);}
       else{line.style.left=`${(progress*pageCount-pageIndex)*100}%`;line.style.top='0';line.style.height='100%';line.dataset.measure='';}
       line.classList.add('is-active');
-      if (pageIndex !== lastCursorPage) { lastCursorPage = pageIndex; page.scrollIntoView({ block:'center', behavior:'smooth' }); }
+      const systemKey=position?.systemId??`page-${pageIndex+1}`;
+      if(systemKey!==lastCursorSystem){lastCursorPage=pageIndex;lastCursorSystem=systemKey;centerActiveSystem(page,position);}
       els.position.value = `Pagina ${pageIndex + 1} / ${pageCount} · Battuta ${runtime.measureAt(beat).number}`;
     }
     els.time.value = `${Math.floor(seconds / 60)}:${String(Math.floor(seconds % 60)).padStart(2,'0')}`;
@@ -305,29 +342,37 @@
     document.title = `${displayTitle(piece)} · Mostra partitura`; els.back.href = `index.html?piece=${encodeURIComponent(piece.piece_id)}`;
     if (updateHistory) history.replaceState(null, '', `?piece=${encodeURIComponent(piece.piece_id)}`);
     try { localStorage.setItem('choir-last-practice-piece', piece.piece_id); } catch (_) {}
-    const response = await fetch(bundleUrl(piece.piece_id), { cache:'no-store' });
+    const response = await fetch(bundleUrl(piece.piece_id), { cache:'force-cache' });
     if (!response.ok) throw new Error('Partitura non disponibile');
     bundle = await response.json(); if (generation !== loadGeneration) return;
-    const sources = bundle.assets?.full_score_pages ?? [];
+    const sources = (bundle.assets?.full_score_pages ?? []).map(releaseAssetUrl);
     if (!sources.length) throw new Error('Questo brano non ha una partitura completa');
-    const [scoreResponse, audioResponse, scoreSlots] = await Promise.all([fetch(bundle.assets.score), fetch(bundle.assets.audio_manifest), buildFullScoreSlots(sources)]);
+    const [scoreResponse, audioResponse, scoreSlots] = await Promise.all([
+      fetch(releaseAssetUrl(bundle.assets.score),{cache:'force-cache'}),
+      fetch(releaseAssetUrl(bundle.assets.audio_manifest),{cache:'force-cache'}),
+      buildFullScoreSlots(sources),
+    ]);
     if (!scoreResponse.ok || !audioResponse.ok) throw new Error('Timeline o audio del brano non disponibili');
     const [score, manifest] = await Promise.all([scoreResponse.json(), audioResponse.json()]);
     if (generation !== loadGeneration) return;
     runtime = window.ChoirScore.NormalizedScoreRuntime.fromNormalizedScore(score); audioManifest = manifest; playbackPosition = 0; fullScoreSlots=scoreSlots;
     els.pages.dataset.measureSlots=String(fullScoreSlots.length);els.pages.dataset.measures=String(runtime.measures.length);
     if(fullScoreSlots.length!==runtime.measures.length)console.warn('Geometria battute partitura incompleta',{slots:fullScoreSlots.length,measures:runtime.measures.length});
-    selections = { accompaniment:true, voices:new Set(Object.keys(manifest.voice_stems ?? {})) }; pageCount = sources.length; lastCursorPage = -1;
+    selections = { accompaniment:true, voices:new Set(Object.keys(manifest.voice_stems ?? {})) }; pageCount = sources.length; lastCursorPage = -1; lastCursorSystem = null;
     const fragment = document.createDocumentFragment();
     sources.forEach((source,index) => {
       const page = document.createElement('figure'); page.className = 'viewer-page'; page.dataset.page = String(index+1);
       const image = document.createElement('img'); image.src = source; image.alt = `Pagina ${index+1} di ${sources.length} · ${displayTitle(piece)}`; image.loading = index < 2 ? 'eager':'lazy'; image.decoding='async';
+      image.addEventListener('load',()=>{if(page.querySelector('.viewer-playhead.is-active')){lastCursorSystem=null;updateCursor();}},{once:true});
       const line = document.createElement('div'); line.className='viewer-playhead'; line.setAttribute('aria-hidden','true');
       const caption = document.createElement('figcaption'); caption.textContent=`Pagina ${index+1} di ${sources.length}`;
       page.append(image,line,caption); fragment.append(page);
     });
     els.pages.replaceChildren(fragment); els.pages.setAttribute('aria-busy','false'); els.position.value=`Pagina 1 / ${sources.length}`; els.position.hidden=false;
-    installMeasureTargets(); updateMixerOptions(); await applyMix({ resume:false, time:0 }); observePages(sources.length); window.scrollTo({top:0,behavior:'auto'});
+    // Reset the old piece before exposing the score hit targets. A later reset
+    // would override a fast user's seek while audio metadata is still loading.
+    window.scrollTo({top:0,behavior:'auto'});
+    installMeasureTargets(); updateMixerOptions(); await applyMix({ resume:false, time:0 }); observePages(sources.length);
   }
   function setZoom(nextZoom) { zoom=Math.max(560,Math.min(1440,nextZoom)); document.body.dataset.zoom='manual'; document.documentElement.style.setProperty('--page-width',`${zoom}px`); }
   function setPaperColor(value,persist=false) {
@@ -339,7 +384,7 @@
     try { setPaperColor(localStorage.getItem(paperPreferenceKey)); } catch (_) { setPaperColor(null); }
     document.querySelectorAll('[data-paper]').forEach((button)=>button.addEventListener('click',()=>setPaperColor(button.dataset.paper,true)));
     window.addEventListener('storage',(event)=>{if(event.key===paperPreferenceKey)setPaperColor(event.newValue);});
-    const response=await fetch(config.libraryUrl,{cache:'no-store'}); if(!response.ok)throw new Error('Libreria dei brani non disponibile');
+    const response=await fetch(releaseAssetUrl(config.libraryUrl),{cache:'force-cache'}); if(!response.ok)throw new Error('Libreria dei brani non disponibile');
     library=(await response.json()).pieces??[]; if(!library.length)throw new Error('Non ci sono partiture disponibili');
     els.piece.replaceChildren(...library.map((piece)=>new Option(displayTitle(piece),piece.piece_id)));
     const requested=new URLSearchParams(location.search).get('piece'); let remembered=null;

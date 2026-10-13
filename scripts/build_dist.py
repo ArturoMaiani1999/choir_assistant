@@ -276,8 +276,11 @@ def write_headers(destination: Path) -> None:
 /*.css
   Cache-Control: public, max-age=31536000, immutable
 
+/library.json
+  Cache-Control: public, max-age=31536000, immutable
+
 /library-assets/*
-  Cache-Control: no-cache, max-age=0, must-revalidate
+  Cache-Control: public, max-age=31536000, immutable
 """, encoding="utf-8")
 
 

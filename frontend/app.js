@@ -9,10 +9,79 @@ const VocalFeedback = window.VocalFeedback;
 const { MediaElementMixer, buildMediaPlaybackPlan } = window.ChoirMedia;
 const RUNTIME_CONFIG = window.ChoirRuntimeConfig ?? Object.freeze({});
 
+function releaseAssetUrl(path) {
+  if (!path || !RUNTIME_CONFIG.buildVersion) return path;
+  const url = new URL(path, location.href);
+  url.searchParams.set('v', RUNTIME_CONFIG.buildVersion);
+  return url.href;
+}
+
 function libraryBundleUrl(pieceId) {
   const template = RUNTIME_CONFIG.bundleUrlTemplate;
   if (!template) throw new Error('Configurazione della libreria incompleta');
-  return template.replace('{pieceId}', encodeURIComponent(pieceId));
+  return releaseAssetUrl(template.replace('{pieceId}', encodeURIComponent(pieceId)));
+}
+
+const bundleCache = new Map();
+const pieceDataCache = new Map();
+let practiceLoadGeneration = 0;
+let controlsBound = false;
+let prefetchedScoreKey = null;
+
+async function loadBundleManifest(pieceId) {
+  if (!bundleCache.has(pieceId)) {
+    bundleCache.set(pieceId, fetch(libraryBundleUrl(pieceId), { cache: 'force-cache' }).then((response) => {
+      if (!response.ok) throw new Error('Manifest del brano non disponibile');
+      return response.json();
+    }).catch((error) => {
+      bundleCache.delete(pieceId);
+      throw error;
+    }));
+  }
+  return bundleCache.get(pieceId);
+}
+
+async function loadPieceData(pieceId, bundleManifest) {
+  const key = `${pieceId}:${bundleManifest.score_version_id}:${RUNTIME_CONFIG.buildVersion ?? ''}`;
+  if (!pieceDataCache.has(key)) {
+    const promise = Promise.all([
+      fetch(releaseAssetUrl(bundleManifest.assets.score), { cache: 'force-cache' }),
+      fetch(releaseAssetUrl(bundleManifest.assets.glyph_map), { cache: 'force-cache' }),
+      fetch(releaseAssetUrl(bundleManifest.assets.audio_manifest), { cache: 'force-cache' }),
+    ]).then(async ([scoreResponse, glyphResponse, backingResponse]) => {
+      if (!scoreResponse.ok || !glyphResponse.ok || !backingResponse.ok) {
+        throw new Error('Asset di prova non disponibili');
+      }
+      return Promise.all([scoreResponse.json(), glyphResponse.json(), backingResponse.json()]);
+    }).catch((error) => {
+      pieceDataCache.delete(key);
+      throw error;
+    });
+    pieceDataCache.set(key, promise);
+    while (pieceDataCache.size > 2) pieceDataCache.delete(pieceDataCache.keys().next().value);
+  }
+  return pieceDataCache.get(key);
+}
+
+function prefetchSelectedScore(bundleManifest, partId) {
+  const source = bundleManifest.assets.continuous_scores?.[partId]
+    ?? bundleManifest.assets.score_pages?.[partId]?.[0];
+  const key = `${bundleManifest.piece_id}:${partId}:${RUNTIME_CONFIG.buildVersion ?? ''}`;
+  if (!source || key === prefetchedScoreKey) return;
+  prefetchedScoreKey = key;
+  void fetch(releaseAssetUrl(source), { cache: 'force-cache', priority: 'low' })
+    .then((response) => response.ok ? response.arrayBuffer() : null)
+    .catch(() => { /* Prefetch is optional; normal loading remains authoritative. */ });
+}
+
+async function warmSelectedPiece(piece, partId) {
+  if (!piece?.piece_id || !partId || piece.piece_id === state.bundleManifest?.piece_id) return;
+  try {
+    const bundleManifest = await loadBundleManifest(piece.piece_id);
+    piece.bundleManifest = bundleManifest;
+    prefetchSelectedScore(bundleManifest, partId);
+    await loadPieceData(piece.piece_id, bundleManifest);
+  } catch (_) { /* Opening the piece will surface actionable loading errors. */ }
 }
 
 const UI_CONFIG = Object.freeze({
@@ -433,8 +502,9 @@ function loadScoreImage(page = 1) {
   const part = state.runtime.parts.find((item) => item.id === state.runtime.selectedPartId);
   const continuousSource = state.bundleManifest.assets.continuous_scores?.[state.runtime.selectedPartId];
   const pages = state.bundleManifest.assets.score_pages?.[state.runtime.selectedPartId] ?? [];
-  const source = continuousSource ?? pages?.[Math.max(0, Math.min(pages.length - 1, page - 1))];
-  if (!source) { els.scoreLoading.hidden = false; els.scoreLoading.textContent = 'Pagina spartito non disponibile'; return; }
+  const rawSource = continuousSource ?? pages?.[Math.max(0, Math.min(pages.length - 1, page - 1))];
+  if (!rawSource) { els.scoreLoading.hidden = false; els.scoreLoading.textContent = 'Pagina spartito non disponibile'; return; }
+  const source = releaseAssetUrl(rawSource);
   const layout = continuousSource ? 'continuous' : 'paged';
   if (state.scoreLayout !== layout) state.activeScoreSegment = null;
   state.scoreLayout = layout;
@@ -449,8 +519,7 @@ function loadScoreImage(page = 1) {
 
 function voiceStemUrl(filename) {
   const path = `${state.bundleManifest.assets.audio_root}/${filename}`;
-  const version = RUNTIME_CONFIG.buildVersion;
-  return version ? `${path}?v=${encodeURIComponent(version)}` : path;
+  return releaseAssetUrl(path);
 }
 
 function pauseVoiceStems() {
@@ -514,8 +583,9 @@ function configureVoiceStems() {
   const plannedStems = state.playbackPlan?.voiceStems
     ?? [...state.selectedVoiceIds].filter((partId) => stems[partId]).map((partId) => ({ partId, file: stems[partId] }));
   for (const { partId, file } of plannedStems) {
-    const audio = new Audio(voiceStemUrl(file));
-    audio.preload = 'auto';
+    const audio = new Audio();
+    audio.preload = 'metadata';
+    audio.src = voiceStemUrl(file);
     audio.playsInline = true;
     state.voiceStemAudio.set(partId, audio);
   }
@@ -797,6 +867,7 @@ function scorePageFallbackSlots(svg, page) {
 }
 
 async function buildFallbackScoreGeometry(partId) {
+  const bundleManifest = state.bundleManifest;
   const continuousSource = state.bundleManifest.assets.continuous_scores?.[partId];
   const pages = state.bundleManifest.assets.score_pages?.[partId] ?? [];
   const sources = continuousSource ? [continuousSource] : pages;
@@ -805,11 +876,11 @@ async function buildFallbackScoreGeometry(partId) {
   if (!sources?.length) { state.fallbackScoreSlots = []; return; }
   try {
     const contents = await Promise.all(sources.map(async (page) => {
-      const response = await fetch(page, { cache: 'force-cache' });
+      const response = await fetch(releaseAssetUrl(page), { cache: 'force-cache' });
       if (!response.ok) throw new Error(`pagina spartito non disponibile (${response.status})`);
       return response.text();
     }));
-    if (state.runtime.selectedPartId !== partId) return;
+    if (state.bundleManifest !== bundleManifest || state.runtime.selectedPartId !== partId) return;
     state.fallbackScoreSlots = contents.flatMap((svg, index) => scorePageFallbackSlots(svg, index + 1));
     if (!state.scoreGeometry.size && state.fallbackScoreSlots.length !== state.runtime.measures.length) {
       console.warn('Mappa di fallback spartito incompleta', { slots: state.fallbackScoreSlots.length, writtenMeasures: state.runtime.measures.length });
@@ -3540,6 +3611,8 @@ function changePart(partId) {
 }
 
 function bindControls() {
+  if (controlsBound) return;
+  controlsBound = true;
   updateMobileChrome();
   els.mobileToolbarToggle.addEventListener('click', () => {
     mobileChrome.topCollapsed = !mobileChrome.topCollapsed;
@@ -3888,16 +3961,26 @@ async function initialize() {
     buildVersion.textContent = `Build ${RUNTIME_CONFIG.buildVersion}`;
     buildVersion.hidden = false;
   }
-  const libraryResponse = await fetch(RUNTIME_CONFIG.libraryUrl, { cache: 'no-store' });
+  const libraryResponse = await fetch(releaseAssetUrl(RUNTIME_CONFIG.libraryUrl), { cache: 'force-cache' });
   if (!libraryResponse.ok) throw new Error('Libreria dei brani non disponibile');
   state.library = (await libraryResponse.json()).pieces ?? [];
   if (!state.library.length) throw new Error('Non ci sono brani MuseScore nella cartella sheets');
   bindLibraryPicker();
+  window.addEventListener('message', (event) => {
+    if (event.origin === location.origin && event.data?.type === 'choir-bundle-approval') location.reload();
+  });
+  window.addEventListener('popstate', () => {
+    const query = new URLSearchParams(location.search);
+    const pieceId = query.get('piece');
+    if (!pieceId || !state.library.some((piece) => piece.piece_id === pieceId)) return;
+    void loadPracticePiece(pieceId, { partId: query.get('part'), updateHistory: false })
+      .catch((error) => showToast(error.message));
+  });
   const requestedPiece = new URLSearchParams(window.location.search).get('piece');
   const requestedPieceExists = requestedPiece
     && state.library.some((piece) => piece.piece_id === requestedPiece);
   if (requestedPieceExists) {
-    await loadPracticePiece(requestedPiece);
+    await loadPracticePiece(requestedPiece, { updateHistory: false });
     return;
   }
   openLibraryPicker();
@@ -3927,9 +4010,8 @@ async function updateLibraryParts() {
     els.libraryNote.hidden = false;
     els.libraryNote.textContent = 'Preparo le parti vocali…';
     try {
-      const response = await fetch(libraryBundleUrl(piece.piece_id), { cache: 'no-store' });
-      if (!response.ok) throw new Error('Impossibile leggere il brano selezionato');
-      const bundle = await response.json();
+      const bundle = await loadBundleManifest(piece.piece_id);
+      piece.bundleManifest = bundle;
       piece.parts = bundle.parts ?? [];
       piece.monodic = Boolean(bundle.monodic);
     } catch (error) {
@@ -3948,6 +4030,7 @@ async function updateLibraryParts() {
   const message = piece?.monodic ? 'Brano monodico: Soprano e Contralto usano la melodia scritta; Tenore e Basso la cantano un’ottava sotto.' : (!parts.length ? 'Nessuna parte vocale disponibile nel file MuseScore.' : '');
   els.libraryNote.hidden = !message;
   els.libraryNote.textContent = message;
+  void warmSelectedPiece(piece, els.libraryPart.value);
 }
 
 function bindLibraryPicker() {
@@ -3957,10 +4040,24 @@ function bindLibraryPicker() {
     if (!state.runtime) event.preventDefault();
   });
   els.libraryPiece.addEventListener('change', updateLibraryParts);
-  els.libraryOpen.addEventListener('click', () => {
-    const query = new URLSearchParams({ piece: els.libraryPiece.value });
-    if (els.libraryPart.value) query.set('part', els.libraryPart.value);
-    window.location.search = query.toString();
+  els.libraryPart.addEventListener('change', () => {
+    const piece = state.library.find((item) => item.piece_id === els.libraryPiece.value);
+    void warmSelectedPiece(piece, els.libraryPart.value);
+  });
+  els.libraryOpen.addEventListener('click', async () => {
+    const pieceId = els.libraryPiece.value;
+    const partId = els.libraryPart.value;
+    els.libraryOpen.disabled = true;
+    els.libraryNote.hidden = false;
+    els.libraryNote.textContent = 'Apro il brano…';
+    try {
+      await loadPracticePiece(pieceId, { partId, updateHistory: true });
+      if (els.piecePickerDialog.open) els.piecePickerDialog.close();
+    } catch (error) {
+      els.libraryNote.textContent = error.message;
+    } finally {
+      els.libraryOpen.disabled = false;
+    }
   });
   els.libraryScore.addEventListener('click', () => {
     window.location.href = `score-viewer.html?piece=${encodeURIComponent(els.libraryPiece.value)}`;
@@ -3981,18 +4078,21 @@ function restartPractice() {
   showToast('Brano riportato all’inizio.');
 }
 
-async function loadPracticePiece(pieceId) {
-  const bundleResponse = await fetch(libraryBundleUrl(pieceId), { cache: 'no-store' });
-  if (!bundleResponse.ok) throw new Error('Manifest del brano non disponibile');
-  const bundleManifest = await bundleResponse.json();
+async function loadPracticePiece(pieceId, { partId = null, updateHistory = false } = {}) {
+  const generation = ++practiceLoadGeneration;
+  if (state.runtime) savePitchHistory();
+  if (state.clock?.running) state.clock.pause();
+  pauseVoiceStems();
+  els.backingAudio.pause();
+  els.scoreLoading.hidden = false;
+  els.scoreLoading.textContent = 'Preparazione spartito…';
+  const stopMicrophonePromise = state.microphoneStatus === 'idle' ? Promise.resolve() : stopMicrophone();
+  const bundleManifest = await loadBundleManifest(pieceId);
+  const [payload, glyphMap, backingManifest] = await loadPieceData(pieceId, bundleManifest);
+  await stopMicrophonePromise;
+  if (generation !== practiceLoadGeneration) return;
+  discardVoiceStems();
   try { localStorage.setItem(LAST_PRACTICE_PIECE_KEY, pieceId); } catch (_) { /* Optional convenience only. */ }
-  const [scoreResponse, glyphResponse, backingResponse] = await Promise.all([
-    fetch(bundleManifest.assets.score),
-    fetch(bundleManifest.assets.glyph_map),
-    fetch(bundleManifest.assets.audio_manifest),
-  ]);
-  if (!scoreResponse.ok || !glyphResponse.ok || !backingResponse.ok) throw new Error('Asset di prova non disponibili');
-  const [payload, glyphMap, backingManifest] = await Promise.all([scoreResponse.json(), glyphResponse.json(), backingResponse.json()]);
   state.glyphMap = glyphMap;
   state.backingManifest = backingManifest;
   state.bundleManifest = bundleManifest;
@@ -4022,7 +4122,7 @@ async function loadPracticePiece(pieceId) {
   const parts = vocalParts(state.runtime);
   els.partSelector.replaceChildren(...parts.map((part) => new Option(part.name, part.id)));
   let savedPart;
-  try { savedPart = new URLSearchParams(window.location.search).get('part') ?? localStorage.getItem(`choir-part:${bundleManifest.piece_id ?? state.runtime.title}`); } catch (_) {}
+  try { savedPart = partId ?? new URLSearchParams(window.location.search).get('part') ?? localStorage.getItem(`choir-part:${bundleManifest.piece_id ?? state.runtime.title}`); } catch (_) {}
   state.runtime.selectPart(parts.find((part) => part.id === savedPart)?.id ?? parts.find((part) => part.name.toLowerCase().includes('tenor'))?.id ?? parts[0]?.id);
   state.selectedVoiceIds = new Set([state.runtime.selectedPartId]);
   els.partSelector.value = state.runtime.selectedPartId;
@@ -4039,6 +4139,13 @@ async function loadPracticePiece(pieceId) {
   els.transpose.value = '0';
   updateTransposeControl();
   restorePitchHistory();
+  state.attemptActive = false;
+  state.resumeCheckpointBeat = null;
+  state.scorePage = 0;
+  state.activeScoreSegment = null;
+  state.fallbackScoreSlots = [];
+  state.pitchViewport = null;
+  state.lastScoreEvent = null;
   state.occurrenceMeasures = buildOccurrenceMeasures(state.runtime);
   configureBacking();
   state.clock = new MediaPlaybackClock({ mediaElement: els.backingAudio, scoreRuntime: state.runtime });
@@ -4054,12 +4161,14 @@ async function loadPracticePiece(pieceId) {
   }
   const libraryPiece = state.library.find((piece) => piece.piece_id === bundleManifest.piece_id);
   els.pieceTitle.textContent = libraryPiece ? pieceDisplayTitle(libraryPiece) : state.runtime.title.split('·')[0].trim();
+  document.title = `${els.pieceTitle.textContent} · Choir Assistant`;
   els.scoreViewerLink.href = `score-viewer.html?piece=${encodeURIComponent(bundleManifest.piece_id)}`;
   els.scorePartLabel.textContent = parts.find((part) => part.id === state.runtime.selectedPartId)?.name ?? 'Parte';
   bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(0); updatePlaybackButton();
-  window.addEventListener('message', (event) => {
-    if (event.origin === location.origin && event.data?.type === 'choir-bundle-approval') location.reload();
-  });
+  if (updateHistory) {
+    const query = new URLSearchParams({ piece: bundleManifest.piece_id, part: state.runtime.selectedPartId });
+    history.pushState(null, '', `?${query}`);
+  }
 }
 
 initialize().catch((error) => {

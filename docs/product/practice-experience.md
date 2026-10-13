@@ -43,6 +43,12 @@ Practice consumes a dedicated one-staff continuous SVG for the selected part; pa
 
 This is real draft notation, not arbitrary HTML notation. Horizontal position inside a measure currently follows canonical beat progress between its barlines. A future renderer may expose stable event-to-glyph bounds for note-level highlighting, but it must preserve the same audio-derived clock and written-measure mapping.
 
+The full-score reader derives each system's vertical extent from the SATB and accompaniment staves. On a system transition it centers that complete extent between the sticky toolbar and floating transport. At the start of a wrapped system, horizontal playback begins at the first rendered note (or rest when no note exists), rather than at the barline behind the repeated clef and key signature.
+
+## Asset loading
+
+Changing piece in Practice does not reload the application shell. The client keeps parsed data for at most two pieces, prefetches only the selected part's score at low priority, and asks audio elements for metadata until playback requires media data. It never prefetches the whole repertoire. Library and piece assets carry the immutable release version in their URL; the browser can therefore reuse them safely while a new deployment receives a distinct cache key.
+
 ## Responsive behavior
 
 - Desktop/laptop landscape: all four regions visible; pitch lane dominates.

@@ -135,7 +135,38 @@ def main() -> int:
                 assert result["allMapped"] and result["allCursorsVisible"], (label, result)
                 assert abs(result["repeatedX"] - result["firstPassX"]) < .001, (label, result)
 
-            evidence = {"desktop": desktop, "mobile": mobile}
+            spa_switch = evaluate(socket, call_id, r"""(async () => {
+              const currentPiece=state.bundleManifest.piece_id;
+              const nextPiece=state.library.find(piece=>piece.piece_id!==currentPiece);
+              els.piecePicker.click();
+              els.libraryPiece.value=nextPiece.piece_id;
+              els.libraryPiece.dispatchEvent(new Event('change'));
+              for(let i=0;i<100&&!bundleCache.has(nextPiece.piece_id);i++)await new Promise(resolve=>setTimeout(resolve,20));
+              for(let i=0;i<100&&pieceDataCache.size<2;i++)await new Promise(resolve=>setTimeout(resolve,20));
+              const prefetched=[...performance.getEntriesByType('resource')]
+                .filter(entry=>entry.name.includes(`/library-assets/${nextPiece.piece_id}/`)).map(entry=>entry.name);
+              els.libraryOpen.click();
+              for(let i=0;i<200&&state.bundleManifest.piece_id!==nextPiece.piece_id;i++)await new Promise(resolve=>setTimeout(resolve,20));
+              for(let i=0;i<100&&(!els.scoreImage.complete||!els.scoreImage.naturalWidth);i++)await new Promise(resolve=>setTimeout(resolve,20));
+              const libraryResources=performance.getEntriesByType('resource')
+                .map(entry=>entry.name).filter(name=>name.includes('/library-assets/'));
+              return {
+                before:currentPiece,after:state.bundleManifest.piece_id,
+                navigationEntries:performance.getEntriesByType('navigation').length,
+                appScripts:performance.getEntriesByType('resource').filter(entry=>/\/app\.[a-f0-9]+\.js/.test(entry.name)).length,
+                bundleCache:bundleCache.size,pieceDataCache:pieceDataCache.size,
+                prefetchedCount:prefetched.length,
+                versioned:libraryResources.every(name=>new URL(name).searchParams.get('v')===RUNTIME_CONFIG.buildVersion),
+                dialogOpen:els.piecePickerDialog.open,
+              };
+            })()""")
+            call_id += 1
+            assert spa_switch["after"] != spa_switch["before"], spa_switch
+            assert spa_switch["navigationEntries"] == 1 and spa_switch["appScripts"] == 1, spa_switch
+            assert 1 <= spa_switch["pieceDataCache"] <= 2 and spa_switch["prefetchedCount"] > 0, spa_switch
+            assert spa_switch["versioned"] and not spa_switch["dialogOpen"], spa_switch
+
+            evidence = {"desktop": desktop, "mobile": mobile, "spaSwitch": spa_switch}
             print(json.dumps(evidence, ensure_ascii=False, indent=2))
             return 0
         finally:

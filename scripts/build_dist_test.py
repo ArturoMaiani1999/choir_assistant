@@ -93,6 +93,19 @@ class BuildDistTest(unittest.TestCase):
             self.assertIn("score_viewer.js", names)
             self.assertIn("score_viewer.css", names)
 
+    def test_versioned_library_assets_are_immutable(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            build_dist.write_headers(destination)
+            headers = (destination / "_headers").read_text(encoding="utf-8")
+
+            self.assertIn("/library.json\n  Cache-Control: public, max-age=31536000, immutable", headers)
+            self.assertIn("/library-assets/*\n  Cache-Control: public, max-age=31536000, immutable", headers)
+            app = (build_dist.FRONTEND / "app.js").read_text(encoding="utf-8")
+            viewer = (build_dist.FRONTEND / "score_viewer.js").read_text(encoding="utf-8")
+            self.assertIn("releaseAssetUrl(RUNTIME_CONFIG.libraryUrl)", app)
+            self.assertIn("releaseAssetUrl(config.libraryUrl)", viewer)
+
     def test_practice_toolbar_exposes_settings_without_redundant_menu_actions(self) -> None:
         html = (build_dist.FRONTEND / "index.html").read_text(encoding="utf-8")
 
