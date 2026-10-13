@@ -129,6 +129,9 @@ Legenda: `DONE` implementato e verificato localmente; `IN PROGRESS` in lavorazio
 - Aggiunta una configurazione distinta `wrangler.access.jsonc` per continuare
   a distribuire in sicurezza il sito statico sul Worker storico protetto da
   Cloudflare Access.
+- Distribuita la build `20261013-123910-46a41678c1a9` come versione Cloudflare
+  `e8ef1ab0-b213-4031-abd8-ee46abd62d44`. Root, `library.json` e bundle diretto
+  restituiscono `302` anonimo; il test autenticato resta manuale.
 
 ### 2026-10-11 — baseline consumer-auth
 
