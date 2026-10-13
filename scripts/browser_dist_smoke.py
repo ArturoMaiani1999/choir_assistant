@@ -568,7 +568,7 @@ def main() -> int:
             assert result["selectedPart"] == expected_part, result
             assert result["plumeWidth"] == 2.5 and result["plumeWidthSlider"] == "250" and result["plumeWidthLabel"] == "250%", result
             assert result["transposeChoices"] == 25 and result["diagnosticsHidden"], result
-            assert result["transposeLabel"] == "Transpose" and result["transposeValue"] == "±0", result
+            assert result["transposeLabel"] == "Transp" and result["transposeValue"] == "±0", result
             assert result["phraseUiRemoved"] and result["advancedUiRemoved"], result
             assert result["mixerChannels"] == 5, result
             assert result["metronomeOffset"] == 50 and result["metronomeOffsetControlPresent"] is False, result
