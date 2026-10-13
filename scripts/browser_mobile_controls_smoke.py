@@ -68,6 +68,14 @@ def main() -> None:
                 'paused inspection continues to use review rendering');
               assert(state.pianoRollDelayMs === 270, 'piano roll delay defaults to 270 ms');
               assert(state.plumeSettings.timeAdvanceMs === 270, 'standard vocal trace advance defaults to 270 ms');
+              populateLibraryPieces(state.bundleManifest.piece_id);
+              const libraryTitles = [...els.libraryPiece.options].map(option => option.textContent);
+              const sortedTitles = [...libraryTitles].sort((left, right) => left.localeCompare(right, 'it', {sensitivity:'base'}));
+              assert(JSON.stringify(libraryTitles) === JSON.stringify(sortedTitles),
+                'piece picker is alphabetically sorted by displayed title');
+              assert(libraryTitles.includes('Anima Christi'), 'Anima Christi uses normal title casing');
+              assert(libraryTitles.includes('qui-credit-in-me-non-sitiet-umquam'),
+                'Qui credit uses the configured display title');
               els.settingsAudioOutputBluetooth.checked = true;
               els.settingsAudioOutputBluetooth.dispatchEvent(new Event('change'));
               assert(state.pianoRollDelayMs === 270, 'Bluetooth does not alter the piano roll delay');
@@ -87,6 +95,11 @@ def main() -> None:
               const part = document.querySelector('#part-selector');
               const transpose = document.querySelector('.transpose-control');
               const transposeSelect = document.querySelector('#transpose');
+              const speed = document.querySelector('.speed-control');
+              const speedSelect = document.querySelector('#playback-speed');
+              const mixerButton = document.querySelector('#accompaniment-mode');
+              const settingsButton = document.querySelector('#settings');
+              const settingsIcon = settingsButton.querySelector('.settings-icon');
               const metronome = document.querySelector('.metronome-control');
               const metronomeVolume = document.querySelector('#metronome-volume');
               const toolbarRect = document.querySelector('#practice-toolbar').getBoundingClientRect();
@@ -110,6 +123,18 @@ def main() -> None:
               assert(transpose.textContent.trim().startsWith('Transp'), 'transpose has compact label');
               assert(getComputedStyle(transposeSelect).opacity === '0', 'duplicate transpose value is hidden');
               assert(document.querySelector('#transpose-value').textContent === '±0', 'semitones remain visible');
+              assert(getComputedStyle(speed).display !== 'none' && speed.getBoundingClientRect().width > 0,
+                'speed control is visible on mobile');
+              assert([...speedSelect.options].map(option => option.textContent).join(',') === '100%,75%,50%',
+                'speed control offers 100, 75 and 50 percent');
+              speedSelect.value = '0.75';
+              speedSelect.dispatchEvent(new Event('change'));
+              await new Promise(resolve => setTimeout(resolve, 50));
+              assert(state.clock.snapshot().speed === .75, 'mobile speed control updates playback speed');
+              assert(getComputedStyle(mixerButton).display === 'none', 'standalone mobile mixer button is hidden');
+              assert(settingsButton.querySelector('.settings-label').getBoundingClientRect().width === 0,
+                'mobile settings text is replaced');
+              assert(getComputedStyle(settingsIcon).display === 'block', 'mobile settings gear is visible');
               assert(getComputedStyle(metronome).display === 'flex', 'metronome control is visible');
               assert(metronomeVolume.getBoundingClientRect().width >= 44, 'metronome volume slider is usable');
               assert(transportGroupRect.left >= 35, 'transport controls move inward from the left edge');
@@ -127,7 +152,10 @@ def main() -> None:
 
             mixer = evaluate(socket, 122, """(async () => {
               const assert = (value, message) => { if (!value) throw Error(message); };
-              document.querySelector('#accompaniment-mode').click();
+              document.querySelector('#settings').click();
+              const menuMixer = document.querySelector('#settings-menu-mixer');
+              assert(getComputedStyle(menuMixer).display === 'grid', 'mixer is available inside mobile settings');
+              menuMixer.click();
               await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
               const dialog = document.querySelector('#voice-mixer-dialog');
               const rect = dialog.getBoundingClientRect();
@@ -161,7 +189,8 @@ def main() -> None:
             time.sleep(.15)
             landscape = evaluate(socket, 126, """(async () => {
               const assert = (value, message) => { if (!value) throw Error(message); };
-              document.querySelector('#accompaniment-mode').click();
+              document.querySelector('#settings').click();
+              document.querySelector('#settings-menu-mixer').click();
               await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
               const dialog = document.querySelector('#voice-mixer-dialog');
               const rect = dialog.getBoundingClientRect();

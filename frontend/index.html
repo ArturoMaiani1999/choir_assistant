@@ -7,7 +7,7 @@
     <title>Choir Assistant · Il tuo studio</title>
     <script src="ui_preferences.js?v=2-lyrics-only"></script>
     <link rel="stylesheet" href="styles.css?v=20261013-continuous-score" />
-    <link rel="stylesheet" href="studio.css?v=20261013-mobile-transport-center" />
+    <link rel="stylesheet" href="studio.css?v=20261013-mobile-speed-settings" />
     <script src="score_appearance.js?v=3-settings-groups"></script>
     <script src="runtime-config.js" defer></script>
     <script src="practice_math.js?v=20261013-mobile-four-measures" defer></script>
@@ -19,7 +19,7 @@
     <script src="one_euro_filter.js?v=20260927-phase2" defer></script>
     <script src="media_mixer.js?v=20261013-pitch-param-sync" defer></script>
     <script src="pitch_test_harness.js?v=20260927-phase0" defer></script>
-    <script src="app.js?v=20261013-dialog-backdrop-fix" defer></script>
+    <script src="app.js?v=20261013-mobile-speed-settings" defer></script>
   </head>
   <body>
     <main class="practice-shell" id="practice-shell" aria-label="Strumento di prova">
@@ -32,13 +32,14 @@
         </div>
         <div class="toolbar-actions">
           <label class="compact-select transpose-control"><span>Transp</span><select id="transpose" aria-label="Trasposizione"></select><output id="transpose-value" aria-live="polite">±0</output></label>
-          <label class="compact-select"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità"><option value="0.5">50%</option><option value="0.75">75%</option><option value="1" selected>100%</option></select></label>
+          <label class="compact-select speed-control"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità del brano"><option value="1" selected>100%</option><option value="0.75">75%</option><option value="0.5">50%</option></select></label>
           <button class="mode-button accompaniment-select" id="accompaniment-mode" type="button">Voci</button>
           <a class="mode-button score-viewer-link" id="score-viewer-link" href="score-viewer.html">Mostra partitura</a>
           <button class="mode-button" id="benchmark" type="button" hidden>Le mie registrazioni</button>
           <div class="settings-menu-wrap" id="settings-menu-wrap">
-            <button class="mode-button" id="settings" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-menu">Impostazioni</button>
+            <button class="mode-button settings-button" id="settings" type="button" aria-label="Impostazioni" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-menu"><span class="settings-label">Impostazioni</span><svg class="settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.7 2h4.6l.6 2.3c.5.2 1 .5 1.5.9l2.3-.7 2.3 4-1.7 1.6a8 8 0 0 1 0 1.8l1.7 1.6-2.3 4-2.3-.7c-.5.4-1 .7-1.5.9l-.6 2.3H9.7l-.6-2.3c-.5-.2-1-.5-1.5-.9l-2.3.7-2.3-4 1.7-1.6a8 8 0 0 1 0-1.8L3 8.5l2.3-4 2.3.7c.5-.4 1-.7 1.5-.9L9.7 2Z"/><circle cx="12" cy="11" r="3"/></svg></button>
             <div class="settings-menu" id="settings-menu" role="menu" hidden>
+              <button class="settings-menu-mixer" id="settings-menu-mixer" type="button" role="menuitem"><strong>Mixer</strong><small>Voci e accompagnamento</small></button>
               <button id="settings-menu-basic" type="button" role="menuitem"><strong>Base</strong><small>Audio, testo e colore carta</small></button>
               <button id="settings-menu-advanced" type="button" role="menuitem"><strong>Avanzate</strong><small>Microfono e sincronizzazione</small></button>
             </div>

@@ -18,6 +18,7 @@ button:disabled{cursor:not-allowed}
 .practice-toolbar .piece-identity{gap:12px}.practice-toolbar .piece-picker-button{flex:0 1 auto;max-width:min(340px,30vw)}.practice-toolbar .part-control{flex:0 0 auto}
 .piece-identity strong{font-size:22px;font-weight:500;letter-spacing:-.035em}
 .toolbar-actions{gap:8px}
+.settings-icon{display:none;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
 .mode-button,.toolbar-more>summary,.lab-mode-tabs button{border:1px solid transparent;border-radius:9px;color:#b7c6c8;min-height:42px;font-size:13px;padding:10px 13px}
 .change-piece-button{border-color:var(--line)}
 .mode-button:hover,.toolbar-more>summary:hover{background:#ffffff09}
@@ -356,9 +357,15 @@ button:disabled{cursor:not-allowed}
   .practice-toolbar .part-control select{width:100%;min-height:30px;padding:4px 20px 4px 8px;border:1px solid #e4bd7840;border-radius:8px;background-color:#ffffff08;color:var(--amber);font-size:11px;font-weight:650}
   .practice-toolbar>.toolbar-actions{grid-column:1/-1;grid-row:2;width:100%;min-width:0;justify-content:space-between;gap:4px}
   .practice-toolbar .toolbar-actions #benchmark{display:none}
+  .practice-toolbar .toolbar-actions .accompaniment-select{display:none}
+  .practice-toolbar .toolbar-actions .speed-control{display:inline-flex!important;flex:0 0 auto}
+  .practice-toolbar .speed-control select{width:58px;min-height:32px;padding:4px 18px 4px 7px;border-radius:8px;font-size:10.5px}
   .practice-toolbar .toolbar-actions .mode-button{min-width:0;min-height:32px;padding:5px 6px;border-color:#ffffff12;border-radius:8px;font-size:10.5px;white-space:nowrap}
   .practice-toolbar .toolbar-actions .score-viewer-link{font-size:10px}
-  .practice-toolbar .toolbar-actions #settings{min-height:32px;padding:5px 6px;font-size:10.5px}
+  .practice-toolbar .toolbar-actions #settings{display:grid;width:32px;min-width:32px;min-height:32px;padding:0;place-items:center;font-size:10.5px}
+  .practice-toolbar .settings-label{display:none}
+  .practice-toolbar .settings-icon{display:block}
+  .settings-menu-mixer{display:grid!important}
   .practice-toolbar .transpose-control{display:inline-flex;flex:0 0 auto;min-width:69px;min-height:32px;gap:5px;padding:0 7px;border-radius:8px}
   .practice-toolbar .transpose-control>span{display:inline;font-size:10.5px}
   .practice-toolbar .transpose-control output{min-width:18px;font-size:11px}
@@ -376,6 +383,8 @@ button:disabled{cursor:not-allowed}
   .practice-transport .metronome-control{display:flex;gap:6px}
   .practice-transport .metronome-control input{display:block;width:56px}
 }
+
+@media(min-width:601px){.settings-menu-mixer{display:none!important}}
 
 @media(max-width:340px){
   .practice-toolbar{column-gap:6px;padding-left:7px}

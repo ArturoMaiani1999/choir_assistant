@@ -27,6 +27,7 @@
     },
     {
       "id": "animachristi-strofa-monodico",
+      "display_title": "Anima Christi",
       "publication_approved": true,
       "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
     },
@@ -66,7 +67,8 @@
       "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
     },
     {
-      "id": "qui-credit-in-me-non-sitiet",
+      "id": "qui-credit-in-me-non-sitiet-umquam",
+      "display_title": "qui-credit-in-me-non-sitiet-umquam",
       "publication_approved": true,
       "rights_note": "Mio brano."
     }

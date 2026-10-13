@@ -42,7 +42,9 @@ class BuildDistTest(unittest.TestCase):
                 (source / name).write_text(name, encoding="utf-8")
 
             with mock.patch.object(build_dist, "FRONTEND", frontend):
-                build_dist.build_piece({"id": "test-piece"}, destination)
+                listing = build_dist.build_piece({
+                    "id": "test-piece", "display_title": "Titolo pubblico",
+                }, destination)
 
             bundle = json.loads(
                 (destination / "library-assets" / "test-piece" / "bundle.json").read_text(encoding="utf-8")
@@ -50,6 +52,21 @@ class BuildDistTest(unittest.TestCase):
             continuous = "library-assets/test-piece/part-P1-continuous-1.svg"
             self.assertEqual(bundle["assets"]["continuous_scores"], {"P1": continuous})
             self.assertTrue((destination / continuous).is_file())
+            self.assertEqual(listing["title"], "Titolo pubblico")
+
+    def test_empty_display_title_is_rejected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "repertoire.json"
+            config.write_text(json.dumps({
+                "pieces": [{
+                    "id": "o-sacrum",
+                    "display_title": "  ",
+                    "publication_approved": True,
+                    "rights_note": "Pubblicazione autorizzata",
+                }],
+            }), encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "display_title"):
+                build_dist.read_allowlist(config)
 
     def test_placeholder_rights_note_is_rejected(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
@@ -109,7 +126,8 @@ class BuildDistTest(unittest.TestCase):
     def test_practice_toolbar_exposes_settings_without_redundant_menu_actions(self) -> None:
         html = (build_dist.FRONTEND / "index.html").read_text(encoding="utf-8")
 
-        self.assertIn('id="settings" type="button" aria-haspopup="menu"', html)
+        self.assertIn('id="settings" type="button" aria-label="Impostazioni"', html)
+        self.assertIn('id="settings-menu-mixer"', html)
         self.assertIn('id="settings-menu-basic"', html)
         self.assertIn('id="settings-menu-advanced"', html)
         self.assertNotIn("toolbar-more", html)

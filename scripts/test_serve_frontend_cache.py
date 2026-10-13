@@ -260,6 +260,28 @@ class LocalBundlePreparationTests(unittest.TestCase):
 
             self.assertEqual(sources, [repertoire / "ave-verum.mscz"])
 
+    def test_library_listing_uses_deploy_display_title(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "sheets" / "test-piece" / "test-piece.mscz"
+            config = root / "repertoire.json"
+            config.write_text(json.dumps({"pieces": [{
+                "id": "test-piece", "display_title": "Titolo pubblico",
+            }]}), encoding="utf-8")
+            metadata = {
+                "piece_id": "test-piece", "title": "Titolo interno",
+                "parts": [], "monodic": False,
+            }
+
+            with mock.patch.object(serve_frontend, "REPERTOIRE_CONFIG", config), \
+                    mock.patch.object(serve_frontend, "_library_sources", return_value=[source]), \
+                    mock.patch.object(serve_frontend, "_source_hashes", return_value=("raw", "semantic")), \
+                    mock.patch.object(serve_frontend, "_cached_library_metadata", return_value=metadata), \
+                    mock.patch.object(serve_frontend, "_browser_assets_ready", return_value=True):
+                listing = serve_frontend._library_listing()
+
+            self.assertEqual(listing[0]["title"], "Titolo pubblico")
+
     def test_runtime_bundle_is_precomputed_on_disk(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             assets = Path(directory)

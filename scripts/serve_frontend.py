@@ -34,6 +34,7 @@ from backend.choir_assistant.ingestion.musicxml import compile_musicxml
 DATA_ROOT = ROOT / "data"
 SHEETS_ROOT = ROOT / "sheets"
 LIBRARY_ASSETS_ROOT = ROOT / "frontend" / "library-assets"
+REPERTOIRE_CONFIG = ROOT / "deploy" / "repertoire.json"
 MUSESCORE_CANDIDATES = (
     Path(r"C:\Program Files\MuseScore 4\bin\MuseScore4.exe"),
 )
@@ -928,6 +929,15 @@ def _sync_local_musicxml(report=None) -> list[Path]:
 
 
 def _library_listing() -> list[dict]:
+    display_titles: dict[str, str] = {}
+    try:
+        configured = json.loads(REPERTOIRE_CONFIG.read_text(encoding="utf-8")).get("pieces", [])
+        display_titles = {
+            str(item.get("id", "")): str(item.get("display_title", "")).strip()
+            for item in configured if str(item.get("display_title", "")).strip()
+        }
+    except (OSError, json.JSONDecodeError, AttributeError):
+        pass
     items = []
     for source in _library_sources():
         piece_id = _piece_id(source.parent.name)
@@ -936,13 +946,17 @@ def _library_listing() -> list[dict]:
         metadata = _cached_library_metadata(cached, raw_hash, semantic_hash)
         if metadata is not None and _browser_assets_ready(cached.parent, metadata):
             try:
-                items.append({key: metadata[key] for key in ("piece_id", "title", "parts", "monodic")})
+                listing = {key: metadata[key] for key in ("piece_id", "title", "parts", "monodic")}
+                listing["title"] = display_titles.get(piece_id, listing["title"])
+                items.append(listing)
                 continue
             except KeyError:
                 pass
         # This can only occur with --skip-library-prebuild or after a source is
         # edited while the server is already running.
-        items.append({"piece_id": piece_id, "title": source.stem.replace("-", " ").title(), "parts": [], "monodic": False})
+        items.append({"piece_id": piece_id,
+                      "title": display_titles.get(piece_id, source.stem.replace("-", " ").title()),
+                      "parts": [], "monodic": False})
     return items
 
 

@@ -112,7 +112,7 @@ let audioOutputExpiryTimer = null;
 const els = Object.fromEntries([
   'transpose', 'transpose-value', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
   'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-accompaniment', 'voice-mixer-accompaniment-enabled', 'voice-mixer-accompaniment-level', 'voice-mixer-accompaniment-value', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
-  'settings-menu-wrap', 'settings-menu', 'settings-menu-basic', 'settings-menu-advanced', 'settings-dialog', 'settings-heading', 'settings-basic-panel', 'settings-advanced-panel', 'settings-audio-output-standard', 'settings-audio-output-bluetooth', 'settings-audio-output-status', 'settings-audio-output-description', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
+  'settings-menu-wrap', 'settings-menu', 'settings-menu-mixer', 'settings-menu-basic', 'settings-menu-advanced', 'settings-dialog', 'settings-heading', 'settings-basic-panel', 'settings-advanced-panel', 'settings-audio-output-standard', 'settings-audio-output-bluetooth', 'settings-audio-output-status', 'settings-audio-output-description', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
   'result-dialog', 'result-heading', 'result-text', 'result-progress', 'retry', 'result-resume', 'result-close',
   'note-names',
   'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-viewer-link', 'settings',
@@ -378,8 +378,6 @@ function normalizeSlug(value) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
 }
 
-function pieceTitleKey(pieceId) { return `choir-piece-title:${pieceId}`; }
-
 function proposedPieceTitle(piece) {
   const duplicate = state.library.filter((item) => item.title.trim().toLowerCase() === piece.title.trim().toLowerCase()).length > 1;
   if (!duplicate) return piece.title;
@@ -391,12 +389,13 @@ function proposedPieceTitle(piece) {
 }
 
 function pieceDisplayTitle(piece) {
-  try { return localStorage.getItem(pieceTitleKey(piece.piece_id))?.trim() || proposedPieceTitle(piece); }
-  catch (_) { return proposedPieceTitle(piece); }
+  return proposedPieceTitle(piece);
 }
 
 function populateLibraryPieces(selectedPieceId) {
-  els.libraryPiece.replaceChildren(...state.library.map((piece) => new Option(pieceDisplayTitle(piece), piece.piece_id)));
+  const sortedPieces = [...state.library].sort((left, right) => pieceDisplayTitle(left)
+    .localeCompare(pieceDisplayTitle(right), 'it', { sensitivity: 'base' }));
+  els.libraryPiece.replaceChildren(...sortedPieces.map((piece) => new Option(pieceDisplayTitle(piece), piece.piece_id)));
   els.libraryPiece.value = state.library.some((piece) => piece.piece_id === selectedPieceId) ? selectedPieceId : state.library[0].piece_id;
 }
 
@@ -653,6 +652,20 @@ function renderVoiceMixer() {
     row.append(heading, output, fader, mute);
     return row;
   }));
+}
+
+function openVoiceMixer() {
+  closeSettingsMenu();
+  // Opening the mixer is an intentional pause point. Keep this flag so
+  // applying a new routing resumes the same musical instant afterwards.
+  if (state.clock.running) {
+    state.voiceMixResumeRequested = true;
+    state.clock.pause();
+    updatePlaybackButton();
+    render();
+  }
+  renderVoiceMixer();
+  if (!els.voiceMixerDialog.open) els.voiceMixerDialog.showModal();
 }
 
 function configureBacking() {
@@ -3626,18 +3639,7 @@ function bindControls() {
   bindGridInspection();
   bindScorePitchDivider();
   bindBenchmarkAnalysisCanvas();
-  els.accompanimentMode.addEventListener('click', () => {
-    // Opening the mixer is an intentional pause point.  Keep this flag so
-    // applying a new routing resumes the same musical instant afterwards.
-    if (state.clock.running) {
-      state.voiceMixResumeRequested = true;
-      state.clock.pause();
-      updatePlaybackButton();
-      render();
-    }
-    renderVoiceMixer();
-    if (!els.voiceMixerDialog.open) els.voiceMixerDialog.showModal();
-  });
+  els.accompanimentMode.addEventListener('click', openVoiceMixer);
   els.voiceMixerClose.addEventListener('click', () => els.voiceMixerDialog.close());
   els.voiceMixerDialog.addEventListener('click', closeVoiceMixerFromBackdrop);
   els.voiceMixerAccompanimentEnabled.addEventListener('click', () => {
@@ -3818,6 +3820,7 @@ function bindControls() {
   els.backingAudio.addEventListener('pause', () => { updatePlaybackButton(); if (!state.clock.running) render(); });
   els.backingAudio.addEventListener('error', () => showToast(`Errore audio (${els.backingAudio.error?.code ?? 'sconosciuto'}).`));
   els.settings.addEventListener('click', (event) => { event.stopPropagation(); toggleSettingsMenu(); });
+  els.settingsMenuMixer.addEventListener('click', openVoiceMixer);
   els.settingsMenuBasic.addEventListener('click', () => openDetectorSettings('basic'));
   els.settingsMenuAdvanced.addEventListener('click', () => openDetectorSettings('advanced'));
   document.addEventListener('click', (event) => {

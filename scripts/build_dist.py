@@ -79,6 +79,9 @@ def read_allowlist(path: Path) -> list[dict]:
             raise ValueError(f"{piece_id}: manca rights_note")
         if rights_note.casefold() in PLACEHOLDER_RIGHTS_NOTES:
             raise ValueError(f"{piece_id}: rights_note è ancora un segnaposto")
+        display_title = str(item.get("display_title", "")).strip()
+        if "display_title" in item and not display_title:
+            raise ValueError(f"{piece_id}: display_title non può essere vuoto")
         seen.add(piece_id)
     return pieces
 
@@ -246,7 +249,12 @@ def build_piece(piece: dict, destination: Path) -> dict:
         },
     }
     (target / "bundle.json").write_text(json.dumps(bundle, ensure_ascii=False), encoding="utf-8")
-    return {"piece_id": piece_id, "title": metadata["title"], "parts": parts, "monodic": bundle["monodic"]}
+    return {
+        "piece_id": piece_id,
+        "title": str(piece.get("display_title", "")).strip() or metadata["title"],
+        "parts": parts,
+        "monodic": bundle["monodic"],
+    }
 
 
 def write_headers(destination: Path) -> None:
