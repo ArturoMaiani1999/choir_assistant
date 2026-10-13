@@ -72,7 +72,7 @@
     </defaults>
   <credit page="1">
     <credit-type>title</credit-type>
-    <credit-words default-x="708.33" default-y="1734.91" justify="center" valign="top" font-size="22">Terra sine aqua</credit-words>
+    <credit-words default-x="708.33" default-y="1734.91" justify="center" valign="top" font-size="22">Qui credit in me non sitiet umquam</credit-words>
     </credit>
   <credit page="1">
     <credit-type>composer</credit-type>
@@ -758,11 +758,19 @@
         <voice>1</voice>
         <type>half</type>
         </note>
-      <note default-x="79.97" default-y="-20">
-        <rest />
+      <note default-x="79.97" default-y="-30">
+        <pitch>
+          <step>G</step>
+          <octave>4</octave>
+          </pitch>
         <duration>2</duration>
         <voice>1</voice>
         <type>quarter</type>
+        <stem>up</stem>
+        <lyric number="1" default-y="-50.18" relative-y="-30">
+          <syllabic>begin</syllabic>
+          <text>Vi</text>
+          </lyric>
         </note>
       <note default-x="117.97" default-y="-20">
         <pitch>
@@ -6960,7 +6968,6 @@
         <dot default-x="75.81" default-y="-171.91" />
         <stem>up</stem>
         <notations>
-          <fermata type="upright" relative-y="5" />
           <articulations>
             <breath-mark default-x="-7.64" default-y="5">comma</breath-mark>
             </articulations>

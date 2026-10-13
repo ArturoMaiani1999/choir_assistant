@@ -1,9 +1,19 @@
 {
   "pieces": [
     {
+      "id": "alto-e-glorioso-dio",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
       "id": "ave-verum",
       "publication_approved": true,
       "rights_note": "W. A. Mozart, Ave verum corpus K. 618: composizione in pubblico dominio. Trascrizione SATB © Robert Garrigós, CC BY 4.0, https://github.com/robertgarrigos/lilypond-scores/blob/main/Mozart/Ave-verum-k618.ly. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+        {
+      "id": "cantico-dell-agnello",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
     },
     {
       "id": "dove-la-carita",
@@ -17,11 +27,6 @@
     },
     {
       "id": "animachristi-strofa-monodico",
-      "publication_approved": true,
-      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
-    },
-    {
-      "id": "cantico-dell-agnello",
       "publication_approved": true,
       "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
     },
