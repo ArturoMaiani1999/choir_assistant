@@ -359,6 +359,7 @@ function openDetectorSettings(mode = 'basic') {
 }
 
 function closeDialogFromBackdrop(dialog, event) {
+  if (event.target !== dialog) return;
   const rect = dialog.getBoundingClientRect();
   const outsideDialog = event.clientX < rect.left || event.clientX > rect.right
     || event.clientY < rect.top || event.clientY > rect.bottom;
