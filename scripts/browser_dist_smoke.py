@@ -621,7 +621,7 @@ def main() -> int:
                                                     "voice": expected_part, "otherStems": 0}, mixer_layout
             assert mixer_layout["allVoicesPreset"] == {"organ": False, "source": "voice-P1.mp3",
                                                           "otherStems": 3}, mixer_layout
-            assert mixer_mobile["columns"] == 2 and not mixer_mobile["overflow"], mixer_mobile
+            assert mixer_mobile["columns"] == 1 and not mixer_mobile["overflow"], mixer_mobile
             assert mixer_mobile["width"] <= mixer_mobile["viewport"], mixer_mobile
             after_drag = inspection_result["afterDrag"]
             resumed = inspection_result["resumed"]
