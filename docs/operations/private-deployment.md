@@ -127,9 +127,19 @@ npx wrangler deploy --name choir-assistant --assets deploy/holding --compatibili
 - [ ] Collegare eventualmente il dominio personalizzato dal dashboard (Workers & Pages → `choir-assistant` → Settings → Domains & Routes).
 - [ ] Verificare HTTPS attivo (il microfono funziona solo in contesto sicuro).
 
-`wrangler.jsonc` è la configurazione di produzione e punta esclusivamente a
-`dist/`. Non eseguire `npx wrangler deploy` finché il test anonimo di Access
-non blocca il segnaposto.
+`wrangler.access.jsonc` è la configurazione del Worker storico protetto da
+Access e punta esclusivamente a `dist/`. `wrangler.jsonc` resta riservato alla
+futura autenticazione consumer Clerk/D1. Non eseguire Wrangler senza indicare
+la configurazione corretta.
+
+Da un commit pulito, il comando canonico per questo ambiente è:
+
+```powershell
+npm run deploy:access
+```
+
+Il relativo controllo pre-deploy rifiuta nomi Worker diversi, preview URL,
+route alternative, entrypoint dinamici e binding non necessari.
 
 ---
 

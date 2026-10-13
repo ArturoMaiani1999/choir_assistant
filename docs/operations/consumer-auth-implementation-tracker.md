@@ -121,6 +121,15 @@ Legenda: `DONE` implementato e verificato localmente; `IN PROGRESS` in lavorazio
 
 ## Registro di implementazione
 
+### 2026-10-13 — mantenimento temporaneo di Cloudflare Access
+
+- Poiché il coro resta sotto 50 utenti attivi, il cutover Clerk/D1 è rinviato.
+- Il codice consumer-auth rimane disponibile sul branch, senza risorse cloud
+  create e senza modificare la produzione.
+- Aggiunta una configurazione distinta `wrangler.access.jsonc` per continuare
+  a distribuire in sicurezza il sito statico sul Worker storico protetto da
+  Cloudflare Access.
+
 ### 2026-10-11 — baseline consumer-auth
 
 - Implementati Clerk session verification, D1 allowlist, HMAC email digest,
