@@ -105,6 +105,11 @@ assert.equal(split.strips, 2, 'silence is never bridged by ribbon geometry');
 const stale = fluid.trailGeometry(samples, sample => sample.time * 200, pitch => pitch,
   { currentTime: 20, nowX: 600, trailStartX: 0, sortedTimeline: true });
 assert.equal(stale.vertexCount, 0, 'live history is bounded');
+const retained = fluid.trailGeometry(samples, sample => sample.time * 200, pitch => pitch,
+  { currentTime: 20, nowX: 600, trailStartX: 0, sortedTimeline: true, retainHistory: true });
+assert.ok(retained.vertexCount > 100, 'retained live history remains rendered while it is in the viewport');
+assert.ok(Math.abs(retained.vertices[4] - retained.vertices.at(-4)) < 1e-6,
+  'retained live history does not lose energy as it ages');
 assert.equal(fluid.CONFIG.enabled, true);
 assert.equal(fluid.CONFIG.filamentCount, 3);
 console.log('fluid pitch trail: geometry, local coordinates, fade and gaps passed');

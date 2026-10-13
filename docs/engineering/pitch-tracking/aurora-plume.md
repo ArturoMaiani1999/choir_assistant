@@ -67,12 +67,14 @@ x, and therefore cannot undo a nonmonotonic segment boundary.
   timing-offset preference is respected; it does not change stored F0/timestamps.
 - Live Practice filters to the current take. Existing seek/start/reset/piece
   boundaries remain authoritative. Future observations are rejected after seek.
+  While singing, every observed segment still inside the visible piano-roll
+  window is retained at stable intensity instead of fading with age. Silence
+  and other genuine segment boundaries remain visible as gaps.
 - Voice Lab uses elapsed recording time. During recording the recent plume
   is brighter, but the whole visible trail remains present. After stopping,
   the roll and feedback chart use explicit review
   mode: the entire observed trajectory remains visible without live decay.
-- Practice's paused inspection also uses review mode. Historical data are not
-  deleted by the live fade. Historical sample storage retains its existing
+- Practice's paused inspection also uses review mode. Historical sample storage retains its existing
   12,000-frame limit; this work does not expand storage policy.
 
 Ordered timelines are cropped to the viewport with binary search before segmentation;

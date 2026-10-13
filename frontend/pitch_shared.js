@@ -5,7 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
   const PREFERENCE_KEY = 'choir-detector-settings:v1';
-  const SETTINGS_DEFAULTS_VERSION = 2;
+  const SETTINGS_DEFAULTS_VERSION = 4;
   const DETECTOR_DEFAULTS = Object.freeze({ rmsThreshold: .000002, weakVoiceMode: false, fastAlpha: .65, slowAlpha: .65, medianWindowFrames: 3 });
   const LEGACY_DETECTOR_DEFAULTS = Object.freeze({ rmsThreshold: .001, fastAlpha: .65, slowAlpha: .3, medianWindowFrames: 3 });
   const VERSION_1_DETECTOR_DEFAULTS = Object.freeze({ rmsThreshold: .0001, fastAlpha: .6, slowAlpha: .65, medianWindowFrames: 3 });
@@ -17,11 +17,12 @@
       levelConfidenceFloor: .68, rmsThresholdCeiling: .00003, weakSignalHoldFrames: 6,
       candidateConsistencyCents: 220 }),
   });
-  const PLUME_ADVANCE_MAX_MS = 400;
+  const PLUME_ADVANCE_MAX_MS = 600;
   const PLUME_WIDTH_PREFERENCE_VERSION = 2;
-  const PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1.75, color: '#72e0d2', timeAdvanceMs: 280 });
+  const PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1.75, color: '#72e0d2', timeAdvanceMs: 270 });
   const LEGACY_PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1, timeAdvanceMs: 200 });
   const VERSION_1_PLUME_DEFAULTS = Object.freeze({ width: 2.05, intensity: 1.75, timeAdvanceMs: 310 });
+  const VERSION_2_3_PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1.75, timeAdvanceMs: 280 });
   // Visual density, NOT a calibrated F0 posterior or confidence interval.
   const AURORA = Object.freeze({ trailSeconds: 2.8, historyOpacity: .08, sigmaSemitones: .16,
     palette: Object.freeze([[114,224,210], [114,224,210], [114,224,210]]) });
@@ -34,7 +35,8 @@
     const previousDetectorDefaults = saved.settingsDefaultsVersion === 1
       ? VERSION_1_DETECTOR_DEFAULTS : LEGACY_DETECTOR_DEFAULTS;
     const previousPlumeDefaults = saved.settingsDefaultsVersion === 1
-      ? VERSION_1_PLUME_DEFAULTS : LEGACY_PLUME_DEFAULTS;
+      ? VERSION_1_PLUME_DEFAULTS : saved.settingsDefaultsVersion === 2 || saved.settingsDefaultsVersion === 3
+        ? VERSION_2_3_PLUME_DEFAULTS : LEGACY_PLUME_DEFAULTS;
     const migratedNumber = (key, legacyDefault, currentDefault) => {
       const value = Number(saved[key]);
       if (!Number.isFinite(value)) return currentDefault;
@@ -112,12 +114,13 @@
     return { segments, now, cadence, gap, inspectedSamples: end-start };
   }
   function auroraStyle(age, confidence, settings = {}) {
-    const review = settings.mode === 'review', trail = settings.trailSeconds ?? AURORA.trailSeconds;
-    const fraction = review ? .5 : Math.max(0, Math.min(1, age / trail));
+    const review = settings.mode === 'review', retainHistory = settings.retainHistory === true;
+    const trail = settings.trailSeconds ?? AURORA.trailSeconds;
+    const fraction = review || retainHistory ? .5 : Math.max(0, Math.min(1, age / trail));
     const palette = settings.palette || AURORA.palette, phase = Math.min(1.999999, fraction * 2);
     const index = Math.floor(phase), mix = smoothstep(phase - index);
     return { color: palette[index].map((v,i) => Math.round(v + (palette[index+1][i]-v)*mix)),
-      alpha: Math.min(1, confidence * (settings.intensity ?? 1)) * (review ? 1
+      alpha: Math.min(1, confidence * (settings.intensity ?? 1)) * (review || retainHistory ? 1
         : 1 - (1 - (settings.historyOpacity ?? AURORA.historyOpacity)) * smoothstep(fraction)) };
   }
   // Linear interpolation per physical pixel column: no overshoot, no DSP smoothing.

@@ -177,6 +177,7 @@
     const timeAt = options.timeAt || (sample => sample.time ?? sample.audioTimeSec);
     const currentTime = Number.isFinite(options.currentTime) ? options.currentTime : timeAt(samples.at(-1) || {});
     const review = options.mode === 'review';
+    const retainHistory = options.retainHistory === true;
     const model = PitchShared.plumeSegments(samples, xAt, {
       ...options, currentTime, timeAt, mode: options.mode,
       viewportLeft: options.viewportLeft ?? options.trailStartX,
@@ -188,7 +189,8 @@
 
     const push = (x, y, edge, s, fluidEnergy, coreEnergy, head, cap) => vertices.push(x, y, edge, s, fluidEnergy, coreEnergy, head, cap);
     for (const source of reconcileSegments(model, config)) {
-      const visible = source.filter(point => review || currentTime - point.time <= config.centerlineHistorySeconds);
+      const visible = source.filter(point => review || retainHistory
+        || currentTime - point.time <= config.centerlineHistorySeconds);
       const points = graphPoints(visible, yAt, config, options);
       if (points.length < 2) continue;
       const strip = [];
@@ -208,8 +210,8 @@
         const verticalHalfWidth = halfWidth * (.45 + .55 * Math.sqrt(cap));
         const age = Math.max(0, currentTime - point.time);
         const confidence = clamp01(point.confidence);
-        const fluidAgeEnergy = review ? .72 : clamp01(1 - age / config.historySeconds);
-        const coreAgeEnergy = review ? .72 : clamp01(1 - age / config.centerlineHistorySeconds);
+        const fluidAgeEnergy = review ? .72 : retainHistory ? 1 : clamp01(1 - age / config.historySeconds);
+        const coreAgeEnergy = review ? .72 : retainHistory ? 1 : clamp01(1 - age / config.centerlineHistorySeconds);
         const fluidEnergy = Math.pow(fluidAgeEnergy, config.pastFadeExponent) * confidence;
         const coreEnergy = Math.pow(coreAgeEnergy, config.pastFadeExponent) * confidence;
         const head = review ? 0 : 1 - clamp01(age / config.headSeconds);
@@ -314,6 +316,7 @@
     const timeAt = options.timeAt || (sample => sample.time ?? sample.audioTimeSec);
     const currentTime = Number.isFinite(options.currentTime) ? options.currentTime : timeAt(samples.at(-1) || {});
     const review = options.mode === 'review';
+    const retainHistory = options.retainHistory === true;
     const model = PitchShared.plumeSegments(samples, xAt, {
       ...options, currentTime, timeAt,
       viewportLeft: options.viewportLeft ?? options.trailStartX,
@@ -325,13 +328,15 @@
         options.clip.right - options.clip.left, options.clip.bottom - options.clip.top); context.clip();
     }
     for (const source of reconcileSegments(model, config)) {
-      const visible = source.filter(point => review || currentTime - point.time <= config.centerlineHistorySeconds);
+      const visible = source.filter(point => review || retainHistory
+        || currentTime - point.time <= config.centerlineHistorySeconds);
       const points = graphPoints(visible, yAt, config, options);
       if (points.length < 2) continue;
       const liveHead = !review && currentTime - points.at(-1).time <= model.cadence * 1.5;
       const span = Math.max(1, points.at(-1).x - points[0].x);
       const fadeFraction = Math.min(.45, config.capFadePixels / span);
-      const firstEnergy = review ? .72 : Math.pow(clamp01(1 - (currentTime - points[0].time) / config.centerlineHistorySeconds), config.pastFadeExponent);
+      const firstEnergy = review ? .72 : retainHistory ? 1
+        : Math.pow(clamp01(1 - (currentTime - points[0].time) / config.centerlineHistorySeconds), config.pastFadeExponent);
       const gradient = context.createLinearGradient(points[0].x, 0, points.at(-1).x, 0);
       gradient.addColorStop(0, 'rgba(114,224,210,0)');
       gradient.addColorStop(fadeFraction, `rgba(114,224,210,${.22 * firstEnergy})`);

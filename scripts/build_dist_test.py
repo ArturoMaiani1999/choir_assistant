@@ -75,7 +75,7 @@ class BuildDistTest(unittest.TestCase):
         self.assertIn('id="settings-piano-roll-delay" type="range" min="0" max="600"', dialog)
         self.assertNotIn('settings-display-pitch-algorithm', dialog)
         self.assertNotIn('Come mostrare la tua intonazione', dialog)
-        self.assertIn('id="settings-v1-plume-advance" type="range" min="0" max="400"', dialog)
+        self.assertIn('id="settings-v1-plume-advance" type="range" min="0" max="600"', dialog)
         score_appearance = (build_dist.FRONTEND / "score_appearance.js").read_text(encoding="utf-8")
         self.assertIn("basicPanel.appendChild(section)", score_appearance)
 

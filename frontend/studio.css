@@ -368,7 +368,7 @@ button:disabled{cursor:not-allowed}
   .practice-transport{grid-template-columns:minmax(0,1fr) auto;gap:7px;padding-inline:9px}
   .practice-transport>.transport-position,
   .practice-transport>.transport-controls[aria-label="Feedback"]{display:none}
-  .practice-transport>.transport-controls[aria-label="Trasporto"]{justify-self:start;gap:4px}
+  .practice-transport>.transport-controls[aria-label="Trasporto"]{justify-self:center;gap:4px}
   .practice-transport .transport-button{width:34px;min-width:34px;min-height:38px;padding:0}
   .practice-transport .play-button{width:46px;height:46px;min-width:46px;min-height:46px}
   .practice-transport .mixer-controls{display:flex;justify-self:end;gap:0}

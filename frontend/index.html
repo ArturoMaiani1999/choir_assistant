@@ -7,19 +7,19 @@
     <title>Choir Assistant · Il tuo studio</title>
     <script src="ui_preferences.js?v=2-lyrics-only"></script>
     <link rel="stylesheet" href="styles.css?v=20261013-continuous-score" />
-    <link rel="stylesheet" href="studio.css?v=20261013-hide-readout" />
+    <link rel="stylesheet" href="studio.css?v=20261013-mobile-transport-center" />
     <script src="score_appearance.js?v=3-settings-groups"></script>
     <script src="runtime-config.js" defer></script>
     <script src="practice_math.js?v=20261013-mobile-four-measures" defer></script>
     <script src="score_runtime.js?v=20261012-tonal-roles" defer></script>
     <script src="pitch_detector.js?v=20261003-weak-voice" defer></script>
-    <script src="pitch_shared.js?v=20261013-settings-defaults-v2" defer></script>
-    <script src="fluid_pitch_trail.js?v=20261012-single-valued" defer></script>
+    <script src="pitch_shared.js?v=20261013-live-history-visible" defer></script>
+    <script src="fluid_pitch_trail.js?v=20261013-live-history-visible" defer></script>
     <script src="vocal_feedback.js?v=20260928-feedback-v1" defer></script>
     <script src="one_euro_filter.js?v=20260927-phase2" defer></script>
     <script src="media_mixer.js?v=20261008-mixer-transpose" defer></script>
     <script src="pitch_test_harness.js?v=20260927-phase0" defer></script>
-    <script src="app.js?v=20261013-mobile-layout-v2" defer></script>
+    <script src="app.js?v=20261013-live-plume-history" defer></script>
   </head>
   <body>
     <main class="practice-shell" id="practice-shell" aria-label="Strumento di prova">
@@ -109,7 +109,7 @@
       <h2 id="settings-heading">Impostazioni</h2>
       <section id="settings-basic-panel" class="settings-panel" data-settings-panel="basic">
       <section class="detector-setting audio-output-setting" aria-labelledby="settings-audio-output-heading">
-        <div><h3 id="settings-audio-output-heading">Uscita audio in uso <button class="setting-info" type="button" aria-label="Informazioni sull’uscita audio" data-tooltip="La scelta vale 30 minuti. Con Bluetooth il ritardo del piano roll viene impostato automaticamente a 500 ms.">i</button></h3><output id="settings-audio-output-status">Da confermare</output></div>
+        <div><h3 id="settings-audio-output-heading">Uscita audio in uso <button class="setting-info" type="button" aria-label="Informazioni sull’uscita audio" data-tooltip="La scelta vale 30 minuti. Il ritardo del piano roll resta a 270 ms; l’anticipo della traccia vocale passa a 550 ms con Bluetooth e a 270 ms senza Bluetooth.">i</button></h3><output id="settings-audio-output-status">Da confermare</output></div>
         <div class="audio-output-choices" role="radiogroup" aria-label="Uscita audio in uso">
           <label class="audio-output-choice" for="settings-audio-output-standard">
             <input id="settings-audio-output-standard" name="settings-audio-output" type="radio" value="standard" />
@@ -166,11 +166,11 @@
         <div class="detector-setting-scale"><span>Più stretta</span><span>Più ampia</span></div>
         <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-intensity">Intensità <output id="settings-v1-plume-intensity-value">175%</output></label>
         <input id="settings-v1-plume-intensity" type="range" min="15" max="200" step="5" value="175" />
-        <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-advance">Anticipo della traccia vocale <output id="settings-v1-plume-advance-value">280 ms</output></label>
-        <input id="settings-v1-plume-advance" type="range" min="0" max="400" step="10" value="280" />
-        <div class="detector-setting-scale"><span>0 ms · timestamp reale</span><span>400 ms · più anticipata</span></div>
-        <label class="detector-setting-label tracker-setting-label" for="settings-piano-roll-delay">Ritardo piano roll rispetto all’audio <output id="settings-piano-roll-delay-value">330 ms</output></label>
-        <input id="settings-piano-roll-delay" type="range" min="0" max="600" step="10" value="330" />
+        <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-advance">Anticipo della traccia vocale <output id="settings-v1-plume-advance-value">270 ms</output></label>
+        <input id="settings-v1-plume-advance" type="range" min="0" max="600" step="10" value="270" />
+        <div class="detector-setting-scale"><span>0 ms · timestamp reale</span><span>600 ms · più anticipata</span></div>
+        <label class="detector-setting-label tracker-setting-label" for="settings-piano-roll-delay">Ritardo piano roll rispetto all’audio <output id="settings-piano-roll-delay-value">270 ms</output></label>
+        <input id="settings-piano-roll-delay" type="range" min="0" max="600" step="10" value="270" />
         <div class="detector-setting-scale"><span>0 ms · tempo reale</span><span>600 ms · più ritardato</span></div>
       </section>
       <div class="dialog-actions"><button id="settings-reset" type="button">Ripristina predefinito</button></div>

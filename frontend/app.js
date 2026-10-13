@@ -18,8 +18,8 @@ function libraryBundleUrl(pieceId) {
 const UI_CONFIG = Object.freeze({
   historyBeats: 4.5,
   futureBeats: 7.5,
-  mobileHistoryBeats: 3,
-  mobileFutureBeats: 5,
+  mobileHistoryBeats: 1.5,
+  mobileFutureBeats: 2.5,
   centeredCents: 12,
   acceptableCents: 30,
   targetToleranceCents: 25,
@@ -33,9 +33,10 @@ const UI_CONFIG = Object.freeze({
 
 const AUDIO_OUTPUT_SESSION_KEY = 'choir-audio-output:v1';
 const AUDIO_OUTPUT_CONFIRMATION_TTL_MS = 30 * 60 * 1000;
-const BLUETOOTH_PIANO_ROLL_DELAY_MS = 500;
 const PIANO_ROLL_DELAY_MAX_MS = 600;
-const PIANO_ROLL_DELAY_DEFAULT_MS = 330;
+const PIANO_ROLL_DELAY_DEFAULT_MS = 270;
+const STANDARD_PLUME_ADVANCE_MS = 270;
+const BLUETOOTH_PLUME_ADVANCE_MS = 550;
 const METRONOME_OFFSET_MS = 50;
 let audioOutputExpiryTimer = null;
 
@@ -1219,6 +1220,7 @@ function livePlumeSettings(displayBeat, inspecting, nowX, trailStartX) {
   const speed = Math.max(.1, Number(els.playbackSpeed.value) || 1);
   return { ...state.plumeSettings, nowX, trailStartX,
     mode: inspecting ? 'review' : 'live', sortedTimeline: !inspecting,
+    retainHistory: !inspecting,
     minConfidence: activeRecognitionSettings().minConfidence,
     currentTime: state.runtime.secondsAtBeat(displayBeat) / speed,
     timeAt: sample => state.runtime.secondsAtBeat(sample.beat) / speed };
@@ -1729,7 +1731,8 @@ function bindGridInspection() {
     const span = (state.pitchViewport?.bounds.max ?? 67) - (state.pitchViewport?.bounds.min ?? 55);
     if (event.ctrlKey || event.metaKey) {
       const zoom = Math.exp(-event.deltaY * .0025);
-      view.timeZoom = Math.max(.55, Math.min(5, view.timeZoom * zoom));
+      const minimumTimeZoom = matchMedia('(max-width: 960px)').matches ? 1 : .55;
+      view.timeZoom = Math.max(minimumTimeZoom, Math.min(5, view.timeZoom * zoom));
       view.pitchZoom = Math.max(.55, Math.min(5, view.pitchZoom * zoom));
     } else if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
       view.viewBeat = Math.max(0, Math.min(totalBeats(), view.viewBeat + (event.deltaX || event.deltaY) * .015 / view.timeZoom));
@@ -1740,15 +1743,21 @@ function bindGridInspection() {
   }, { passive: false });
   const horizontalSpan = () => {
     const inspect = state.gridInspect;
-    return (UI_CONFIG.historyBeats + UI_CONFIG.futureBeats) / (inspect.active ? inspect.timeZoom : 1);
+    const compactLayout = matchMedia('(max-width: 960px)').matches;
+    const baseHistory = compactLayout ? UI_CONFIG.mobileHistoryBeats : UI_CONFIG.historyBeats;
+    const baseFuture = compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats;
+    return (baseHistory + baseFuture) / (inspect.active ? inspect.timeZoom : 1);
   };
   const beatAtPointer = (clientX) => {
     const rect = canvas.getBoundingClientRect();
     const plot = { left: rect.width < 700 ? 48 : 58, right: rect.width - 8 };
     const inspect = state.gridInspect;
     const displayBeat = inspect.active ? inspect.viewBeat : currentPianoRollBeat();
-    const historyBeats = UI_CONFIG.historyBeats / (inspect.active ? inspect.timeZoom : 1);
-    const futureBeats = UI_CONFIG.futureBeats / (inspect.active ? inspect.timeZoom : 1);
+    const compactLayout = matchMedia('(max-width: 960px)').matches;
+    const historyBeats = (compactLayout ? UI_CONFIG.mobileHistoryBeats : UI_CONFIG.historyBeats)
+      / (inspect.active ? inspect.timeZoom : 1);
+    const futureBeats = (compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats)
+      / (inspect.active ? inspect.timeZoom : 1);
     const nowX = timeToX(displayBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
     const ratio = (clientX - rect.left - nowX) / Math.max(1, plot.right - plot.left);
     return Math.max(0, Math.min(totalBeats(), displayBeat + ratio * (historyBeats + futureBeats)));
@@ -3389,9 +3398,10 @@ function restorePreferences() {
     getItem: () => JSON.stringify(detectorSaved),
   });
   const savedPianoRollDelay = Number(detectorSaved.pianoRollDelayMs ?? saved.pianoRollDelayMs);
-  const previousPianoRollDefault = detectorSaved.settingsDefaultsVersion === 1 ? 270 : 150;
+  const previousPianoRollDefaults = detectorSaved.settingsDefaultsVersion === 2
+    ? [330, 500] : detectorSaved.settingsDefaultsVersion === 1 ? [270] : [150];
   const legacyPianoRollDefault = detectorSaved.settingsDefaultsVersion !== PitchShared.SETTINGS_DEFAULTS_VERSION
-    && Math.abs(savedPianoRollDelay - previousPianoRollDefault) < 1e-9;
+    && previousPianoRollDefaults.some((value) => Math.abs(savedPianoRollDelay - value) < 1e-9);
   state.pianoRollDelayMs = Number.isFinite(savedPianoRollDelay) && !legacyPianoRollDefault
     ? Math.round(Math.max(0, Math.min(PIANO_ROLL_DELAY_MAX_MS, savedPianoRollDelay)) / 10) * 10
     : PIANO_ROLL_DELAY_DEFAULT_MS;
@@ -3413,6 +3423,8 @@ function restorePreferences() {
   els.pitchLayerCrepe.checked = state.pitchLayers.crepe;
   applyLiveTrackerSettings();
   restoreAudioOutputPreference();
+  state.plumeSettings.timeAdvanceMs = state.audioOutputType === 'bluetooth'
+    ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
   updateDetectorSettingsUi();
   try { saveGlobalDetectorPreferences(); } catch (_) { /* Storage is optional. */ }
   const mobileLayout = matchMedia('(max-width: 960px)').matches;
@@ -3719,11 +3731,12 @@ function bindControls() {
     control.addEventListener('change', () => {
       if (!control.checked) return;
       saveAudioOutputPreference(control.value);
-      if (control.value === 'bluetooth') state.pianoRollDelayMs = BLUETOOTH_PIANO_ROLL_DELAY_MS;
+      state.plumeSettings.timeAdvanceMs = control.value === 'bluetooth'
+        ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
       updateDetectorSettingsUi(); savePreferences(); render();
       showToast(control.value === 'bluetooth'
-        ? 'Bluetooth selezionato: ritardo piano roll impostato a 500 ms.'
-        : 'Uscita non Bluetooth confermata.');
+        ? 'Bluetooth confermato: anticipo traccia vocale 550 ms.'
+        : 'Uscita non Bluetooth: anticipo traccia vocale 270 ms.');
     });
   }
   els.settingsTextScale.addEventListener('input', () => {
@@ -3791,11 +3804,12 @@ function bindControls() {
     state.lyricTextScale = UiPreferences.write(UiPreferences.DEFAULT_LYRIC_SCALE);
     state.showIntervals = false;
     state.metronomeOffsetMs = METRONOME_OFFSET_MS;
-    state.pianoRollDelayMs = state.audioOutputType === 'bluetooth' ? BLUETOOTH_PIANO_ROLL_DELAY_MS : PIANO_ROLL_DELAY_DEFAULT_MS;
+    state.pianoRollDelayMs = PIANO_ROLL_DELAY_DEFAULT_MS;
     state.detectorSettings.rmsThreshold = V1_RMS_THRESHOLD.default;
     state.detectorSettings.weakVoiceMode = false;
     Object.assign(state.detectorSettings, V1_TRACKER_DEFAULTS);
-    state.plumeSettings = { ...PitchShared.PLUME_DEFAULTS };
+    state.plumeSettings = { ...PitchShared.PLUME_DEFAULTS,
+      timeAdvanceMs: state.audioOutputType === 'bluetooth' ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS };
     state.displayPitchFilter.reset();
     applyLiveTrackerSettings(); updateDetectorSettingsUi(); savePreferences();
     render(); showToast('Impostazioni v1 ripristinate ai valori predefiniti.');

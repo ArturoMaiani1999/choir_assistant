@@ -60,6 +60,21 @@ def main() -> None:
 
             toolbar = evaluate(socket, 120, """(async () => {
               const assert = (value, message) => { if (!value) throw Error(message); };
+              assert(UI_CONFIG.mobileHistoryBeats + UI_CONFIG.mobileFutureBeats === 4,
+                'mobile piano roll displays four beats at its widest zoom');
+              assert(livePlumeSettings(0, false, 10, 0).retainHistory === true,
+                'live singing retains all visible plume history');
+              assert(livePlumeSettings(0, true, 10, 0).retainHistory === false,
+                'paused inspection continues to use review rendering');
+              assert(state.pianoRollDelayMs === 270, 'piano roll delay defaults to 270 ms');
+              assert(state.plumeSettings.timeAdvanceMs === 270, 'standard vocal trace advance defaults to 270 ms');
+              els.settingsAudioOutputBluetooth.checked = true;
+              els.settingsAudioOutputBluetooth.dispatchEvent(new Event('change'));
+              assert(state.pianoRollDelayMs === 270, 'Bluetooth does not alter the piano roll delay');
+              assert(state.plumeSettings.timeAdvanceMs === 550, 'Bluetooth applies 550 ms vocal trace advance');
+              els.settingsAudioOutputStandard.checked = true;
+              els.settingsAudioOutputStandard.dispatchEvent(new Event('change'));
+              assert(state.plumeSettings.timeAdvanceMs === 270, 'standard output restores 270 ms vocal trace advance');
               const topToggle = document.querySelector('#mobile-toolbar-toggle');
               const iconBefore = topToggle.firstElementChild.getBoundingClientRect();
               const iconCenterBefore = {x:iconBefore.left + iconBefore.width / 2, y:iconBefore.top + iconBefore.height / 2};
@@ -75,6 +90,8 @@ def main() -> None:
               const metronome = document.querySelector('.metronome-control');
               const metronomeVolume = document.querySelector('#metronome-volume');
               const toolbarRect = document.querySelector('#practice-toolbar').getBoundingClientRect();
+              const transportGroupRect = document.querySelector('.practice-transport [aria-label="Trasporto"]').getBoundingClientRect();
+              const mixerGroupRect = document.querySelector('.practice-transport .mixer-controls').getBoundingClientRect();
               const scoreHeight = document.querySelector('.score-region').getBoundingClientRect().height;
               const pitchHeight = document.querySelector('.pitch-region').getBoundingClientRect().height;
               const actionRects = [...document.querySelectorAll('.toolbar-actions > *')]
@@ -95,12 +112,15 @@ def main() -> None:
               assert(document.querySelector('#transpose-value').textContent === '±0', 'semitones remain visible');
               assert(getComputedStyle(metronome).display === 'flex', 'metronome control is visible');
               assert(metronomeVolume.getBoundingClientRect().width >= 44, 'metronome volume slider is usable');
+              assert(transportGroupRect.left >= 35, 'transport controls move inward from the left edge');
+              assert(transportGroupRect.right < mixerGroupRect.left, 'transport and metronome controls remain separated');
               assert(scoreHeight >= innerHeight * .28 && scoreHeight <= innerHeight * .32,
                 'mobile score opens at about one third of the viewport');
               assert(pitchHeight > scoreHeight, 'the piano roll receives most of the available height');
               return {toolbarHeight: toolbarRect.height, titleWidth: title.getBoundingClientRect().width,
                 partWidth: part.getBoundingClientRect().width, metronomeWidth: metronomeVolume.getBoundingClientRect().width,
-                scoreHeight, pitchHeight};
+                transportLeft: transportGroupRect.left, transportRight: transportGroupRect.right,
+                mixerLeft: mixerGroupRect.left, scoreHeight, pitchHeight};
             })()""")
             toolbar_shot = command(socket, 121, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
             (ARTIFACTS / "mobile-controls-toolbar.png").write_bytes(base64.b64decode(toolbar_shot["data"]))
