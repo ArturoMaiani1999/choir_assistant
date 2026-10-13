@@ -44,6 +44,7 @@ LIBRARY_ASSET_LAYOUT_VERSION = 15
 MUSICXML_SYNC_VERSION = 1
 DEFAULT_SCORE_TEMPO_BPM = 80.0
 SOURCE_FINGERPRINT_VERSION = 2
+SOURCE_PLAYBACK_EXPORT_VERSION = 1
 CONTINUOUS_PAGE_HEIGHT_TENTHS = 520.0
 CONTINUOUS_PAGE_MARGIN_TENTHS = 40.0
 CONTINUOUS_HORIZONTAL_PADDING_TENTHS = 900.0
@@ -79,6 +80,14 @@ def _library_sources() -> list[Path]:
 
 def _piece_id(value: str) -> str:
     return value.lower().replace("_", "-")
+
+
+def _repertoire_piece(piece_id: str) -> dict:
+    try:
+        pieces = json.loads(REPERTOIRE_CONFIG.read_text(encoding="utf-8")).get("pieces", [])
+    except (OSError, ValueError):
+        return {}
+    return next((item for item in pieces if item.get("id") == piece_id), {})
 
 
 def _xml_local_name(tag: str) -> str:
@@ -347,10 +356,6 @@ def _cached_library_metadata(metadata_path: Path, raw_hash: str, semantic_hash: 
                       and metadata.get("source_semantic_sha256") == semantic_hash)
     legacy_raw_match = metadata.get("source_semantic_sha256") is None and metadata.get("source_sha256") == raw_hash
     if not semantic_match and not legacy_raw_match:
-        return None
-    # Older exports from the source MSCZ could contain the full accompaniment
-    # in a vocal stem: MuseScore's CLI does not reliably honour mixer mute flags.
-    if metadata.get("source_playback_sounds_preserved"):
         return None
     if legacy_raw_match:
         metadata["source_fingerprint_version"] = SOURCE_FINGERPRINT_VERSION
@@ -725,10 +730,16 @@ def _browser_assets_ready(destination: Path, metadata: dict) -> bool:
 def _build_library_piece(source: Path) -> dict:
     """Build browser-only derivatives of a user-owned MSCZ source."""
     piece_id = _piece_id(source.parent.name)
+    preserve_source_sounds = bool(_repertoire_piece(piece_id).get("preserve_source_playback_sounds"))
     destination = LIBRARY_ASSETS_ROOT / piece_id
     metadata_path = destination / "metadata.json"
     raw_source_hash, semantic_source_hash = _source_hashes(source)
     cached = _cached_library_metadata(metadata_path, raw_source_hash, semantic_source_hash)
+    if cached is not None and bool(cached.get("source_playback_sounds_preserved")) != preserve_source_sounds:
+        cached = None
+    if preserve_source_sounds and cached is not None \
+            and cached.get("source_playback_export_version") != SOURCE_PLAYBACK_EXPORT_VERSION:
+        cached = None
     if cached is not None and _browser_assets_ready(destination, cached):
         return cached
     with _library_lock:
@@ -736,6 +747,11 @@ def _build_library_piece(source: Path) -> dict:
         # re-read the source in case MuseScore saved it during that interval.
         raw_source_hash, semantic_source_hash = _source_hashes(source)
         cached = _cached_library_metadata(metadata_path, raw_source_hash, semantic_source_hash)
+        if cached is not None and bool(cached.get("source_playback_sounds_preserved")) != preserve_source_sounds:
+            cached = None
+        if preserve_source_sounds and cached is not None \
+                and cached.get("source_playback_export_version") != SOURCE_PLAYBACK_EXPORT_VERSION:
+            cached = None
         if cached is not None and _browser_assets_ready(destination, cached):
             return cached
         destination.mkdir(parents=True, exist_ok=True)
@@ -781,9 +797,21 @@ def _build_library_piece(source: Path) -> dict:
         score_json = destination / "score.json"
         score_json.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
         vocal_parts = [part for part in payload["parts"] if not _is_accompaniment(part["name"])]
-        _set_choir_aahs(musicxml, {part["id"] for part in vocal_parts})
-        _set_organ_fast_strings(musicxml)
-        _export_audio_stem(musicxml, score_audio, executable)
+        source_part_ids = _source_part_ids(source)
+        payload_part_ids = [part["id"] for part in payload["parts"]]
+        source_part_by_payload_id = dict(zip(payload_part_ids, source_part_ids))
+        if preserve_source_sounds and len(source_part_by_payload_id) != len(payload_part_ids):
+            raise RuntimeError("Impossibile associare le parti MusicXML alle tracce del mixer MuseScore")
+        if preserve_source_sounds:
+            exported = _export_source_audio_subset(
+                source, score_audio, executable, set(source_part_ids),
+            )
+            if not exported:
+                raise RuntimeError("Mixer MuseScore senza tracce esportabili")
+        else:
+            _set_choir_aahs(musicxml, {part["id"] for part in vocal_parts})
+            _set_organ_fast_strings(musicxml)
+            _export_audio_stem(musicxml, score_audio, executable)
         complete_root = ET.parse(musicxml).getroot()
         tempo_directions = _tempo_directions(complete_root)
         part_pages = {
@@ -799,7 +827,15 @@ def _build_library_piece(source: Path) -> dict:
         voice_stems = {}
         for part in vocal_parts:
             filename = f"voice-{part['id']}.mp3"
-            _export_audio_stem(destination / f"part-{part['id']}.musicxml", destination / filename, executable)
+            if preserve_source_sounds:
+                exported = _export_source_audio_subset(
+                    source, destination / filename, executable,
+                    {source_part_by_payload_id[part["id"]]},
+                )
+                if not exported:
+                    raise RuntimeError(f"Mixer MuseScore senza traccia per {part['name']}")
+            else:
+                _export_audio_stem(destination / f"part-{part['id']}.musicxml", destination / filename, executable)
             voice_stems[part["id"]] = filename
         vocal_ids = {part["id"] for part in vocal_parts}
         tree = ET.parse(musicxml)
@@ -818,7 +854,21 @@ def _build_library_piece(source: Path) -> dict:
             accompaniment_source = destination / "accompaniment.musicxml"
             tree.write(accompaniment_source, encoding="utf-8", xml_declaration=True)
             accompaniment_file = "accompaniment.mp3"
-            _export_audio_stem(accompaniment_source, destination / accompaniment_file, executable)
+            if preserve_source_sounds:
+                accompaniment_source_ids = {
+                    source_part_by_payload_id[part["id"]]
+                    for part in payload["parts"] if part["id"] not in vocal_ids
+                }
+                exported = _export_source_audio_subset(
+                    source, destination / accompaniment_file, executable, accompaniment_source_ids,
+                )
+                if not exported:
+                    raise RuntimeError("Mixer MuseScore senza traccia di accompagnamento")
+            else:
+                _export_audio_stem(accompaniment_source, destination / accompaniment_file, executable)
+        if preserve_source_sounds and not _source_audio_has_distinct_stems(
+                destination, voice_stems, accompaniment_file):
+            raise RuntimeError("Le tracce esportate dal mixer MuseScore non risultano isolate")
         metadata = {
             "layout_version": LIBRARY_ASSET_LAYOUT_VERSION,
             "piece_id": piece_id,
@@ -834,7 +884,10 @@ def _build_library_piece(source: Path) -> dict:
             "continuous_part_scores": continuous_part_scores,
             "voice_stems": voice_stems,
             "accompaniment_file": accompaniment_file,
-            "source_playback_sounds_preserved": False,
+            "source_playback_sounds_preserved": preserve_source_sounds,
+            "source_playback_export_version": (
+                SOURCE_PLAYBACK_EXPORT_VERSION if preserve_source_sounds else None
+            ),
         }
         _write_json_atomic(metadata_path, metadata)
         return metadata

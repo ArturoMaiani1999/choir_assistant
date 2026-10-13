@@ -3,9 +3,13 @@
 from pathlib import Path
 from tempfile import TemporaryDirectory
 import unittest
+import json
+import zipfile
 from xml.etree import ElementTree as ET
 
-from scripts.serve_frontend import _set_choir_aahs, _set_organ_fast_strings, _source_audio_has_distinct_stems
+from scripts.serve_frontend import (_set_choir_aahs, _set_organ_fast_strings,
+                                    _source_audio_has_distinct_stems,
+                                    _write_audio_subset_source)
 
 
 class SourceAudioStemTests(unittest.TestCase):
@@ -67,6 +71,31 @@ class SourceAudioStemTests(unittest.TestCase):
             self.assertTrue(_source_audio_has_distinct_stems(
                 root, {"P1": "voice-P1.mp3", "P2": "voice-P2.mp3"}, "accompaniment.mp3"
             ))
+
+    def test_source_mixer_subset_preserves_sound_and_mutes_other_tracks(self):
+        with TemporaryDirectory() as directory:
+            root = Path(directory)
+            source = root / "source.mscz"
+            target = root / "alto.mscz"
+            settings = {"tracks": [
+                {"partId": "8", "in": {"resourceMeta": {"id": "103"}},
+                 "soloMuteState": {"mute": False, "solo": False}},
+                {"partId": "2", "in": {"resourceMeta": {"id": "105"}},
+                 "soloMuteState": {"mute": False, "solo": False}},
+            ]}
+            with zipfile.ZipFile(source, "w") as archive:
+                archive.writestr("audiosettings.json", json.dumps(settings))
+                archive.writestr("score.mscx", "<museScore/>")
+
+            self.assertTrue(_write_audio_subset_source(source, target, {"2"}))
+
+            with zipfile.ZipFile(target) as archive:
+                isolated = json.loads(archive.read("audiosettings.json"))
+                tracks = {track["partId"]: track for track in isolated["tracks"]}
+                self.assertEqual(tracks["2"]["in"]["resourceMeta"]["id"], "105")
+                self.assertFalse(tracks["2"]["soloMuteState"]["mute"])
+                self.assertTrue(tracks["8"]["soloMuteState"]["mute"])
+                self.assertEqual(archive.read("score.mscx"), b"<museScore/>")
 
 
 if __name__ == "__main__":

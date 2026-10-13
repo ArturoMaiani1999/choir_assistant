@@ -282,6 +282,18 @@ class LocalBundlePreparationTests(unittest.TestCase):
 
             self.assertEqual(listing[0]["title"], "Titolo pubblico")
 
+    def test_repertoire_piece_exposes_source_sound_policy(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "repertoire.json"
+            config.write_text(json.dumps({"pieces": [{
+                "id": "custom-sounds", "preserve_source_playback_sounds": True,
+            }]}), encoding="utf-8")
+
+            with mock.patch.object(serve_frontend, "REPERTOIRE_CONFIG", config):
+                piece = serve_frontend._repertoire_piece("custom-sounds")
+
+            self.assertTrue(piece["preserve_source_playback_sounds"])
+
     def test_runtime_bundle_is_precomputed_on_disk(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             assets = Path(directory)

@@ -73,7 +73,8 @@
     },
     {
       "id": "qui-credit-in-me-non-sitiet-umquam",
-      "display_title": "qui-credit-in-me-non-sitiet-umquam",
+      "display_title": "Qui credit in me non sitiet umquam",
+      "preserve_source_playback_sounds": true,
       "publication_approved": true,
       "rights_note": "Mio brano."
     }
