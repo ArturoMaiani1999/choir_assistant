@@ -11,8 +11,8 @@ Prezzi, limiti e nomi dei menu di Cloudflare cambiano: dove indicato "verificare
 | Fase | Stato |
 |---|---|
 | 0 · Diritti e repertorio autorizzato | ✅ Prima release limitata ad `ave-verum`: Mozart pubblico dominio, trascrizione SATB CC BY 4.0 attribuita |
-| 1 · Build statica privata | ✅ Build pulita `20261013-140209-9380933cd44d`: 1.975 file, 13 brani |
-| 2 · Account/dominio/Workers | ✅ Versione `06d6229b-ebdf-44dd-a68a-a27822e058b3` attiva su `choir-assistant.choir-assistant.workers.dev` |
+| 1 · Build statica privata | ✅ Build pulita `20261013-145107-ef05531ed3a5`: 2.027 file, 13 brani; SVG continui inclusi |
+| 2 · Account/dominio/Workers | ✅ Versione `2424e583-06ea-4a5e-90f7-77c0d42efbf3` attiva su `choir-assistant.choir-assistant.workers.dev` |
 | 3 · Header di sicurezza | ✅ Generati automaticamente dalla build |
 | 4 · Cloudflare Access OTP | ✅ `All traffic` protetto; procedura allowlist email e PIN configurata e documentata |
 | 5–6 · Collaudo e onboarding | 🔶 Test anonimo root/catalogo/bundle superato il 2026-10-13; completare test autenticato e matrice dispositivi |
