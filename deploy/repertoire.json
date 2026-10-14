@@ -15,6 +15,11 @@
       "publication_approved": true,
       "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
     },
+            {
+      "id": "chi-ci-separera",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
+    },
     {
       "id": "dell-aurora-tu-sorgi-piu-bella",
       "publication_approved": true,
@@ -30,6 +35,11 @@
       "publication_approved": true,
       "rights_note": "Approvato da Molfino. Accompagnamento adattato nel progetto per lo studio personale."
     },
+        {
+      "id": "pane-di-vita-nuova",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
+    },
     {
       "id": "animachristi-strofa-monodico",
       "display_title": "Anima Christi",
@@ -42,9 +52,19 @@
       "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
     },
     {
+      "id": "miserere-mei",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
       "id": "ti-cerco-signore-mia-speranza",
       "publication_approved": true,
       "rights_note": "Approvato da Massimillo. Accompagnamento adattato nel progetto per lo studio personale."
+    },
+    {
+      "id": "rallegriamoci-ed-esultiamo",
+      "publication_approved": true,
+      "rights_note": "Approvato da Frisina. Accompagnamento adattato nel progetto per lo studio personale."
     },
     {
       "id": "guarda-signore-i-doni",

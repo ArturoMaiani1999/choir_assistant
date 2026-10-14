@@ -104,7 +104,8 @@ approved and `rights_note` contains a real, verifiable rights reference:
 }
 ```
 
-Commit all intended release changes and confirm that the worktree is clean:
+Per una release condivisa è preferibile committare le modifiche e confermare
+che il working tree sia pulito:
 
 ```powershell
 git status --short
@@ -113,8 +114,9 @@ git commit -m "Add $pieceId to private repertoire"
 git status --porcelain
 ```
 
-The final command must print nothing. Do not deploy a build produced with
-`--allow-dirty`; that option exists only for local diagnostics.
+Per l'istanza personale è consentito pubblicare anche dal working tree non
+pulito. In questo caso la versione e il manifest di deploy vengono marcati con
+il suffisso `-dirty`, così lo stato della release rimane riconoscibile.
 
 Build and serve the release candidate locally:
 

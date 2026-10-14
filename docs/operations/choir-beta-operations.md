@@ -44,7 +44,8 @@ After the first beta transition:
 - a change reaches `main` only after review and the relevant checks pass;
 - each production deployment receives a tag such as `beta-2026.10.03.1`;
 - the current long-lived `deploy` branch is reconciled into `main` and retired;
-- releases are never built from an uncommitted or untracked working tree.
+- shared beta releases use a clean working tree; personal releases may be
+  marked `-dirty` when local changes are intentionally included.
 
 Large features stay off production until complete. If an experiment must be
 visible to pilot users, expose it only in staging; introduce a production

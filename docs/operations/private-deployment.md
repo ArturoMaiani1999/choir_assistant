@@ -29,8 +29,9 @@ sviluppo locale -> dist/ locale -> staging protetto -> produzione protetta
 
 1. Sviluppare e diagnosticare con `python scripts/serve_frontend.py`.
 2. Approvare diritti e contenuto di ogni voce in `deploy/repertoire.json`.
-3. Da un commit con working tree pulito, eseguire una sola volta
-   `python scripts/build_dist.py`. `--allow-dirty` serve solo a verifiche locali
+3. Preferibilmente da un commit con working tree pulito, eseguire una sola volta
+   `python scripts/build_dist.py`. Per l'istanza personale sono ammesse anche
+   build non committate, identificate dal suffisso `-dirty`
    e produce una versione marcata `-dirty`, che non va caricata.
 4. Provare quella build con
    `npx wrangler dev --assets dist --local-protocol=https`.

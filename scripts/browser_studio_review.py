@@ -38,11 +38,11 @@ def main():
                 for width, height in [(1440, 900), (1366, 768), (390, 844)]:
                     command(socket, 2, 'Emulation.setDeviceMetricsOverride', {'width': width, 'height': height, 'deviceScaleFactor': 1, 'mobile': False})
                     for name, path, action, selector in [
-                        ('lab', '/voice-lab.html', "document.querySelector('#lab-settings-close').click()", '#lab-record'),
-                        ('listening', '/voice-lab.html', "document.querySelector('#lab-settings-close').click();document.querySelector('[data-activity=ear]').click()", '#lab-answer'),
-                        ('answer', '/voice-lab.html', "document.querySelector('#lab-settings-close').click();document.querySelector('[data-activity=ear]').click();document.querySelector('[data-answer]').click()", '#lab-next'),
+                        ('warmup', '/voice-lab.html', "document.querySelector('#lab-settings-close')?.click()", '#warmup-start'),
+                        ('inner-ear', '/voice-lab.html', "document.querySelector('#lab-settings-close')?.click();document.querySelector('[data-mode=inner-ear]')?.click()", '#warmup-start'),
+                        ('arpeggios', '/voice-lab.html', "document.querySelector('#lab-settings-close')?.click();document.querySelector('[data-family=arpeggio]')?.click()", '#warmup-start'),
+                        ('degrees', '/voice-lab.html', "document.querySelector('#lab-settings-close')?.click();document.querySelector('[data-family=degree]')?.click();document.querySelector('[data-degree-level=advanced]')?.click()", '#warmup-start'),
                         ('practice', '/index.html?piece=o-sacrum', "document.querySelectorAll('dialog[open]').forEach(d=>d.close())", '#toggle-playback'),
-                        ('library', '/index.html?piece=o-sacrum', "document.querySelector('#library').click()", '#library-open'),
                     ]:
                         command(socket, 3, 'Page.navigate', {'url': BASE + path})
                         time.sleep(1.5)

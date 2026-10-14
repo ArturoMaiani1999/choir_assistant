@@ -1,54 +1,62 @@
-"""Rhythmic shape of the MuseScore source, without generating the artifact bank."""
+"""Validate the Muse Choir MusicXML source without invoking MuseScore."""
 from xml.etree import ElementTree as ET
-from pathlib import Path
-from tempfile import TemporaryDirectory
-from zipfile import ZipFile
 
-from build_voice_lab_assets import compact_final_system, score_xml, sustained_choir_xml, sustained_strings_xml
+from build_voice_lab_assets import (CHOIR_PRESETS, SCALE_OFFSETS, exercise_score_xml, guide_phrase_xml,
+                                    pad_xml, scale_phrase_xml, sustained_choir_xml)
 
 
 def measures(xml: str):
     return ET.fromstring(xml).findall("./part/measure")
 
 
-note = measures(score_xml("", [(60, 8)], leading_rest=True))
-assert len(note) == 2
-assert note[0].find("./note/rest") is not None
-assert note[0].findtext("./note/duration") == "8"
-assert note[1].find("./note/rest") is None
-assert note[1].findtext("./note/duration") == "8"
-assert [measure.attrib["number"] for measure in note] == ["1", "2"]
+for role, preset in CHOIR_PRESETS.items():
+    choir = measures(sustained_choir_xml(role, preset["anchors"][0]))
+    assert len(choir) == 15 and all(measure.findtext("./note/duration") == "8" for measure in choir)
+    assert choir[0].find('./note/tie[@type="start"]') is not None
+    assert choir[-1].find('./note/tie[@type="stop"]') is not None
 
-interval = measures(score_xml("", [(51, 8), (53, 8)], leading_rest=True))
-assert len(interval) == 3
-assert interval[0].find("./note/rest") is not None
-assert [measure.findtext("./note/duration") for measure in interval] == ["8", "8", "8"]
-assert all(measure.find("./note/pitch") is not None for measure in interval[1:])
-assert [measure.attrib["number"] for measure in interval] == ["1", "2", "3"]
+phrase = measures(scale_phrase_xml("tenor", 53, 120))
+phrase_notes = phrase[0].findall("./note")
+assert len(phrase_notes) == len(SCALE_OFFSETS)
+assert [int(note.findtext("./pitch/octave")) * 12 + {"C": 0, "D": 2, "E": 4, "F": 5,
+        "G": 7, "A": 9, "B": 11}[note.findtext("./pitch/step")] +
+        int(note.findtext("./pitch/alter") or 0) + 12 for note in phrase_notes] == [53 + value for value in SCALE_OFFSETS]
+assert phrase_notes[0].find('./notations/slur[@type="start"]') is not None
+assert phrase_notes[-1].find('./notations/slur[@type="stop"]') is not None
+assert phrase[1].find("./note/rest") is not None
 
-# Aural-recognition scores must not acquire a singing count-in.
-ear = measures(score_xml("", [(51, 8), (53, 8)], harmonic=True))
-assert len(ear) == 1 and ear[0].find("./note/rest") is None
-strings_xml = ET.fromstring(score_xml("", [(48, 4)], instrument_name="Archi",
-    instrument_sound="strings.group", midi_program=49, tempo=96, dynamics=72))
-assert strings_xml.findtext("./part-list/score-part/score-instrument/instrument-sound") == "strings.group"
-assert strings_xml.findtext("./part-list/score-part/midi-instrument/midi-program") == "49"
-assert strings_xml.find("./part/measure/direction/direction-type/dynamics/mf") is not None
-choir = measures(sustained_choir_xml("tenor", 56))
-assert len(choir) == 15 and all(measure.findtext("./note/duration") == "8" for measure in choir)
-assert choir[0].find('./note/tie[@type="start"]') is not None
-assert choir[-1].find('./note/tie[@type="stop"]') is not None
-strings_long = measures(sustained_strings_xml(48))
-assert len(strings_long) == 15 and strings_long[0].find('./note/tie[@type="start"]') is not None
-assert strings_long[-1].find('./note/tie[@type="stop"]') is not None
-with TemporaryDirectory(prefix="choir-score-style-") as folder:
-    archive = Path(folder) / "test.mscz"
-    with ZipFile(archive, "w") as output:
-        output.writestr("score_style.mss", "<lastSystemFillLimit>0.3</lastSystemFillLimit>")
-        output.writestr("score.mscx", "<Score/>")
-    assert compact_final_system(archive)
-    assert not compact_final_system(archive), "the style patch must be idempotent"
-    with ZipFile(archive) as updated:
-        assert b"<lastSystemFillLimit>1</lastSystemFillLimit>" in updated.read("score_style.mss")
-        assert updated.read("score.mscx") == b"<Score/>"
-print("voice_lab_assets: preparatory rest and two full interval measures passed")
+pad = measures(pad_xml(5))
+assert len(pad) == 6 and all(len(measure.findall("./note")) == 4 for measure in pad)
+assert all(note.find('./tie[@type="start"]') is not None for note in pad[0].findall("./note"))
+assert all(note.find('./tie[@type="stop"]') is not None for note in pad[-1].findall("./note"))
+
+minor_pad = measures(pad_xml(5, "minor"))
+minor_pad_midis = [int(note.findtext("./pitch/octave")) * 12 + {"C": 0, "D": 2, "E": 4, "F": 5,
+                    "G": 7, "A": 9, "B": 11}[note.findtext("./pitch/step")] +
+                    int(note.findtext("./pitch/alter") or 0) + 12 for note in minor_pad[0].findall("./note")]
+assert minor_pad_midis == [41, 48, 53, 56]
+
+arpeggio = measures(guide_phrase_xml("tenor", "triad-minor-second", 41, 80))
+arpeggio_notes = arpeggio[0].findall("./note")
+arpeggio_midis = [int(note.findtext("./pitch/octave")) * 12 + {"C": 0, "D": 2, "E": 4, "F": 5,
+                   "G": 7, "A": 9, "B": 11}[note.findtext("./pitch/step")] +
+                   int(note.findtext("./pitch/alter") or 0) + 12 for note in arpeggio_notes]
+assert arpeggio_midis == [48, 53, 56, 53, 48]
+assert arpeggio[0].findtext("./attributes/time/beats") == "5"
+
+engraved = measures(exercise_score_xml("tenor", "scale-major", 54))
+engraved_notes = [note for measure in engraved for note in measure.findall("./note") if note.find("./pitch") is not None]
+assert len(engraved) == 3 and len(engraved_notes) == 9
+assert engraved[0].findtext("./attributes/clef/clef-octave-change") == "-1"
+assert engraved[0].findtext("./attributes/key/fifths") == "6"
+assert engraved_notes[1].findtext("./pitch/step") == "G" and engraved_notes[1].findtext("./pitch/alter") == "1"
+assert [note.findtext("./lyric/text") for note in engraved_notes] == ["1", "2", "3", "4", "5", "4", "3", "2", "1"]
+assert engraved[-1].find("./note/rest") is not None
+
+major_score = measures(exercise_score_xml("tenor", "triad-major-root", 53))
+minor_score = measures(exercise_score_xml("tenor", "triad-minor-root", 53))
+assert [note.findtext("./lyric/text") for measure in major_score for note in measure.findall("./note")
+        if note.find("./pitch") is not None] == ["1", "3M", "5", "3M", "1"]
+assert [note.findtext("./lyric/text") for measure in minor_score for note in measure.findall("./note")
+        if note.find("./pitch") is not None] == ["1", "3m", "5", "3m", "1"]
+print("voice_lab_assets: Muse Choir sources passed")

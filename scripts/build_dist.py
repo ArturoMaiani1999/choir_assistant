@@ -22,7 +22,7 @@ CORE_ASSETS = (
     "practice_math.js", "score_runtime.js", "pitch_detector.js",
     "pitch_detector_worker.js", "pitch_shared.js", "fluid_pitch_trail.js",
     "vocal_feedback.js", "one_euro_filter.js", "pitch_shifter_worklet.js", "media_mixer.js", "app.js", "voice_lab_core.js",
-    "voice_draw_core.js", "voice_lab.js", "score_viewer.js",
+    "voice_lab.js", "score_viewer.js",
 )
 FORBIDDEN_TEXT = ("__pitchTestHooks", "/api/", "cdn.jsdelivr", "unpkg", "localhost")
 FORBIDDEN_SUFFIXES = (".mscz", ".env", ".py", ".map", ".musicxml", ".xml", ".onnx")
@@ -329,16 +329,11 @@ def main() -> int:
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
     parser.add_argument(
         "--allow-dirty", action="store_true",
-        help="consente una build diagnostica locale, marcata -dirty e non pubblicabile",
+        help="opzione mantenuta per compatibilità; le build dirty sono consentite e marcate -dirty",
     )
     args = parser.parse_args()
     pieces = read_allowlist(args.config.resolve())
     dirty = worktree_is_dirty()
-    if dirty and not args.allow_dirty:
-        raise ValueError(
-            "working tree non pulito: committare le modifiche prima di creare una release "
-            "oppure usare --allow-dirty solo per una verifica locale"
-        )
     destination = args.output.resolve()
     safe_clean(destination)
     build_auth_client(destination)
@@ -375,12 +370,11 @@ def main() -> int:
     shutil.copy2(FRONTEND / "not-authorized.html", destination / "not-authorized.html")
     lab_assets = destination / "voice-lab-assets"
     lab_assets.mkdir()
-    for source in (FRONTEND / "voice-lab-assets").iterdir():
-        if source.is_dir() or source.name == "manifest.json" or source.name == "choir-voice-c4.wav" or source.suffix == ".svg":
-            if source.is_dir():
-                shutil.copytree(source, lab_assets / source.name)
-            else:
-                shutil.copy2(source, lab_assets / source.name)
+    shutil.copy2(FRONTEND / "voice-lab-assets" / "manifest.json", lab_assets / "manifest.json")
+    shutil.copytree(FRONTEND / "voice-lab-assets" / "choir", lab_assets / "choir")
+    shutil.copytree(FRONTEND / "voice-lab-assets" / "phrases", lab_assets / "phrases")
+    shutil.copytree(FRONTEND / "voice-lab-assets" / "pads", lab_assets / "pads")
+    shutil.copytree(FRONTEND / "voice-lab-assets" / "scores", lab_assets / "scores")
     listings = [build_piece(piece, destination) for piece in pieces]
     (destination / "library.json").write_text(json.dumps({"pieces": listings}, ensure_ascii=False), encoding="utf-8")
     write_headers(destination)

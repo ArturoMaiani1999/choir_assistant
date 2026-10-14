@@ -19,14 +19,19 @@ take precedence over anything under `archive/`.
 - [Performance timeline](architecture/performance-timeline.md) — written score
   versus performed occurrences.
 
+- [Shared performances and scoped authorization](architecture/shared-performances-rbac.md) —
+  singer best-score images, group-scoped RBAC, private storage and update
+  protocol.
+
 ## Product
 
 - [Practice experience](product/practice-experience.md) — canonical UX and
   temporal behavior.
 - [Session states](product/session-states.md) — microphone, playback and
   interruption state model.
-- [Voice Lab learning path](product/voice-lab-learning-path.md) — curriculum,
-  adaptive sessions and early-completion criteria for vocal exercises.
+- [Voice Lab warm-up redesign](product/voice-lab-warmup-redesign-plan.md) —
+  current product and technical contract for scales, arpeggios and inner-ear
+  work.
 
 ## Engineering
 

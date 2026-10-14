@@ -120,7 +120,8 @@ restored deliberately if the wrong complete list was supplied.
 
 ## 6. Build and stage
 
-The repository must be clean because the release builder rejects dirty builds.
+A clean repository remains preferable for shared releases. The personal
+instance may also publish a build marked with the `-dirty` suffix.
 
 ```powershell
 npm ci

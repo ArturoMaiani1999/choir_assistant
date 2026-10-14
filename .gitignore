@@ -2,6 +2,11 @@ FlutterPitchGame-main/*
 data/
 __pycache__/
 *.py[cod]
+
+# MuseScore crash/autosave backups are local recovery files, not project sources.
+.mscbackup/
+*.mscz~
+
 automate_mscz/.work/
 automate_mscz/job-state.json
 automate_mscz/output/
@@ -27,10 +32,9 @@ node_modules/
 authorized-members*.csv
 authorized-members*.txt
 
-# Rebuildable Voice Lab authoring cache. The browser-ready SVG files under
-# frontend/voice-lab-assets remain versioned so a static build needs no
-# MuseScore installation.
-/sheets/voice-lab/intervals/
-/sheets/voice-lab/notes/
-/sheets/voice-lab/strings/
+# Rebuildable Voice Lab Muse Sounds authoring cache. Browser-ready FLAC files
+# remain local build inputs so a static release needs no MuseScore installation.
 /sheets/voice-lab/choir/
+/sheets/voice-lab/phrases/
+/sheets/voice-lab/pads/
+/sheets/voice-lab/scores/

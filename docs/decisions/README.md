@@ -14,3 +14,4 @@ superseding ADR.
 | [0002](0002-neural-pitch-diagnostics-only.md) | Neural pitch models remain local diagnostics | Accepted |
 | [0003](0003-workers-static-delivery.md) | Private delivery through Workers Static Assets and Access | Accepted |
 | [0004](0004-consumer-authentication.md) | Consumer identity through Clerk and authorization through D1 | Proposed; implemented, pending cutover |
+| [0005](0005-scoped-performance-sharing.md) | Group-scoped sharing of singer best-performance images | Proposed; implementation pending |

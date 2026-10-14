@@ -11,5 +11,5 @@
 
    & "C:\Program Files\MuseScore 4\bin\MuseScore4.exe" `
   -f `
-  -o "sheets\celebra-il-signore-terra-tutta\celebra-il-signore-terra-tutta.mscz" `
-  "sheets\celebra-il-signore-terra-tutta\celebra-il-signore-terra-tutta.xml"
+  -o "sheets\rallegriamoci-ed-esultiamo\rallegriamoci-ed-esultiamo.mscz" `
+  "sheets\rallegriamoci-ed-esultiamo\rallegriamoci-ed-esultiamo.mxl"

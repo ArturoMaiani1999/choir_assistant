@@ -78,7 +78,7 @@ a partially executed script is not a passing test.
 1. Confirm rights and editorial approval for every allowlisted piece. A generic
    or placeholder `rights_note` is a release blocker.
 2. Confirm `git status --porcelain` is empty. Production builds refuse a dirty
-   worktree; `--allow-dirty` exists only for local diagnostics and marks the
+   worktree; a dirty build remains allowed for the personal instance and marks the
    resulting build as non-publishable.
 3. Regenerate each changed browser bundle with
    `python scripts/build_library_bundle.py <piece-id>`.

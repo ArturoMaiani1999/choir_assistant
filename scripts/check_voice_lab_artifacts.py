@@ -1,4 +1,4 @@
-"""Fail when generated Voice Lab assets drift or grow beyond reviewed budgets."""
+"""Fail when the Muse Choir sample bank drifts or exceeds reviewed budgets."""
 from __future__ import annotations
 
 import json
@@ -10,9 +10,8 @@ SOURCE = ROOT / "sheets" / "voice-lab"
 PUBLIC = ROOT / "frontend" / "voice-lab-assets"
 MANIFEST = PUBLIC / "manifest.json"
 
-MAX_AUTHORING_BYTES = 40 * 1024 * 1024
-MAX_INTERVAL_SVG_BYTES = 8 * 1024 * 1024
-MAX_PUBLIC_BYTES = 64 * 1024 * 1024
+MAX_AUTHORING_BYTES = 32 * 1024 * 1024
+MAX_PUBLIC_BYTES = 72 * 1024 * 1024
 ALLOWED_AUTHORING_SUFFIXES = {".musicxml", ".mscz"}
 
 
@@ -20,24 +19,16 @@ def total_bytes(files: list[Path]) -> int:
     return sum(path.stat().st_size for path in files)
 
 
-def expected_pairs(low: int, high: int, distances: set[int]) -> tuple[set[tuple[int, int]], set[tuple[int, int]]]:
-    melodic = {(first, second) for first in range(low, high + 1) for second in range(low, high + 1)
-               if abs(second - first) in distances}
-    harmonic = {tuple(sorted(pair)) for pair in melodic}
-    return melodic, harmonic
-
-
 def require_git_ignores() -> None:
-    sentinels = [SOURCE / "intervals" / "generated.mscz", SOURCE / "notes" / "generated.musicxml",
-                 SOURCE / "strings" / "generated.mscz"]
-    sentinels.append(SOURCE / "choir" / "generated.mscz")
-    result = subprocess.run(["git", "check-ignore", *map(str, sentinels)], cwd=ROOT, capture_output=True, text=True)
-    if result.returncode or len(result.stdout.splitlines()) != len(sentinels):
-        raise AssertionError("Le cache di authoring Voice Lab devono restare in .gitignore")
-    tracked = subprocess.run(["git", "ls-files", "sheets/voice-lab/intervals", "sheets/voice-lab/notes", "sheets/voice-lab/strings", "sheets/voice-lab/choir"],
-                             cwd=ROOT, check=True, capture_output=True, text=True).stdout.strip()
-    if tracked:
-        raise AssertionError(f"Artifact Voice Lab ricostruibili presenti nell'indice Git: {tracked.splitlines()[0]}")
+    for directory in ("choir", "phrases", "pads", "scores"):
+        sentinel = SOURCE / directory / "generated.mscz"
+        result = subprocess.run(["git", "check-ignore", str(sentinel)], cwd=ROOT, capture_output=True, text=True)
+        if result.returncode:
+            raise AssertionError(f"La cache audio {directory} deve restare in .gitignore")
+        tracked = subprocess.run(["git", "ls-files", f"sheets/voice-lab/{directory}"], cwd=ROOT,
+                                 check=True, capture_output=True, text=True).stdout.strip()
+        if tracked:
+            raise AssertionError(f"Artifact audio ricostruibili presenti nell'indice Git: {tracked.splitlines()[0]}")
 
 
 def audit_voice_lab_artifacts(*, require_public: bool = True) -> dict[str, int]:
@@ -46,61 +37,56 @@ def audit_voice_lab_artifacts(*, require_public: bool = True) -> dict[str, int]:
             raise AssertionError("Manifest Voice Lab assente: eseguire build_voice_lab_assets.py")
         return {}
     manifest = json.loads(MANIFEST.read_text(encoding="utf-8"))
-    interval_config = manifest.get("intervalScores", {})
-    note_config = manifest.get("noteScores", {})
-    low, high = int(note_config.get("lowMidi", 36)), int(note_config.get("highMidi", 84))
-    distances = set(map(int, interval_config.get("distances", [])))
-    melodic, harmonic = expected_pairs(low, high, distances)
-    expected_intervals = len(melodic) + len(harmonic)
-    expected_notes = high - low + 1
-    string_config = manifest.get("stringSamples", {})
-    string_low, string_high = int(string_config.get("lowMidi", 36)), int(string_config.get("highMidi", 60))
+    if manifest.get("schemaVersion") != 3:
+        raise AssertionError("Il manifest Voice Lab deve usare schemaVersion 3")
     choir_config = manifest.get("choirSamples", {})
-    expected_choir = sum(len(role.get("anchors", [])) for role in choir_config.get("roles", {}).values())
-
-    interval_svgs = list((PUBLIC / "intervals").glob("*.svg"))
-    note_svgs = list((PUBLIC / "notes").glob("*.svg"))
-    string_samples = list((PUBLIC / "strings").glob("*.ogg"))
-    choir_samples = list((PUBLIC / "choir").glob("*.flac"))
-    if require_public and len(interval_svgs) != expected_intervals:
-        raise AssertionError(f"SVG intervalli: {len(interval_svgs)}, attesi {expected_intervals}")
-    if require_public and len(note_svgs) != expected_notes:
-        raise AssertionError(f"SVG note: {len(note_svgs)}, attesi {expected_notes}")
-    if require_public and len(string_samples) != string_high - string_low + 1:
-        raise AssertionError(f"Campioni archi: {len(string_samples)}, attesi {string_high - string_low + 1}")
-    if require_public and len(choir_samples) != expected_choir:
-        raise AssertionError(f"Campioni Muse Choir: {len(choir_samples)}, attesi {expected_choir}")
-    expected_names = {f"melodic-{first}-{second}-1.svg" for first, second in melodic}
-    expected_names |= {f"harmonic-{first}-{second}-1.svg" for first, second in harmonic}
-    if require_public and {path.name for path in interval_svgs} != expected_names:
-        raise AssertionError("La banca SVG contiene coppie mancanti o inattese")
-
-    authoring_files = [path for folder in (SOURCE / "intervals", SOURCE / "notes", SOURCE / "strings", SOURCE / "choir") if folder.is_dir()
-                       for path in folder.iterdir() if path.is_file()]
+    roles = choir_config.get("roles", {})
+    expected_names = {f"{role}-{midi}.flac" for role, config in roles.items() for midi in config.get("anchors", [])}
+    choir_dir = PUBLIC / "choir"
+    choir_samples = list(choir_dir.glob("*.flac")) if choir_dir.is_dir() else []
+    if require_public and {path.name for path in choir_samples} != expected_names:
+        missing = sorted(expected_names - {path.name for path in choir_samples})
+        raise AssertionError(f"Banca Muse Choir incompleta o inattesa; primo mancante: {missing[0] if missing else 'nessuno'}")
+    phrase_items = manifest.get("guidePhrases", {}).get("items", [])
+    pad_items = manifest.get("pads", {}).get("items", [])
+    phrase_dir, pad_dir = PUBLIC / "phrases", PUBLIC / "pads"
+    phrase_files = list(phrase_dir.glob("*.flac")) if phrase_dir.is_dir() else []
+    pad_files = list(pad_dir.glob("*.flac")) if pad_dir.is_dir() else []
+    expected_phrases = {Path(item["file"]).name for item in phrase_items}
+    expected_pads = {Path(item["file"]).name for item in pad_items}
+    if require_public and {path.name for path in phrase_files} != expected_phrases:
+        raise AssertionError("Banca frasi Muse Choir incompleta o inattesa")
+    if require_public and {path.name for path in pad_files} != expected_pads:
+        raise AssertionError("Banca pad Voice Lab incompleta o inattesa")
+    score_items = manifest.get("scoreSvgs", {}).get("items", [])
+    score_dir = PUBLIC / "scores"
+    score_files = list(score_dir.glob("*.svg")) if score_dir.is_dir() else []
+    expected_scores = {Path(item["file"]).name for item in score_items}
+    if require_public and {path.name for path in score_files} != expected_scores:
+        raise AssertionError("Banca spartiti MuseScore Voice Lab incompleta o inattesa")
+    authoring_files = []
+    for directory in (SOURCE / "choir", SOURCE / "phrases", SOURCE / "pads", SOURCE / "scores"):
+        if directory.is_dir():
+            authoring_files.extend(path for path in directory.iterdir() if path.is_file())
     unexpected = [path for path in authoring_files if path.suffix.lower() not in ALLOWED_AUTHORING_SUFFIXES]
     if unexpected:
         raise AssertionError(f"Tipo di artifact inatteso: {unexpected[0].relative_to(ROOT)}")
-    expected_authoring = 2 * (expected_intervals + expected_notes + string_high - string_low + 1 + expected_choir)
+    expected_authoring = (len(expected_names) + len(expected_phrases) + len(expected_pads) + len(expected_scores)) * 2
     if authoring_files and len(authoring_files) != expected_authoring:
-        raise AssertionError(f"Artifact di authoring: {len(authoring_files)}, attesi {expected_authoring}")
-
-    authoring_bytes, interval_svg_bytes = total_bytes(authoring_files), total_bytes(interval_svgs)
-    public_files = [path for path in PUBLIC.rglob("*") if path.is_file()]
-    public_bytes = total_bytes(public_files)
+        raise AssertionError(f"Artifact audio di authoring: {len(authoring_files)}, attesi {expected_authoring}")
+    public_files = choir_samples + phrase_files + pad_files + score_files + [MANIFEST]
+    authoring_bytes, public_bytes = total_bytes(authoring_files), total_bytes(public_files)
     if authoring_bytes > MAX_AUTHORING_BYTES:
-        raise AssertionError(f"Cache authoring oltre 32 MiB: {authoring_bytes / 1024 / 1024:.2f} MiB")
-    if interval_svg_bytes > MAX_INTERVAL_SVG_BYTES:
-        raise AssertionError(f"SVG intervalli oltre 8 MiB: {interval_svg_bytes / 1024 / 1024:.2f} MiB")
+        raise AssertionError(f"Cache Muse Choir oltre budget: {authoring_bytes / 1024 / 1024:.2f} MiB")
     if public_bytes > MAX_PUBLIC_BYTES:
-        raise AssertionError(f"Asset pubblici Voice Lab oltre 10 MiB: {public_bytes / 1024 / 1024:.2f} MiB")
+        raise AssertionError(f"Asset pubblici Voice Lab oltre budget: {public_bytes / 1024 / 1024:.2f} MiB")
     return {"authoringFiles": len(authoring_files), "authoringBytes": authoring_bytes,
-            "intervalSvgFiles": len(interval_svgs), "intervalSvgBytes": interval_svg_bytes,
-            "publicFiles": len(public_files), "publicBytes": public_bytes}
+            "choirFiles": len(choir_samples), "phraseFiles": len(phrase_files),
+            "padFiles": len(pad_files), "scoreFiles": len(score_files), "publicBytes": public_bytes}
 
 
 def main() -> int:
-    require_git_ignores()
-    report = audit_voice_lab_artifacts()
+    require_git_ignores(); report = audit_voice_lab_artifacts()
     print("Voice Lab artifact audit: " + ", ".join(f"{key}={value}" for key, value in report.items()))
     return 0
 
