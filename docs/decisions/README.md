@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-11
+**Last reviewed:** 2026-10-15
 
 ADRs record decisions that are expensive to reverse or affect multiple parts
 of the system. Accepted ADRs remain immutable except for status and links to a
@@ -14,4 +14,5 @@ superseding ADR.
 | [0002](0002-neural-pitch-diagnostics-only.md) | Neural pitch models remain local diagnostics | Accepted |
 | [0003](0003-workers-static-delivery.md) | Private delivery through Workers Static Assets and Access | Accepted |
 | [0004](0004-consumer-authentication.md) | Consumer identity through Clerk and authorization through D1 | Proposed; implemented, pending cutover |
-| [0005](0005-scoped-performance-sharing.md) | Group-scoped sharing of singer best-performance images | Proposed; implementation pending |
+| [0005](0005-scoped-performance-sharing.md) | Group-scoped sharing of singer best-performance images | Accepted; implemented, pending cutover |
+| [0006](0006-private-personal-recordings.md) | Owner-only voice recordings with synchronized pitch replay | Accepted; implemented, pending cutover |

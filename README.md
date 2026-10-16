@@ -68,7 +68,7 @@ python -m unittest scripts.check_voice_lab_artifacts_test
 python scripts/build_dist_test.py
 python scripts/check_voice_lab_artifacts.py
 python scripts/check_docs.py
-python -m unittest scripts.check_deploy_config_test scripts.sync_authorized_members_test
+python -m unittest scripts.check_deploy_config_test scripts.sync_authorized_members_test scripts.sync_choir_members_test
 ```
 
 The static release also has a real-browser check. Serve `dist/` with Wrangler,
@@ -158,6 +158,7 @@ points are:
 - [Email allowlist and PIN access](docs/operations/cloudflare-access-email-pin.md)
 - [Consumer authentication deployment](docs/operations/consumer-auth-deployment.md)
 - [Consumer authentication security review](docs/operations/consumer-auth-security-review.md)
+- [Personal recordings and synchronized pitch replay](docs/architecture/personal-recordings.md)
 - [Architecture decisions](docs/decisions/README.md)
 
 Historical audits and superseded plans live under `docs/archive/` and are not

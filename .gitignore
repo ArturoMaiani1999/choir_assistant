@@ -31,6 +31,8 @@ node_modules/
 # Authorization source lists contain personal data and must never be committed.
 authorized-members*.csv
 authorized-members*.txt
+choir-members*.csv
+coristi*.csv
 
 # Rebuildable Voice Lab Muse Sounds authoring cache. Browser-ready FLAC files
 # remain local build inputs so a static release needs no MuseScore installation.

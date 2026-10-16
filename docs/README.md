@@ -22,6 +22,9 @@ take precedence over anything under `archive/`.
 - [Shared performances and scoped authorization](architecture/shared-performances-rbac.md) —
   singer best-score images, group-scoped RBAC, private storage and update
   protocol.
+- [Personal recordings and synchronized pitch replay](architecture/personal-recordings.md) —
+  owner-only voice capture, explicit consent, one recording per piece and
+  synchronized pitch replay.
 
 ## Product
 
@@ -46,6 +49,9 @@ take precedence over anything under `archive/`.
 
 ## Operations
 
+- [Epistrophe staging deployment lesson](operations/epistrophe-staging-deployment-lesson.md) —
+  guida didattica dalla registrazione del dominio alla configurazione
+  Cloudflare, D1, R2 e Clerk, con checkpoint DNS e troubleshooting `.it`.
 - [Consumer authentication implementation tracker](operations/consumer-auth-implementation-tracker.md) —
   motivation, staged plan, implementation status, evidence and external gates.
 - [Consumer authentication dashboard checklist](operations/consumer-auth-dashboard-checklist.md) —

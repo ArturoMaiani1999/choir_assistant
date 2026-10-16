@@ -203,6 +203,12 @@ select option { background: #102229; color: var(--text); }
 .benchmark-recording b { color: #ffab9a; font-size: .8rem; }
 .benchmark-recording small { display: block; margin-top: 2px; color: #d6b7af; font-size: .69rem; }
 .benchmark-recording button { cursor: pointer; touch-action: manipulation; padding: 8px 11px; border: 1px solid rgba(255,190,174,.55); border-radius: 5px; background: #d9826f; color: #23110e; font-weight: 700; }
+.personal-recording-live { position: fixed; z-index: 31; left: 50%; bottom: calc(var(--transport-h) + 12px); transform: translateX(-50%); display: flex; align-items: center; gap: 16px; min-width: min(430px, calc(100vw - 24px)); padding: 10px 11px 10px 15px; border: 1px solid rgba(114,224,210,.55); border-radius: 9px; background: rgba(10,34,39,.97); box-shadow: 0 8px 28px rgba(0,0,0,.42); color: #e8fffb; }
+.personal-recording-live[hidden] { display: none; }
+.personal-recording-live span { min-width: 0; flex: 1; }
+.personal-recording-live b { color: #72e0d2; font-size: .8rem; }
+.personal-recording-live small { display: block; margin-top: 2px; color: #b7d4d1; font-size: .69rem; }
+.personal-recording-live button { cursor: pointer; padding: 8px 11px; border: 1px solid rgba(165,232,224,.5); border-radius: 6px; background: #72e0d2; color: #102328; font-weight: 750; }
 .sync-debug { position: fixed; z-index: 50; right: 10px; bottom: calc(var(--transport-h) + 10px); display: grid; grid-template-columns: auto auto; gap: 2px 12px; min-width: 255px; padding: 10px 12px; border: 1px solid #5d7b82; background: rgba(2, 10, 14, .94); color: #a9bec0; font: 11px/1.35 ui-monospace, SFMono-Regular, Consolas, monospace; pointer-events: none; }
 .sync-debug b { color: #edf3ef; text-align: right; font-weight: 500; font-variant-numeric: tabular-nums; }
 .orientation-hint { display: none; }
@@ -253,6 +259,22 @@ select option { background: #102229; color: var(--text); }
 .benchmark-dialog .benchmark-check input { margin: 0; }
 .benchmark-dialog .library-note { margin: 16px 0 12px; padding: 8px 0 8px 12px; font-size: .79rem; }
 .benchmark-dialog .ground-truth-count { margin: 0 0 17px; color: var(--muted); font-size: .75rem; }
+.personal-recording-dialog { width: min(620px, 92vw); }
+.personal-recording-dialog > p { margin-block: 8px 18px; }
+.personal-recording-current { margin: 14px 0; padding: 13px 15px; border: 1px solid rgba(114,224,210,.28); border-radius: 10px; background: rgba(114,224,210,.07); }
+.personal-recording-current p { margin: 4px 0 0; font-size: .78rem; }
+.personal-recording-consent { display: grid; gap: 9px; margin: 16px 0; padding: 14px; border: 1px solid var(--line); border-radius: 10px; }
+.personal-recording-consent legend { padding: 0 7px; color: var(--amber); font-size: .75rem; font-weight: 750; letter-spacing: .05em; text-transform: uppercase; }
+.personal-recording-consent label { display: flex; align-items: flex-start; gap: 10px; margin: 0; padding: 8px; border-radius: 8px; background: rgba(255,255,255,.025); }
+.personal-recording-consent input { margin-top: 3px; }
+.personal-recording-consent span { display: grid; gap: 4px; }
+.personal-recording-consent small { margin: 0; line-height: 1.45; }
+.personal-recording-status { min-height: 1.5em; margin: 12px 0; font-size: .8rem!important; }
+.personal-recording-review { margin-top: 16px; padding: 15px; border: 1px solid rgba(228,189,120,.3); border-radius: 10px; background: rgba(228,189,120,.06); }
+.personal-recording-review h3 { margin: 0; font-size: 1rem; }
+.personal-recording-review p { margin: 5px 0 12px; font-size: .78rem; }
+.personal-recording-review audio { width: 100%; }
+.personal-recording-actions button:nth-last-child(2) { border-color: rgba(221,139,120,.45); color: #ffc2b5; }
 .benchmark-primary-actions { justify-content: space-between; }
 .benchmark-primary-actions button:first-child { min-width: 230px; }
 .benchmark-review-actions { margin-top: 6px; padding: 15px 16px; border: 1px solid rgba(99,200,194,.36); border-radius: 9px; background: rgba(99,200,194,.07); }
@@ -325,6 +347,7 @@ select option { background: #102229; color: var(--text); }
 .detector-setting p{font-size:.75rem;line-height:1.5}.detector-setting-scale{color:#91a9aa}
 .audio-output-setting{margin-top:16px;border-color:rgba(228,189,120,.38);background:linear-gradient(135deg,rgba(228,189,120,.11),rgba(255,255,255,.018))}
 .audio-output-setting output{color:var(--amber)}
+.detector-settings-dialog.is-audio-output-prompt #settings-basic-panel>.detector-setting:not(.audio-output-setting),.detector-settings-dialog.is-audio-output-prompt>.dialog-actions{display:none}
 .audio-output-choices{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px;margin-top:15px}
 .audio-output-choice{display:flex;align-items:center;gap:10px;min-height:44px;padding:11px 12px;border:1px solid rgba(255,255,255,.13);border-radius:10px;background:rgba(255,255,255,.025);cursor:pointer}
 .audio-output-choice:has(input:checked){border-color:rgba(228,189,120,.7);background:rgba(228,189,120,.1);box-shadow:inset 0 0 0 1px rgba(228,189,120,.18)}

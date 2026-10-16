@@ -68,6 +68,13 @@ def validate(config: dict) -> list[str]:
     auth_databases = [entry for entry in databases if entry.get("binding") == "AUTH_DB"]
     if len(auth_databases) != 1 or not UUID.fullmatch(str(auth_databases[0].get("database_id", ""))):
         errors.append("AUTH_DB deve indicare un solo database_id D1 UUID valido")
+    buckets = config.get("r2_buckets", [])
+    performance_buckets = [entry for entry in buckets if entry.get("binding") == "PERFORMANCE_BUCKET"]
+    if len(performance_buckets) != 1 or not str(performance_buckets[0].get("bucket_name", "")).strip():
+        errors.append("PERFORMANCE_BUCKET deve indicare un solo bucket R2 privato")
+    triggers = config.get("triggers", {})
+    if not isinstance(triggers.get("crons"), list) or len(triggers["crons"]) != 1:
+        errors.append("triggers.crons deve configurare la pulizia giornaliera delle performance")
     return errors
 
 

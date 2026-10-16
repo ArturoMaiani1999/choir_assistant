@@ -6,8 +6,9 @@
     <meta name="theme-color" content="#081419" />
     <title>Choir Assistant · Il tuo studio</title>
     <script src="ui_preferences.js?v=2-lyrics-only"></script>
-    <link rel="stylesheet" href="styles.css?v=20261013-continuous-score" />
+    <link rel="stylesheet" href="styles.css?v=20261015-private-recording" />
     <link rel="stylesheet" href="studio.css?v=20261013-mobile-speed-settings" />
+    <link rel="stylesheet" href="performances.css?v=20261014-rbac" />
     <script src="score_appearance.js?v=3-settings-groups"></script>
     <script src="runtime-config.js" defer></script>
     <script src="practice_math.js?v=20261013-mobile-four-measures" defer></script>
@@ -18,8 +19,10 @@
     <script src="vocal_feedback.js?v=20260928-feedback-v1" defer></script>
     <script src="one_euro_filter.js?v=20260927-phase2" defer></script>
     <script src="media_mixer.js?v=20261013-pitch-param-sync" defer></script>
+    <script src="performance_client.js?v=20261014-rbac" defer></script>
+    <script src="recording_client.js?v=20261015-private-recording" defer></script>
     <script src="pitch_test_harness.js?v=20260927-phase0" defer></script>
-    <script src="app.js?v=20261013-transport-speed" defer></script>
+    <script src="app.js?v=20261015-private-recording" defer></script>
   </head>
   <body>
     <main class="practice-shell" id="practice-shell" aria-label="Strumento di prova">
@@ -31,6 +34,7 @@
           <label class="part-control"><span class="sr-only">Parte vocale</span><select id="part-selector" aria-label="Parte vocale"></select></label>
         </div>
         <div class="toolbar-actions">
+          <button class="mode-button" id="performances" type="button" hidden>I risultati</button>
           <label class="compact-select transpose-control"><span>Transp</span><select id="transpose" aria-label="Trasposizione"></select><output id="transpose-value" aria-live="polite">±0</output></label>
           <label class="compact-select speed-control"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità del brano"><option value="1" selected>100%</option><option value="0.9">90%</option><option value="0.8">80%</option></select></label>
           <button class="mode-button accompaniment-select" id="accompaniment-mode" type="button">Voci</button>
@@ -40,6 +44,7 @@
             <button class="mode-button settings-button" id="settings" type="button" aria-label="Impostazioni" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-menu"><span class="settings-label">Impostazioni</span><svg class="settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.7 2h4.6l.6 2.3c.5.2 1 .5 1.5.9l2.3-.7 2.3 4-1.7 1.6a8 8 0 0 1 0 1.8l1.7 1.6-2.3 4-2.3-.7c-.5.4-1 .7-1.5.9l-.6 2.3H9.7l-.6-2.3c-.5-.2-1-.5-1.5-.9l-2.3.7-2.3-4 1.7-1.6a8 8 0 0 1 0-1.8L3 8.5l2.3-4 2.3.7c.5-.4 1-.7 1.5-.9L9.7 2Z"/><circle cx="12" cy="11" r="3"/></svg></button>
             <div class="settings-menu" id="settings-menu" role="menu" hidden>
               <button class="settings-menu-mixer" id="settings-menu-mixer" type="button" role="menuitem"><strong>Mixer</strong><small>Voci e accompagnamento</small></button>
+              <button id="settings-menu-recording" type="button" role="menuitem"><strong>La mia registrazione</strong><small>Registra, riascolta e analizza</small></button>
               <button id="settings-menu-basic" type="button" role="menuitem"><strong>Base</strong><small>Audio, testo e colore carta</small></button>
               <button id="settings-menu-advanced" type="button" role="menuitem"><strong>Avanzate</strong><small>Microfono e sincronizzazione</small></button>
             </div>
@@ -89,8 +94,10 @@
       </footer>
       <button class="mobile-chrome-toggle mobile-transport-toggle" id="mobile-transport-toggle" type="button" aria-controls="practice-transport" aria-expanded="true" aria-label="Nascondi i controlli di riproduzione" title="Nascondi i controlli di riproduzione"><span class="mobile-chrome-chevron is-down" aria-hidden="true"></span></button>
       <audio id="backing-audio" preload="metadata"></audio>
+      <audio id="personal-recording-replay-audio" preload="metadata"></audio>
       <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
       <aside class="benchmark-recording" id="benchmark-recording" aria-live="assertive" hidden><span><b>● Registrazione benchmark</b><small id="benchmark-live-scenario"></small></span><button id="benchmark-stop-live" type="button" onclick="window.ChoirBenchmarkStop?.()">Interrompi take</button></aside>
+      <aside class="personal-recording-live" id="personal-recording-live" aria-live="assertive" hidden><span><b id="personal-recording-live-title">● Registrazione personale</b><small id="personal-recording-live-detail">Il microfono sta registrando la tua voce.</small></span><button id="personal-recording-stop-live" type="button">Interrompi</button></aside>
     </main>
     <dialog id="voice-mixer-dialog" class="practice-dialog" aria-labelledby="voice-mixer-heading">
       <h2 id="voice-mixer-heading">Voci da ascoltare</h2>
@@ -181,6 +188,39 @@
       <h2 id="result-heading">Prova completata</h2><p id="result-text"></p><p id="result-progress"></p>
       <div class="dialog-actions"><button id="retry" type="button">Riprova</button><button id="result-resume" type="button" hidden>Riprendi</button><button id="result-close" type="button">Chiudi</button></div>
     </dialog>
+    <dialog id="performance-dialog" class="practice-dialog performance-dialog" aria-labelledby="performance-heading">
+      <header class="performance-dialog-header"><div><h2 id="performance-heading">I risultati</h2><p id="performance-identity">Best score condivisi</p><p>Il tuo best è visibile a te, ai referenti autorizzati del tuo settore e al direttore.</p></div><button id="performance-close" type="button">Chiudi</button></header>
+      <nav id="performance-tabs" class="performance-tabs" aria-label="Ambito risultati"></nav>
+      <p id="performance-status" class="performance-empty" role="status">Caricamento…</p>
+      <section id="performance-list" class="performance-list" aria-live="polite"></section>
+    </dialog>
+    <dialog id="personal-recording-dialog" class="practice-dialog personal-recording-dialog" aria-labelledby="personal-recording-heading">
+      <p class="dialog-eyebrow">REGISTRAZIONE PERSONALE</p>
+      <h2 id="personal-recording-heading">La mia registrazione</h2>
+      <p>Puoi conservare nel tuo profilo una sola registrazione per brano. Audio e replay del pitch restano privati: non sono visibili al direttore o agli altri cantori.</p>
+      <section class="personal-recording-current" id="personal-recording-current" hidden>
+        <strong>Registrazione salvata</strong>
+        <p id="personal-recording-current-summary"></p>
+      </section>
+      <fieldset class="personal-recording-consent" id="personal-recording-consent">
+        <legend>Prima di registrare</legend>
+        <label><input id="personal-recording-headphones" type="checkbox" /> <span><strong>Sto usando cuffie</strong><small>Gli altoparlanti non sono ammessi: entrerebbero nella registrazione e nel rilevamento.</small></span></label>
+        <label><input id="personal-recording-storage-consent" type="checkbox" /> <span><strong>Acconsento a registrazione e salvataggio</strong><small>La voce e la traiettoria del pitch saranno memorizzate nel mio profilo privato finché non le sostituisco o elimino.</small></span></label>
+      </fieldset>
+      <p id="personal-recording-status" class="personal-recording-status" role="status">Caricamento…</p>
+      <section id="personal-recording-review" class="personal-recording-review" hidden>
+        <h3>Registrazione pronta</h3>
+        <p id="personal-recording-review-summary">Ascoltala prima di decidere.</p>
+        <audio id="personal-recording-preview" controls preload="metadata"></audio>
+        <div class="dialog-actions"><button id="personal-recording-save" type="button">Salva nel profilo</button><button id="personal-recording-discard" type="button">Scarta</button></div>
+      </section>
+      <div class="dialog-actions personal-recording-actions" id="personal-recording-actions">
+        <button id="personal-recording-start" type="button" disabled>Registra dal principio</button>
+        <button id="personal-recording-replay" type="button" hidden>Riascolta sul brano</button>
+        <button id="personal-recording-delete" type="button" hidden>Elimina</button>
+        <button id="personal-recording-close" type="button">Chiudi</button>
+      </div>
+    </dialog>
     <dialog id="piece-picker-dialog" class="practice-dialog piece-picker-dialog" aria-labelledby="piece-picker-heading">
       <div class="studio-welcome"><span class="studio-wordmark">CHOIR ASSISTANT</span><h2 id="piece-picker-heading">La tua voce.<br>Il tuo prossimo passo.</h2><p>Ritrova la tua parte, <span class="studio-phrase">una frase alla volta.</span></p><div class="studio-staff" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div></div>
       <div class="studio-library-form"><p class="studio-section-label">IL TUO REPERTORIO</p>
@@ -191,7 +231,7 @@
       <div class="studio-mode-picker" aria-label="Modalità">
         <button class="studio-mode-entry is-primary" id="library-open" type="button"><span class="studio-mode-icon" aria-hidden="true">●</span><span class="studio-mode-copy"><strong>Canta brano</strong></span><span class="studio-mode-action">Apri</span></button>
         <button class="studio-mode-entry" id="library-score" type="button"><span class="studio-mode-icon" aria-hidden="true">▤</span><span class="studio-mode-copy"><strong>Mostra partitura</strong></span><span class="studio-mode-action">Apri</span></button>
-        <a class="studio-mode-entry" href="voice-lab.html"><span class="studio-mode-icon" aria-hidden="true">♪</span><span class="studio-mode-copy"><strong>Allena la voce</strong></span><span class="studio-mode-action">Apri</span></a>
+        <a class="studio-mode-entry" id="library-voice-lab" href="voice-lab.html"><span class="studio-mode-icon" aria-hidden="true">♪</span><span class="studio-mode-copy"><strong>Allena la voce</strong></span><span class="studio-mode-action">Apri</span></a>
       </div>
       <button class="studio-return" type="button" onclick="this.closest('dialog').close()">Torna alla prova</button></div>
     </dialog>

@@ -305,8 +305,8 @@ class LocalBundlePreparationTests(unittest.TestCase):
                 "score_version_id": "local-test",
                 "monodic": False,
                 "parts": [{"id": "P1", "name": "Soprano"}],
-                "score_pages": ["score-1.svg"],
-                "part_pages": {"P1": ["part-P1-1.svg"]},
+                "score_pages": ["score-1.svg", "score-10.svg", "score-2.svg"],
+                "part_pages": {"P1": ["part-P1-1.svg", "part-P1-10.svg", "part-P1-2.svg"]},
                 "continuous_part_scores": {"P1": "part-P1-continuous-1.svg"},
                 "voice_stems": {"P1": "voice-P1.mp3"},
                 "accompaniment_file": "accompaniment.mp3",
@@ -319,6 +319,16 @@ class LocalBundlePreparationTests(unittest.TestCase):
             audio = json.loads((destination / "audio-manifest.json").read_text(encoding="utf-8"))
             self.assertEqual(stored_bundle, bundle)
             self.assertEqual(stored_bundle["parts"], metadata["parts"])
+            self.assertEqual(stored_bundle["assets"]["full_score_pages"], [
+                "library-assets/test-piece/score-1.svg",
+                "library-assets/test-piece/score-2.svg",
+                "library-assets/test-piece/score-10.svg",
+            ])
+            self.assertEqual(stored_bundle["assets"]["score_pages"]["P1"], [
+                "library-assets/test-piece/part-P1-1.svg",
+                "library-assets/test-piece/part-P1-2.svg",
+                "library-assets/test-piece/part-P1-10.svg",
+            ])
             self.assertEqual(
                 stored_bundle["assets"]["continuous_scores"]["P1"],
                 "library-assets/test-piece/part-P1-continuous-1.svg",

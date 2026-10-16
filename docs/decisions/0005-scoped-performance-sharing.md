@@ -1,6 +1,6 @@
 # ADR-0005: Scoped sharing of singer performances
 
-**Status:** proposed; implementation pending
+**Status:** accepted; implemented, pending production provisioning and cutover
 **Date:** 2026-10-14
 **Owner:** project maintainer
 **Last reviewed:** 2026-10-14
@@ -80,8 +80,9 @@ The full contract is
 
 ## Implementation gate
 
-This ADR remains proposed until migrations, authorization tests, private R2
-delivery, eligibility rules, deletion/retention behavior, security review and
-staging revocation tests are complete. ADR-0004 continues to describe the
-deployed authentication boundary until cutover.
+The source implementation includes migrations, authorization tests, private R2
+delivery, eligibility rules and deletion/retention behavior. Production
+activation remains gated on real D1/R2 provisioning, private member/role sync,
+independent security review and staging revocation tests. ADR-0004 continues to
+describe the deployed authentication boundary until cutover.
 

@@ -19,8 +19,9 @@ class AuthorizedMemberSyncTests(unittest.TestCase):
         sql = MODULE.sql_for([digest], replace=True)
         self.assertIn(digest, sql)
         self.assertNotIn("singer@example.org", sql)
-        self.assertIn("BEGIN TRANSACTION", sql)
-        self.assertIn("COMMIT", sql)
+        self.assertNotIn("BEGIN", sql.upper())
+        self.assertNotIn("COMMIT", sql.upper())
+        self.assertNotIn("SAVEPOINT", sql.upper())
 
     def test_replace_requires_matching_member_count(self) -> None:
         with self.assertRaisesRegex(ValueError, "confirm-replace-count"):

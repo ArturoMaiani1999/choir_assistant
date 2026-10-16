@@ -1,8 +1,8 @@
 # Shared performances and scoped authorization
 
-**Status:** proposed; implementation pending
+**Status:** implemented; pending production provisioning and cutover
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-14
+**Last reviewed:** 2026-10-15
 
 ## Purpose
 
@@ -10,6 +10,10 @@ Choir Assistant will let each singer keep one current best performance for a
 piece and optionally share it with selected people in the choir. A shared
 performance contains a rendered piano-roll image with detected pitch and
 summary metrics. It never contains microphone audio.
+
+Private voice recordings are a different, owner-only resource with separate
+consent and authorization rules; see
+[Personal recordings and synchronized pitch replay](personal-recordings.md).
 
 This document defines the authorization, identity, data, storage and update
 contracts for that feature. It extends the Clerk/D1 boundary in
@@ -180,8 +184,8 @@ when:
 
 Score and coverage are stored separately. A candidate replaces the current
 result only when strictly better. A tie does not rewrite the image unless a
-future decision defines an explicit tie-break rule. The initial coverage
-threshold must be fixed through product testing before implementation closes.
+future decision defines an explicit tie-break rule. The initial profile uses
+the 60% coverage threshold recorded below.
 
 ## Piano-roll artifact
 
@@ -231,8 +235,9 @@ not let a slow lower score replace a higher one.
 6. If rejected, delete the candidate and return the unchanged best.
 
 D1 is the winner election. Its row always points to a complete immutable
-object. A failed cleanup leaves an inaccessible orphan because no D1 row
-references it; a maintenance task may collect old unreferenced revisions.
+object. Replaced and deleted image keys are queued by D1 triggers. If immediate
+cleanup fails, the object is inaccessible because no current D1 row references
+it and the daily maintenance task retries deletion.
 
 If R2 succeeds but D1 fails, the endpoint fails closed and attempts candidate
 cleanup. If D1 commits but old-object deletion fails, the new row remains
@@ -351,21 +356,27 @@ impersonation sessions.
 9. Complete privacy/security review, staging revocation tests and rollback
    rehearsal before activation.
 
-## Constants to finalize
+## Initial implementation constants
 
-- minimum coverage for the first scoring profile;
-- permitted speed and transposition;
-- maximum PNG bytes and dimensions;
-- display-name convention;
-- deactivation/deletion retention period;
-- CLI-only initial administration versus a later protected admin UI.
+- scoring profile: `pitch-v1-original-100-complete-c60`;
+- minimum recognized coverage: 60%;
+- speed: 100%;
+- transposition: original key only;
+- image limit: 4 MiB, 4096 x 2048 pixels;
+- display name: explicitly supplied by the private operator CSV, with an
+  opaque fallback when omitted;
+- inactive-member retention: 30 days, enforced in batches by a daily Worker
+  scheduled handler;
+- administration: private CLI synchronization only; no production admin API.
 
-These values must be documented and tested before the feature is marked
-implemented. They do not change the authorization or storage boundaries.
+Changing comparability constants creates a new scoring profile rather than
+silently changing the meaning of an existing best.
 
 ## Related documents
 
 - [ADR-0005: scoped performance sharing](../decisions/0005-scoped-performance-sharing.md)
+- [ADR-0006: private owner-only personal recordings](../decisions/0006-private-personal-recordings.md)
+- [Personal recordings and synchronized pitch replay](personal-recordings.md)
 - [ADR-0004: consumer authentication](../decisions/0004-consumer-authentication.md)
 - [System architecture](overview.md)
 - [Consumer authentication security review](../operations/consumer-auth-security-review.md)

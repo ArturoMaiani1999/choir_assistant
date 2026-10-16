@@ -27,6 +27,8 @@ const pieceDataCache = new Map();
 let practiceLoadGeneration = 0;
 let controlsBound = false;
 let prefetchedScoreKey = null;
+let audioOutputControlsBound = false;
+let pendingAudioOutputAction = null;
 
 async function loadBundleManifest(pieceId) {
   if (!bundleCache.has(pieceId)) {
@@ -107,13 +109,19 @@ const PIANO_ROLL_DELAY_DEFAULT_MS = 270;
 const STANDARD_PLUME_ADVANCE_MS = 270;
 const BLUETOOTH_PLUME_ADVANCE_MS = 320;
 const METRONOME_OFFSET_MS = 50;
+const MIXER_DEFAULTS_VERSION = 2;
+const DEFAULT_OWN_VOICE_LEVEL = 1;
+const DEFAULT_OTHER_VOICE_LEVEL = .5;
+const DEFAULT_ACCOMPANIMENT_LEVEL = .4;
 let audioOutputExpiryTimer = null;
 
 const els = Object.fromEntries([
   'transpose', 'transpose-value', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
   'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-accompaniment', 'voice-mixer-accompaniment-enabled', 'voice-mixer-accompaniment-level', 'voice-mixer-accompaniment-value', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
-  'settings-menu-wrap', 'settings-menu', 'settings-menu-mixer', 'settings-menu-basic', 'settings-menu-advanced', 'settings-dialog', 'settings-heading', 'settings-basic-panel', 'settings-advanced-panel', 'settings-audio-output-standard', 'settings-audio-output-bluetooth', 'settings-audio-output-status', 'settings-audio-output-description', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
+  'settings-menu-wrap', 'settings-menu', 'settings-menu-mixer', 'settings-menu-recording', 'settings-menu-basic', 'settings-menu-advanced', 'settings-dialog', 'settings-heading', 'settings-basic-panel', 'settings-advanced-panel', 'settings-audio-output-standard', 'settings-audio-output-bluetooth', 'settings-audio-output-status', 'settings-audio-output-description', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
   'result-dialog', 'result-heading', 'result-text', 'result-progress', 'retry', 'result-resume', 'result-close',
+  'performances', 'performance-dialog', 'performance-heading', 'performance-identity', 'performance-close', 'performance-tabs', 'performance-status', 'performance-list',
+  'personal-recording-dialog', 'personal-recording-current', 'personal-recording-current-summary', 'personal-recording-consent', 'personal-recording-headphones', 'personal-recording-storage-consent', 'personal-recording-status', 'personal-recording-review', 'personal-recording-review-summary', 'personal-recording-preview', 'personal-recording-actions', 'personal-recording-start', 'personal-recording-replay', 'personal-recording-delete', 'personal-recording-save', 'personal-recording-discard', 'personal-recording-close', 'personal-recording-live', 'personal-recording-live-title', 'personal-recording-live-detail', 'personal-recording-stop-live', 'personal-recording-replay-audio',
   'note-names',
   'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-viewer-link', 'settings',
   'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
@@ -129,6 +137,7 @@ const state = {
   transpose: 0,
   noteNames: 'italian',
   attemptActive: false,
+  attemptStartedFromBeginning: true,
   attempt: { voicedMs: 0, insideMs: 0 },
   lastSampleMs: null,
   pendingAudioTime: null,
@@ -170,6 +179,7 @@ const state = {
   rememberedMetronomeVolume: 34,
   syncDebug: new URLSearchParams(window.location.search).has('syncDebug'),
   microphoneStatus: 'idle',
+  microphoneRequestGeneration: 0,
   ignoreAudioDeviceChangesUntil: 0,
   microphoneStream: null,
   microphoneContext: null,
@@ -198,6 +208,9 @@ const state = {
   benchmark: { capture: null, pending: null, previewUrl: null, sessionId: null, savedTakes: [], selectedTakeId: null, analysisAudioUrl: null, correctedAudioUrl: null, correctedAudioKey: null, audioVariant: 'original', analysisPlaybackRaf: null, feedbackSource: null, analysisLayers: { v1: false, display: true, raw: false, audio: false, score: false },
     analysisView: { timeZoom: 1, pitchZoom: 1, centerBeat: null, pitchOffset: 0, pointer: null, inspectBeat: null, selectedBeat: null } },
   gridInspect: { active: false, viewBeat: 0, pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null },
+  performanceMe: null,
+  personalRecording: { capture: null, pending: null, previewUrl: null, current: null,
+    loading: false, saving: false, replay: null },
 };
 
 const V1_RMS_THRESHOLD = Object.freeze({ default: .000002, min: .000001, max: .01 });
@@ -351,6 +364,8 @@ function toggleSettingsMenu() {
 
 function openDetectorSettings(mode = 'basic') {
   const advanced = mode === 'advanced';
+  pendingAudioOutputAction = null;
+  els.settingsDialog.classList.remove('is-audio-output-prompt');
   closeSettingsMenu();
   restoreAudioOutputPreference();
   updateDetectorSettingsUi();
@@ -358,6 +373,67 @@ function openDetectorSettings(mode = 'basic') {
   els.settingsAdvancedPanel.hidden = !advanced;
   els.settingsHeading.textContent = advanced ? 'Impostazioni avanzate' : 'Impostazioni';
   if (!els.settingsDialog.open) els.settingsDialog.showModal();
+}
+
+function openAudioOutputPrompt(action) {
+  pendingAudioOutputAction = action;
+  closeSettingsMenu();
+  restoreAudioOutputPreference();
+  updateDetectorSettingsUi();
+  els.settingsBasicPanel.hidden = false;
+  els.settingsAdvancedPanel.hidden = true;
+  els.settingsHeading.textContent = 'Come ascolti l’audio?';
+  els.settingsDialog.classList.add('is-audio-output-prompt');
+  if (!els.settingsDialog.open) els.settingsDialog.showModal();
+  requestAnimationFrame(() => els.settingsAudioOutputStandard.focus());
+}
+
+function requestAudioOutputForEntry(action) {
+  if (restoreAudioOutputPreference()) { void action(); return; }
+  openAudioOutputPrompt(action);
+}
+
+function bindAudioOutputControls() {
+  if (audioOutputControlsBound) return;
+  audioOutputControlsBound = true;
+  for (const control of [els.settingsAudioOutputStandard, els.settingsAudioOutputBluetooth]) {
+    control.addEventListener('change', () => {
+      if (!control.checked) return;
+      saveAudioOutputPreference(control.value);
+      state.plumeSettings.timeAdvanceMs = control.value === 'bluetooth'
+        ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
+      updateDetectorSettingsUi();
+      if (state.runtime) savePreferences();
+      else { try { saveGlobalDetectorPreferences(); } catch (_) {} }
+      if (state.runtime) render();
+      showToast(control.value === 'bluetooth'
+        ? 'Bluetooth confermato: anticipo traccia vocale 320 ms.'
+        : 'Uscita non Bluetooth: anticipo traccia vocale 270 ms.');
+      const action = pendingAudioOutputAction;
+      pendingAudioOutputAction = null;
+      if (action) {
+        els.settingsDialog.close();
+        void action();
+      }
+    });
+  }
+  els.settingsDialog.addEventListener('cancel', () => { pendingAudioOutputAction = null; });
+  els.settingsDialog.addEventListener('click', (event) => {
+    const selected = event.target.closest('.setting-info');
+    const shouldOpen = selected && !selected.classList.contains('is-open');
+    els.settingsDialog.querySelectorAll('.setting-info.is-open').forEach((button) => button.classList.remove('is-open'));
+    if (shouldOpen) selected.classList.add('is-open');
+  });
+  els.settingsDialog.addEventListener('close', () => {
+    pendingAudioOutputAction = null;
+    els.settingsDialog.classList.remove('is-audio-output-prompt');
+    els.settingsDialog.querySelectorAll('.setting-info.is-open').forEach((button) => button.classList.remove('is-open'));
+  });
+  els.settingsDialog.addEventListener('click', closeSettingsFromBackdrop);
+  navigator.mediaDevices?.addEventListener('devicechange', () => {
+    if (Date.now() < state.ignoreAudioDeviceChangesUntil) return;
+    invalidateAudioOutputPreference(true);
+  });
 }
 
 function closeDialogFromBackdrop(dialog, event) {
@@ -1466,7 +1542,10 @@ function drawPitchLane(beat) {
   ctx.save();
   ctx.beginPath(); ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top); ctx.clip();
   if (state.pitchLayers.v1) {
-    const v1PlumeSamples = state.pitchSamples.filter((sample) => (inspecting || sample.takeId === state.pitchTakeId) && sample.beat >= visibleStart && sample.beat <= visibleEnd);
+    const replaySamples = state.personalRecording.replay?.pitchSamples;
+    const v1PlumeSamples = (replaySamples ?? state.pitchSamples)
+      .filter((sample) => (replaySamples || inspecting || sample.takeId === state.pitchTakeId)
+        && sample.beat >= visibleStart && sample.beat <= visibleEnd);
     const xAtVoice = (sample) => {
       // Keep the detector-latency correction when switching from the live
       // ribbon to the paused history view, including after zooming out.
@@ -1813,6 +1892,7 @@ function seekToMeasure(index, autoPlay = false, preRoll = true) {
   state.gridInspect.active = false;
   const seek = measureSeekState(state.occurrenceMeasures, index, { preRoll });
   state.selectedMeasureIndex = seek.selectedIndex;
+  state.attemptStartedFromBeginning = seek.selectedIndex === 0;
   state.scoringStartBeat = seek.scoringStart;
   queueAudioSeek(state.runtime.secondsAtBeat(seek.playbackStart));
   state.lastMetronomeBeat = null;
@@ -1848,6 +1928,14 @@ function prepareAttemptResume() {
 }
 
 async function togglePlayback() {
+  if (state.personalRecording.capture) {
+    showToast('Usa “Interrompi” per terminare la registrazione personale.');
+    return;
+  }
+  if (state.personalRecording.replay) {
+    await togglePersonalRecordingReplayPlayback();
+    return;
+  }
   if (!state.bundleApproved) { showToast('Serve l’approvazione admin di questo bundle.'); return; }
   if (state.playbackPlan?.kind === 'muted') { showToast('Attiva almeno una traccia nel Mixer.'); return; }
   if (!state.clock.running && !restoreAudioOutputPreference()) {
@@ -1980,22 +2068,56 @@ function showToast(message) {
 }
 
 function updateMicrophoneButton() {
-  els.togglePlayback.disabled = state.microphoneStatus === 'requesting' || state.playbackPlan?.kind === 'muted';
+  els.togglePlayback.disabled = state.microphoneStatus === 'requesting' || state.playbackPlan?.kind === 'muted'
+    || Boolean(state.personalRecording.capture);
 }
 
 async function stopMicrophone() {
+  state.microphoneRequestGeneration += 1;
   document.getElementById('microphone-level').value = 0;
-  state.microphoneStream?.getTracks().forEach((track) => track.stop());
-  state.microphoneSource?.disconnect();
-  state.microphoneAnalyser?.disconnect();
-  state.microphoneSilencer?.disconnect();
+  const stream = state.microphoneStream;
+  const context = state.microphoneContext;
+  const source = state.microphoneSource;
+  const analyser = state.microphoneAnalyser;
+  const silencer = state.microphoneSilencer;
+  state.microphoneStream = null; state.microphoneContext = null; state.microphoneSource = null; state.microphoneAnalyser = null; state.microphoneSilencer = null; state.microphoneBuffer = null;
+  stream?.getTracks().forEach((track) => track.stop());
+  source?.disconnect();
+  analyser?.disconnect();
+  silencer?.disconnect();
   stopPitchAnalysisLoop();
   stopPitchWorker();
-  if (state.microphoneContext && state.microphoneContext.state !== 'closed') await state.microphoneContext.close();
-  state.microphoneStream = null; state.microphoneContext = null; state.microphoneSource = null; state.microphoneAnalyser = null; state.microphoneSilencer = null; state.microphoneBuffer = null;
   state.microphoneStatus = 'idle'; state.trackedPitch = null; state.displayPitch = null; state.pitchConfirmationState = null; state.microphoneRms = 0; state.pitchSmoother.reset(); state.displayPitchFilter.reset();
   state.neuralLive.generation += 1; state.neuralLive.enabled = false; state.neuralLive.loading = false; state.neuralLive.inFlight = false; state.neuralLive.latestPitch = null; state.neuralLive.samples = [];
   updateMicrophoneButton(); updateNeuralLiveUi(); render();
+  if (context && context.state !== 'closed') {
+    try { await context.close(); } catch (_) { /* Tracks are already stopped; context cleanup is best-effort. */ }
+  }
+}
+
+async function suspendPracticeForBackground() {
+  if (state.clock?.running) {
+    const checkpointBeat = playbackSnapshot().beat;
+    state.clock.pause();
+    rememberAttemptCheckpoint(checkpointBeat);
+    updatePlaybackButton();
+  }
+  savePitchHistory();
+  const groundTruthCapture = state.groundTruth.capture;
+  if (groundTruthCapture) {
+    groundTruthCapture.recorder.onstop = () => {};
+    if (groundTruthCapture.recorder.state !== 'inactive') groundTruthCapture.recorder.stop();
+    state.groundTruth.capture = null;
+    els.groundTruthStart.disabled = false; els.groundTruthApprove.disabled = true;
+    els.groundTruthStatus.textContent = 'Acquisizione annullata perché la pagina non è più visibile.';
+  }
+  if (state.benchmark.capture) discardBenchmarkTake();
+  if (state.personalRecording.capture) {
+    stopPersonalRecordingCapture({ discard: true });
+    els.personalRecordingStatus.textContent = 'Registrazione annullata perché la pagina non è più visibile.';
+  }
+  if (state.personalRecording.replay) stopPersonalRecordingReplay();
+  if (state.microphoneStatus !== 'idle' || state.microphoneStream) await stopMicrophone();
 }
 
 async function toggleMicrophone() {
@@ -2005,12 +2127,20 @@ async function toggleMicrophone() {
     showToast('Il microfono richiede un contesto sicuro (HTTPS) e un browser compatibile.'); render(); return;
   }
   state.microphoneStatus = 'requesting'; updateMicrophoneButton();
+  const requestGeneration = ++state.microphoneRequestGeneration;
   // Granting microphone permission can itself change the devices exposed by
   // the browser. Do not mistake that privacy-related update for a real output
   // switch and immediately ask the user the same question again.
   state.ignoreAudioDeviceChangesUntil = Date.now() + 5000;
   try {
     const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 }, video: false });
+    if (requestGeneration !== state.microphoneRequestGeneration || document.visibilityState === 'hidden') {
+      stream.getTracks().forEach((track) => track.stop());
+      if (requestGeneration === state.microphoneRequestGeneration) {
+        state.microphoneStatus = 'idle'; updateMicrophoneButton(); render();
+      }
+      return;
+    }
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     const context = new AudioContextClass({ latencyHint: 'interactive' }); await context.resume();
     // A 2048-sample window covers the practical choir range down to D2/E2
@@ -2023,6 +2153,14 @@ async function toggleMicrophone() {
     // browser processes the microphone graph without feeding it back to the room.
     const silencer = context.createGain(); silencer.gain.value = 0;
     source.connect(analyser); analyser.connect(silencer); silencer.connect(context.destination);
+    if (requestGeneration !== state.microphoneRequestGeneration || document.visibilityState === 'hidden') {
+      stream.getTracks().forEach((track) => track.stop()); source.disconnect(); analyser.disconnect(); silencer.disconnect();
+      try { await context.close(); } catch (_) {}
+      if (requestGeneration === state.microphoneRequestGeneration) {
+        state.microphoneStatus = 'idle'; updateMicrophoneButton(); render();
+      }
+      return;
+    }
     state.microphoneStream = stream; state.microphoneContext = context; state.microphoneSource = source; state.microphoneAnalyser = analyser; state.microphoneSilencer = silencer;
     state.pitchWorkerDisabled = false; state.pitchWorkerInFlight = false;
     state.microphoneBuffer = new Float32Array(analyser.fftSize); state.pitchSmoother.reset(); beginPitchTake();
@@ -2031,6 +2169,7 @@ async function toggleMicrophone() {
     showToast('Microfono attivo. Per risultati migliori usa le cuffie.');
     if (!state.rafId) state.rafId = requestAnimationFrame(render);
   } catch (error) {
+    if (requestGeneration !== state.microphoneRequestGeneration) return;
     state.microphoneStatus = error?.name === 'NotAllowedError' ? 'denied' : 'error';
     updateMicrophoneButton(); showToast(state.microphoneStatus === 'denied' ? 'Permesso microfono negato.' : 'Impossibile avviare il microfono.'); render();
   }
@@ -3447,6 +3586,338 @@ function listenToBenchmarkTake(take = state.benchmark.pending) {
   });
 }
 
+function personalRecordingDate(recording) {
+  return new Date(recording.updatedAt ?? recording.createdAt).toLocaleString('it-IT', {
+    dateStyle: 'medium', timeStyle: 'short',
+  });
+}
+
+function revokePersonalRecordingPreview() {
+  els.personalRecordingPreview.pause();
+  els.personalRecordingPreview.removeAttribute('src');
+  els.personalRecordingPreview.load();
+  if (state.personalRecording.previewUrl) URL.revokeObjectURL(state.personalRecording.previewUrl);
+  state.personalRecording.previewUrl = null;
+}
+
+function updatePersonalRecordingControls() {
+  const personal = state.personalRecording;
+  const current = personal.current;
+  const pending = personal.pending;
+  const busy = personal.loading || personal.saving || Boolean(personal.capture);
+  const ready = els.personalRecordingHeadphones.checked && els.personalRecordingStorageConsent.checked;
+  els.personalRecordingCurrent.hidden = !current;
+  if (current) {
+    const part = state.runtime?.parts.find(item => item.id === current.partId)?.name ?? current.partId;
+    els.personalRecordingCurrentSummary.textContent = `${part} · ${personalRecordingDate(current)} · ${Math.round(current.durationMs / 1000)} s.`;
+  }
+  els.personalRecordingReview.hidden = !pending;
+  els.personalRecordingConsent.disabled = Boolean(pending) || busy;
+  els.personalRecordingStart.hidden = Boolean(pending);
+  els.personalRecordingStart.disabled = !ready || busy;
+  els.personalRecordingStart.textContent = current ? 'Registra una nuova versione' : 'Registra dal principio';
+  els.personalRecordingReplay.hidden = !current || Boolean(pending);
+  els.personalRecordingReplay.disabled = busy;
+  els.personalRecordingDelete.hidden = !current || Boolean(pending);
+  els.personalRecordingDelete.disabled = busy;
+  els.personalRecordingSave.disabled = !pending || personal.saving;
+  els.personalRecordingDiscard.disabled = !pending || personal.saving;
+  els.personalRecordingClose.disabled = Boolean(personal.capture) || personal.saving;
+  if (pending) {
+    els.personalRecordingSave.textContent = current ? 'Sostituisci la registrazione' : 'Salva nel profilo';
+    els.personalRecordingReviewSummary.textContent = `${Math.round(pending.durationMs / 1000)} s · ${pending.pitchDocument.samples.length} campioni pitch. Ascolta e poi scegli se salvare o scartare.`;
+  }
+}
+
+async function refreshPersonalRecording() {
+  const personal = state.personalRecording;
+  if (!window.PersonalRecordings || !state.bundleManifest?.piece_id) {
+    personal.current = null;
+    els.personalRecordingStatus.textContent = 'Il profilo registrazioni non è disponibile in questa modalità.';
+    updatePersonalRecordingControls();
+    return;
+  }
+  personal.loading = true; updatePersonalRecordingControls();
+  try {
+    const result = await PersonalRecordings.mine(state.bundleManifest.piece_id);
+    personal.current = result.recordings?.[0] ?? null;
+    els.personalRecordingStatus.textContent = personal.current
+      ? 'Puoi riascoltare la registrazione salvata oppure crearne una nuova e decidere se sostituirla.'
+      : 'Nessuna registrazione salvata per questo brano.';
+  } catch (error) {
+    personal.current = null;
+    els.personalRecordingStatus.textContent = `Profilo non disponibile: ${error.message}`;
+  } finally { personal.loading = false; updatePersonalRecordingControls(); }
+}
+
+async function openPersonalRecordingDialog() {
+  closeSettingsMenu();
+  if (state.personalRecording.replay) stopPersonalRecordingReplay();
+  if (state.clock?.running) state.clock.pause();
+  updatePlaybackButton();
+  if (!state.personalRecording.pending) {
+    els.personalRecordingStatus.textContent = 'Caricamento della registrazione personale…';
+    void refreshPersonalRecording();
+  }
+  updatePersonalRecordingControls();
+  if (!els.personalRecordingDialog.open) els.personalRecordingDialog.showModal();
+}
+
+async function startPersonalRecordingCapture() {
+  const personal = state.personalRecording;
+  if (!els.personalRecordingHeadphones.checked) {
+    els.personalRecordingStatus.textContent = 'La registrazione è disponibile soltanto usando cuffie.';
+    return;
+  }
+  if (!els.personalRecordingStorageConsent.checked) {
+    els.personalRecordingStatus.textContent = 'Serve il consenso esplicito per registrare e salvare la voce nel profilo.';
+    return;
+  }
+  if (!window.MediaRecorder || !window.PersonalRecordings) {
+    els.personalRecordingStatus.textContent = 'Questo browser non supporta la registrazione personale.';
+    return;
+  }
+  if (personal.pending) discardPersonalRecordingPending();
+  if (personal.replay) stopPersonalRecordingReplay();
+  if (state.clock.running) state.clock.pause();
+  if (state.microphoneStatus !== 'active') await toggleMicrophone();
+  if (state.microphoneStatus !== 'active' || !state.microphoneStream) {
+    els.personalRecordingStatus.textContent = 'Autorizza il microfono per registrare la tua voce.';
+    return;
+  }
+  clearPitchHistory();
+  seekToMeasure(0, false, false);
+  await waitForMediaReady(els.backingAudio, 2);
+  applyPendingAudioSeek();
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus'
+    : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus' : '';
+  const recorder = new MediaRecorder(state.microphoneStream, mimeType ? { mimeType } : undefined);
+  const capture = {
+    recorder, chunks: [], takeId: state.pitchTakeId, startedAt: new Date().toISOString(),
+    startedAtMs: performance.now(), startAudioTimeSec: state.microphoneContext.currentTime,
+    audioOffsetMs: 0, stopping: false,
+    pieceId: state.bundleManifest.piece_id, scoreVersionId: state.runtime.scoreVersionId,
+    partId: state.runtime.selectedPartId, playbackRate: Number(els.playbackSpeed.value),
+    transpose: state.transpose,
+  };
+  personal.capture = capture;
+  updateMicrophoneButton();
+  recorder.ondataavailable = event => { if (event.data.size) capture.chunks.push(event.data); };
+  recorder.start(250);
+  els.personalRecordingLive.hidden = false;
+  els.personalRecordingLiveTitle.textContent = '● Registrazione personale';
+  els.personalRecordingLiveDetail.textContent = 'Voce e pitch in acquisizione. Le cuffie devono restare collegate.';
+  els.personalRecordingStopLive.textContent = 'Interrompi';
+  els.personalRecordingDialog.close();
+  try {
+    await state.playbackMixer.resume([els.backingAudio, ...state.voiceStemAudio.values()]);
+    syncBackingLevel(); syncVoiceStemLevels();
+    await state.clock.play();
+    capture.audioOffsetMs = Math.max(0, Math.round((state.microphoneContext.currentTime - capture.startAudioTimeSec) * 1000));
+    state.attemptActive = false;
+    updatePlaybackButton();
+    if (!state.rafId) state.rafId = requestAnimationFrame(render);
+  } catch (error) {
+    els.personalRecordingStatus.textContent = `Il brano non è partito: ${error.message ?? 'errore audio'}.`;
+    stopPersonalRecordingCapture({ discard: true });
+    if (!els.personalRecordingDialog.open) els.personalRecordingDialog.showModal();
+  }
+}
+
+function finalizePersonalRecordingCapture(capture) {
+  if (capture.finalized) return;
+  capture.finalized = true;
+  const durationMs = Math.max(1, Math.round(performance.now() - capture.startedAtMs));
+  const audio = new Blob(capture.chunks, { type: capture.recorder.mimeType || 'audio/webm' });
+  const samples = state.pitchSamples
+    .filter(sample => sample.takeId === capture.takeId && Number.isFinite(sample.displayPitch))
+    .map(sample => ({ beat: Number(sample.beat.toFixed(5)), displayPitch: Number(sample.displayPitch.toFixed(5)),
+      confidence: Number(Math.max(0, Math.min(1, sample.confidence ?? 0)).toFixed(5)),
+      confirmationState: sample.confirmationState ?? 'confirmed' }));
+  const pitchDocument = { version: 1, totalBeats: totalBeats(), durationMs,
+    audioOffsetMs: capture.audioOffsetMs, playbackRate: capture.playbackRate,
+    transpose: capture.transpose, samples };
+  state.personalRecording.pending = { ...capture, recorder: null, chunks: null, durationMs, audio, pitchDocument };
+  state.personalRecording.capture = null;
+  updateMicrophoneButton();
+  revokePersonalRecordingPreview();
+  state.personalRecording.previewUrl = URL.createObjectURL(audio);
+  els.personalRecordingPreview.src = state.personalRecording.previewUrl;
+  els.personalRecordingStatus.textContent = samples.length
+    ? 'Registrazione pronta: ascoltala e scegli se salvarla nel profilo o scartarla.'
+    : 'La voce è stata registrata, ma non è stato rilevato pitch: conviene scartare e riprovare più vicino al microfono.';
+  els.personalRecordingLive.hidden = true;
+  updatePersonalRecordingControls();
+  if (!els.personalRecordingDialog.open) els.personalRecordingDialog.showModal();
+  void stopMicrophone();
+}
+
+function stopPersonalRecordingCapture({ discard = false } = {}) {
+  const capture = state.personalRecording.capture;
+  if (!capture || capture.stopping) return;
+  capture.stopping = true;
+  if (state.clock?.running) state.clock.pause();
+  updatePlaybackButton();
+  els.personalRecordingLive.hidden = true;
+  if (discard) {
+    capture.recorder.onstop = () => {};
+    if (capture.recorder.state !== 'inactive') capture.recorder.stop();
+    state.personalRecording.capture = null;
+    updateMicrophoneButton();
+    void stopMicrophone();
+    return;
+  }
+  capture.recorder.onstop = () => finalizePersonalRecordingCapture(capture);
+  if (capture.recorder.state === 'inactive') finalizePersonalRecordingCapture(capture);
+  else capture.recorder.stop();
+}
+
+function discardPersonalRecordingPending() {
+  state.personalRecording.pending = null;
+  revokePersonalRecordingPreview();
+  els.personalRecordingStatus.textContent = 'Nuova registrazione scartata. Quella già salvata, se presente, non è stata modificata.';
+  updatePersonalRecordingControls();
+}
+
+async function savePersonalRecording() {
+  const personal = state.personalRecording;
+  const pending = personal.pending;
+  if (!pending || personal.saving) return;
+  if (!pending.pitchDocument.samples.length) {
+    els.personalRecordingStatus.textContent = 'Non posso salvare un replay senza campioni pitch. Scarta e riprova.';
+    return;
+  }
+  personal.saving = true;
+  els.personalRecordingStatus.textContent = personal.current
+    ? 'Sostituzione della registrazione nel profilo…' : 'Salvataggio nel profilo…';
+  updatePersonalRecordingControls();
+  try {
+    const result = await PersonalRecordings.save({
+      pieceId: pending.pieceId, scoreVersionId: pending.scoreVersionId, partId: pending.partId,
+      durationMs: pending.durationMs, audioOffsetMs: pending.audioOffsetMs,
+      playbackRate: pending.playbackRate, transpose: pending.transpose,
+      consent: true, headphonesConfirmed: true, replaceExisting: Boolean(personal.current),
+    }, pending.audio, pending.pitchDocument);
+    personal.current = result.recording;
+    personal.pending = null;
+    revokePersonalRecordingPreview();
+    els.personalRecordingStatus.textContent = result.updated
+      ? 'Registrazione precedente sostituita. Il nuovo replay è pronto.'
+      : 'Registrazione salvata nel tuo profilo privato.';
+    showToast(result.updated ? 'Registrazione sostituita.' : 'Registrazione salvata.');
+  } catch (error) {
+    if (error.status === 409 && error.payload?.recording) personal.current = error.payload.recording;
+    els.personalRecordingStatus.textContent = error.status === 409
+      ? 'Esiste già una registrazione: ricontrolla e premi di nuovo “Sostituisci”.'
+      : `Salvataggio non riuscito: ${error.message}`;
+  } finally { personal.saving = false; updatePersonalRecordingControls(); }
+}
+
+async function deletePersonalRecording() {
+  const recording = state.personalRecording.current;
+  if (!recording || !confirm('Eliminare definitivamente la registrazione personale di questo brano?')) return;
+  state.personalRecording.loading = true; updatePersonalRecordingControls();
+  try {
+    await PersonalRecordings.delete(recording.id);
+    state.personalRecording.current = null;
+    els.personalRecordingStatus.textContent = 'Registrazione eliminata dal profilo.';
+    showToast('Registrazione personale eliminata.');
+  } catch (error) {
+    els.personalRecordingStatus.textContent = `Eliminazione non riuscita: ${error.message}`;
+  } finally { state.personalRecording.loading = false; updatePersonalRecordingControls(); }
+}
+
+function personalReplayAudioTime() {
+  const replay = state.personalRecording.replay;
+  if (!replay) return 0;
+  return replay.audioOffsetMs / 1000 + playbackSnapshot().performanceTime / replay.playbackRate;
+}
+
+function syncPersonalRecordingReplayAudio(force = false) {
+  const replay = state.personalRecording.replay;
+  if (!replay || els.personalRecordingReplayAudio.readyState < 1) return;
+  const target = Math.max(0, Math.min(els.personalRecordingReplayAudio.duration || Infinity, personalReplayAudioTime()));
+  if (force || Math.abs(els.personalRecordingReplayAudio.currentTime - target) > .12) {
+    try { els.personalRecordingReplayAudio.currentTime = target; } catch (_) {}
+  }
+}
+
+async function startPersonalRecordingReplay() {
+  const recording = state.personalRecording.current;
+  if (!recording) return;
+  if (recording.scoreVersionId !== state.runtime.scoreVersionId) {
+    els.personalRecordingStatus.textContent = 'Questa registrazione usa una versione precedente dello spartito. Creane una nuova per mantenere il replay sincronizzato.';
+    return;
+  }
+  state.personalRecording.loading = true; updatePersonalRecordingControls();
+  try {
+    const pitchDocument = await PersonalRecordings.pitch(recording);
+    if (state.clock.running) state.clock.pause();
+    if (state.microphoneStatus !== 'idle') await stopMicrophone();
+    if (state.runtime.parts.some(part => part.id === recording.partId) && state.runtime.selectedPartId !== recording.partId) {
+      changePart(recording.partId);
+      els.partSelector.value = recording.partId;
+    }
+    state.transpose = recording.transpose;
+    els.transpose.value = String(recording.transpose);
+    updateTransposeControl();
+    state.playbackMixer.setTranspose(state.transpose);
+    els.playbackSpeed.value = String(recording.playbackRate);
+    if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(recording.playbackRate);
+    else state.clock.setSpeed(recording.playbackRate);
+    await applyVoiceSelection(state.selectedVoiceIds);
+    seekToMeasure(0, false, false);
+    els.personalRecordingReplayAudio.src = recording.audioUrl;
+    els.personalRecordingReplayAudio.playbackRate = 1;
+    await Promise.all([waitForMediaReady(els.backingAudio, 2), waitForMediaReady(els.personalRecordingReplayAudio, 1)]);
+    applyPendingAudioSeek();
+    state.personalRecording.replay = { ...recording, pitchSamples: pitchDocument.samples.map(sample => ({
+      ...sample, takeId: -1, confirmationState: sample.confirmationState ?? 'confirmed',
+    })) };
+    syncPersonalRecordingReplayAudio(true);
+    els.personalRecordingLive.hidden = false;
+    els.personalRecordingLiveTitle.textContent = '▶ Replay della tua registrazione';
+    els.personalRecordingLiveDetail.textContent = 'Ascolto della voce e pitch detection sul brano.';
+    els.personalRecordingStopLive.textContent = 'Esci dal replay';
+    els.personalRecordingDialog.close();
+    await state.playbackMixer.resume([els.backingAudio, ...state.voiceStemAudio.values()]);
+    syncBackingLevel(); syncVoiceStemLevels();
+    await Promise.all([state.clock.play(), els.personalRecordingReplayAudio.play()]);
+    state.attemptActive = false;
+    updatePlaybackButton(); render();
+  } catch (error) {
+    stopPersonalRecordingReplay();
+    els.personalRecordingStatus.textContent = `Replay non disponibile: ${error.message}`;
+    if (!els.personalRecordingDialog.open) els.personalRecordingDialog.showModal();
+  } finally { state.personalRecording.loading = false; updatePersonalRecordingControls(); }
+}
+
+function stopPersonalRecordingReplay() {
+  const wasReplaying = Boolean(state.personalRecording.replay);
+  if (wasReplaying && state.clock?.running) state.clock.pause();
+  els.personalRecordingReplayAudio.pause();
+  els.personalRecordingReplayAudio.removeAttribute('src');
+  els.personalRecordingReplayAudio.load();
+  state.personalRecording.replay = null;
+  els.personalRecordingLive.hidden = true;
+  if (wasReplaying) { updatePlaybackButton(); render(); }
+}
+
+async function togglePersonalRecordingReplayPlayback() {
+  if (!state.personalRecording.replay) return;
+  if (state.clock.running) {
+    state.clock.pause();
+    els.personalRecordingReplayAudio.pause();
+  } else {
+    if (playbackSnapshot().beat >= totalBeats()) seekToMeasure(0, false, false);
+    syncPersonalRecordingReplayAudio(true);
+    await state.playbackMixer.resume([els.backingAudio, ...state.voiceStemAudio.values()]);
+    await Promise.all([state.clock.play(), els.personalRecordingReplayAudio.play()]);
+  }
+  updatePlaybackButton(); render();
+}
+
 function showAttemptResult({ preliminary = false } = {}) {
   els.resultDialog.dataset.preliminary = String(preliminary);
   els.resultHeading.textContent = preliminary ? 'Risultati preliminari' : 'Prova completata';
@@ -3478,10 +3949,128 @@ function showAttemptResult({ preliminary = false } = {}) {
   if (!els.resultDialog.open) els.resultDialog.showModal();
 }
 
+function attemptCoveragePercent() {
+  if (!state.runtime) return 0;
+  const targetMs = state.runtime.targetEvents.reduce((total, event) => {
+    const start = event.onsetBeat + (event.attackGraceBeats || 0);
+    const end = event.onsetBeat + event.durationBeats;
+    return total + Math.max(0, state.runtime.secondsAtBeat(end) - state.runtime.secondsAtBeat(start)) * 1000;
+  }, 0);
+  return targetMs > 0 ? Math.min(100, state.attempt.voicedMs / targetMs * 100) : 0;
+}
+
+async function shareCompletedAttempt() {
+  if (!window.PerformanceSharing || !RUNTIME_CONFIG.features?.performances || state.attempt.voicedMs < 1000) return;
+  const score = Math.round(state.attempt.insideMs / state.attempt.voicedMs * 100);
+  const coverage = attemptCoveragePercent();
+  if (!state.attemptStartedFromBeginning) {
+    els.resultProgress.textContent += `${els.resultProgress.textContent ? ' ' : ''}Il best condiviso richiede una prova iniziata dalla prima battuta.`;
+    return;
+  }
+  if (state.transpose !== 0 || Number(els.playbackSpeed.value) !== 1) {
+    els.resultProgress.textContent += `${els.resultProgress.textContent ? ' ' : ''}Il best condiviso richiede tonalità originale e velocità 100%.`;
+    return;
+  }
+  if (coverage < PerformanceSharing.MIN_COVERAGE) {
+    els.resultProgress.textContent += `${els.resultProgress.textContent ? ' ' : ''}Copertura ${coverage.toFixed(1)}%: serve almeno ${PerformanceSharing.MIN_COVERAGE}% per il best condiviso.`;
+    return;
+  }
+  const takeId = state.pitchTakeId;
+  const targetEvents = state.runtime.targetEvents.map(event => ({
+    onsetBeat: event.onsetBeat, durationBeats: event.durationBeats, midiPitch: event.midiPitch,
+  }));
+  const pitchSamples = state.pitchSamples.filter(sample => sample.takeId === takeId && Number.isFinite(sample.displayPitch))
+    .map(sample => ({ beat: sample.beat, displayPitch: sample.displayPitch }));
+  const part = state.runtime.parts.find(item => item.id === state.runtime.selectedPartId);
+  const piece = state.library?.find(item => item.piece_id === state.bundleManifest?.piece_id);
+  const pieceId = state.bundleManifest.piece_id;
+  const scoreVersionId = state.runtime.scoreVersionId;
+  const partId = state.runtime.selectedPartId;
+  const image = await PerformanceSharing.renderPianoRoll({
+    title: piece?.title ?? state.runtime.title,
+    partName: part?.name, scoreVersionId, scoringProfile: PerformanceSharing.PROFILE,
+    score, coverage, totalBeats: totalBeats(), targetEvents, pitchSamples,
+    measures: state.occurrenceMeasures.map(measure => ({ startBeat: measure.startBeat, number: measure.number })),
+  });
+  const result = await PerformanceSharing.submitBest({
+    pieceId, scoreVersionId, partId,
+    scoringProfile: PerformanceSharing.PROFILE,
+    score, coverage: coverage.toFixed(3), completed: true,
+  }, image);
+  const message = result.updated ? 'Nuovo best condiviso salvato.' : 'Il best condiviso precedente resta migliore.';
+  els.resultProgress.textContent += `${els.resultProgress.textContent ? ' ' : ''}${message}`;
+}
+
+function performancePieceTitle(pieceId) {
+  return state.library?.find(piece => piece.piece_id === pieceId)?.title ?? pieceId.replaceAll('-', ' ');
+}
+
+function renderPerformanceCards(performances, own = false) {
+  els.performanceList.replaceChildren();
+  els.performanceStatus.hidden = performances.length > 0;
+  els.performanceStatus.textContent = performances.length ? '' : 'Nessun best score disponibile in questo ambito.';
+  for (const performance of performances) {
+    const card = document.createElement('article'); card.className = 'performance-card';
+    const image = document.createElement('img'); image.src = performance.imageUrl;
+    image.alt = `Piano roll di ${performance.owner.displayName}, ${performancePieceTitle(performance.pieceId)}, punteggio ${performance.score}%`;
+    const body = document.createElement('div'); body.className = 'performance-card-body';
+    const title = document.createElement('strong'); title.textContent = performancePieceTitle(performance.pieceId);
+    const owner = document.createElement('small'); owner.textContent = `${performance.owner.displayName} · parte ${performance.partId} · copertura ${Number(performance.coverage).toFixed(1)}%`;
+    const score = document.createElement('span'); score.className = 'performance-score'; score.textContent = `${performance.score}%`;
+    body.append(title, score, owner); card.append(image, body);
+    if (own) {
+      const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'performance-delete'; remove.textContent = 'Elimina';
+      remove.addEventListener('click', async () => {
+        remove.disabled = true;
+        try { await PerformanceSharing.delete(performance.id); await loadOwnPerformances(); }
+        catch (_) { els.performanceStatus.hidden = false; els.performanceStatus.textContent = 'Eliminazione non riuscita. Riprova.'; remove.disabled = false; }
+      });
+      card.append(remove);
+    }
+    els.performanceList.append(card);
+  }
+}
+
+function selectPerformanceTab(button) {
+  els.performanceTabs.querySelectorAll('button').forEach(item => item.classList.toggle('is-active', item === button));
+}
+
+async function loadOwnPerformances(button = els.performanceTabs.querySelector('[data-scope="mine"]')) {
+  if (button) selectPerformanceTab(button);
+  els.performanceStatus.hidden = false; els.performanceStatus.textContent = 'Caricamento…'; els.performanceList.replaceChildren();
+  const result = await PerformanceSharing.mine(); renderPerformanceCards(result.performances, true);
+}
+
+async function loadGroupPerformances(group, button) {
+  selectPerformanceTab(button); els.performanceStatus.hidden = false; els.performanceStatus.textContent = 'Caricamento…'; els.performanceList.replaceChildren();
+  try { const result = await PerformanceSharing.group(group.id); renderPerformanceCards(result.performances, false); }
+  catch (_) { els.performanceStatus.textContent = 'Risultati del settore non disponibili.'; }
+}
+
+async function openPerformanceHub() {
+  if (!window.PerformanceSharing) return;
+  els.performanceDialog.showModal(); els.performanceTabs.replaceChildren(); els.performanceList.replaceChildren();
+  els.performanceStatus.hidden = false; els.performanceStatus.textContent = 'Caricamento…';
+  try {
+    const [me, groups] = await Promise.all([PerformanceSharing.me(), PerformanceSharing.groups()]);
+    state.performanceMe = me; els.performanceIdentity.textContent = me.member.displayName;
+    const mine = document.createElement('button'); mine.type = 'button'; mine.dataset.scope = 'mine'; mine.textContent = 'I miei';
+    mine.addEventListener('click', () => void loadOwnPerformances(mine)); els.performanceTabs.append(mine);
+    for (const group of groups.groups) {
+      const button = document.createElement('button'); button.type = 'button'; button.textContent = group.name;
+      button.addEventListener('click', () => void loadGroupPerformances(group, button)); els.performanceTabs.append(button);
+    }
+    await loadOwnPerformances(mine);
+  } catch (_) { els.performanceStatus.textContent = 'Risultati non disponibili. Riprova più tardi.'; }
+}
+
 function finishAttempt() {
   state.attemptActive = false;
   state.resumeCheckpointBeat = null;
   showAttemptResult();
+  void shareCompletedAttempt().catch(() => {
+    els.resultProgress.textContent += `${els.resultProgress.textContent ? ' ' : ''}Salvataggio del best non riuscito; la prova resta disponibile solo localmente.`;
+  });
 }
 
 function globalDetectorPreferences() {
@@ -3512,6 +4101,7 @@ function savePreferences() {
     localStorage.setItem(preferenceKey(), JSON.stringify({ transpose: state.transpose,
       speed: els.playbackSpeed.value, volume: els.volume.value, metronome: els.metronomeVolume.value,
       settingsDefaultsVersion: PitchShared.SETTINGS_DEFAULTS_VERSION,
+      mixerDefaultsVersion: MIXER_DEFAULTS_VERSION,
       pianoRollDelayMs: state.pianoRollDelayMs,
       selectedVoiceIds: [...state.selectedVoiceIds], voiceLevels: Object.fromEntries(state.voiceLevels),
       accompanimentEnabled: state.accompanimentEnabled, accompanimentLevel: state.accompanimentLevel,
@@ -3544,16 +4134,30 @@ function restorePreferences() {
   state.transpose = Number.isInteger(saved.transpose) && Math.abs(saved.transpose) <= 12 ? saved.transpose : 0;
   els.transpose.value = String(state.transpose);
   const availableVoiceIds = Object.keys(state.backingManifest?.voice_stems ?? {});
-  if (Array.isArray(saved.selectedVoiceIds)) {
+  const legacyDefaultSelection = Array.isArray(saved.selectedVoiceIds)
+    && saved.selectedVoiceIds.length === 1 && saved.selectedVoiceIds[0] === state.runtime.selectedPartId;
+  const legacyDefaultVoiceLevels = availableVoiceIds.every((partId) => {
+    const level = Number(saved.voiceLevels?.[partId]);
+    return !Number.isFinite(level) || level >= .999;
+  });
+  const legacyDefaultAccompaniment = saved.accompanimentEnabled !== false
+    && (!Number.isFinite(Number(saved.accompanimentLevel)) || Number(saved.accompanimentLevel) >= .999);
+  const useNewMixerDefaults = saved.mixerDefaultsVersion !== MIXER_DEFAULTS_VERSION
+    && (!Array.isArray(saved.selectedVoiceIds)
+      || (legacyDefaultSelection && legacyDefaultVoiceLevels && legacyDefaultAccompaniment));
+  if (useNewMixerDefaults) {
+    state.selectedVoiceIds = new Set(availableVoiceIds);
+  } else if (Array.isArray(saved.selectedVoiceIds)) {
     state.selectedVoiceIds = new Set(saved.selectedVoiceIds.filter((partId) => availableVoiceIds.includes(partId)));
   }
   state.voiceLevels = new Map(availableVoiceIds.map((partId) => {
     const level = Number(saved.voiceLevels?.[partId]);
-    return [partId, Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : 1];
+    const defaultLevel = partId === state.runtime.selectedPartId ? DEFAULT_OWN_VOICE_LEVEL : DEFAULT_OTHER_VOICE_LEVEL;
+    return [partId, !useNewMixerDefaults && Number.isFinite(level) ? Math.max(0, Math.min(1, level)) : defaultLevel];
   }));
   state.accompanimentEnabled = Boolean(state.backingManifest?.accompaniment_file) && saved.accompanimentEnabled !== false;
-  state.accompanimentLevel = Number.isFinite(Number(saved.accompanimentLevel))
-    ? Math.max(0, Math.min(1, Number(saved.accompanimentLevel))) : 1;
+  state.accompanimentLevel = !useNewMixerDefaults && Number.isFinite(Number(saved.accompanimentLevel))
+    ? Math.max(0, Math.min(1, Number(saved.accompanimentLevel))) : DEFAULT_ACCOMPANIMENT_LEVEL;
   // Note names follow the current Italian interface. Language selection will
   // return only as a single global application preference.
   state.noteNames = 'italian';
@@ -3711,6 +4315,9 @@ function bindControls() {
   bindGridInspection();
   bindScorePitchDivider();
   bindBenchmarkAnalysisCanvas();
+  els.performances.hidden = !RUNTIME_CONFIG.features?.performances;
+  els.performances.addEventListener('click', () => void openPerformanceHub());
+  els.performanceClose.addEventListener('click', () => els.performanceDialog.close());
   els.accompanimentMode.addEventListener('click', openVoiceMixer);
   els.voiceMixerClose.addEventListener('click', () => els.voiceMixerDialog.close());
   els.voiceMixerDialog.addEventListener('click', closeVoiceMixerFromBackdrop);
@@ -3736,7 +4343,7 @@ function bindControls() {
     void applyVoiceSelection(Object.keys(state.backingManifest?.voice_stems ?? {}));
     savePreferences();
   });
-  window.addEventListener('pagehide', savePreferences);
+  window.addEventListener('pagehide', () => { savePreferences(); void suspendPracticeForBackground(); });
   els.resultClose.addEventListener('click', () => els.resultDialog.close());
   els.resultResume.addEventListener('click', () => {
     els.resultDialog.close();
@@ -3747,15 +4354,26 @@ function bindControls() {
   for (const eventName of ['loadedmetadata', 'durationchange', 'canplay', 'progress', 'seeked']) {
     els.backingAudio.addEventListener(eventName, applyPendingAudioSeek);
   }
-  els.backingAudio.addEventListener('play', () => { void playVoiceStems(); });
-  els.backingAudio.addEventListener('pause', pauseVoiceStems);
+  els.backingAudio.addEventListener('play', () => {
+    void playVoiceStems();
+    if (state.personalRecording.replay) {
+      syncPersonalRecordingReplayAudio(true);
+      void els.personalRecordingReplayAudio.play().catch(() => {});
+    }
+  });
+  els.backingAudio.addEventListener('pause', () => {
+    pauseVoiceStems();
+    if (state.personalRecording.replay) els.personalRecordingReplayAudio.pause();
+  });
   els.backingAudio.addEventListener('seeking', () => {
     for (const audio of state.voiceStemAudio.values()) audio.currentTime = els.backingAudio.currentTime;
+    syncPersonalRecordingReplayAudio(true);
   });
   els.backingAudio.addEventListener('timeupdate', () => {
     for (const audio of state.voiceStemAudio.values()) {
       if (Math.abs(audio.currentTime - els.backingAudio.currentTime) > .08) audio.currentTime = els.backingAudio.currentTime;
     }
+    syncPersonalRecordingReplayAudio();
   });
   els.transpose.addEventListener('change', async () => {
     state.transpose = Number(els.transpose.value);
@@ -3888,28 +4506,46 @@ function bindControls() {
     updateMetronomeControl();
     savePreferences();
   });
-  els.backingAudio.addEventListener('ended', () => { updatePlaybackButton(); render(); });
+  els.backingAudio.addEventListener('ended', () => {
+    if (state.personalRecording.capture) stopPersonalRecordingCapture();
+    else if (state.personalRecording.replay) stopPersonalRecordingReplay();
+    updatePlaybackButton(); render();
+  });
   els.backingAudio.addEventListener('pause', () => { updatePlaybackButton(); if (!state.clock.running) render(); });
   els.backingAudio.addEventListener('error', () => showToast(`Errore audio (${els.backingAudio.error?.code ?? 'sconosciuto'}).`));
   els.settings.addEventListener('click', (event) => { event.stopPropagation(); toggleSettingsMenu(); });
   els.settingsMenuMixer.addEventListener('click', openVoiceMixer);
+  els.settingsMenuRecording.addEventListener('click', () => void openPersonalRecordingDialog());
   els.settingsMenuBasic.addEventListener('click', () => openDetectorSettings('basic'));
   els.settingsMenuAdvanced.addEventListener('click', () => openDetectorSettings('advanced'));
+  for (const control of [els.personalRecordingHeadphones, els.personalRecordingStorageConsent]) {
+    control.addEventListener('change', updatePersonalRecordingControls);
+  }
+  els.personalRecordingStart.addEventListener('click', () => void startPersonalRecordingCapture());
+  els.personalRecordingStopLive.addEventListener('click', () => {
+    if (state.personalRecording.capture) stopPersonalRecordingCapture();
+    else if (state.personalRecording.replay) { stopPersonalRecordingReplay(); void openPersonalRecordingDialog(); }
+  });
+  els.personalRecordingSave.addEventListener('click', () => void savePersonalRecording());
+  els.personalRecordingDiscard.addEventListener('click', discardPersonalRecordingPending);
+  els.personalRecordingReplay.addEventListener('click', () => void startPersonalRecordingReplay());
+  els.personalRecordingDelete.addEventListener('click', () => void deletePersonalRecording());
+  els.personalRecordingClose.addEventListener('click', () => {
+    if (state.personalRecording.pending) {
+      els.personalRecordingStatus.textContent = 'Prima di chiudere scegli se salvare o scartare la nuova registrazione.';
+      return;
+    }
+    els.personalRecordingDialog.close();
+  });
+  els.personalRecordingDialog.addEventListener('cancel', event => {
+    if (state.personalRecording.capture || state.personalRecording.pending || state.personalRecording.saving) {
+      event.preventDefault();
+      els.personalRecordingStatus.textContent = 'Scegli se salvare o scartare prima di chiudere.';
+    }
+  });
   document.addEventListener('click', (event) => {
     if (!els.settingsMenuWrap.contains(event.target)) closeSettingsMenu();
   });
-  for (const control of [els.settingsAudioOutputStandard, els.settingsAudioOutputBluetooth]) {
-    control.addEventListener('change', () => {
-      if (!control.checked) return;
-      saveAudioOutputPreference(control.value);
-      state.plumeSettings.timeAdvanceMs = control.value === 'bluetooth'
-        ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
-      updateDetectorSettingsUi(); savePreferences(); render();
-      showToast(control.value === 'bluetooth'
-        ? 'Bluetooth confermato: anticipo traccia vocale 320 ms.'
-        : 'Uscita non Bluetooth: anticipo traccia vocale 270 ms.');
-    });
-  }
   els.settingsTextScale.addEventListener('input', () => {
     state.lyricTextScale = UiPreferences.apply(Number(els.settingsTextScale.value) / 100);
     els.settingsTextScaleValue.textContent = `${Math.round(state.lyricTextScale * 100)}%`;
@@ -3985,25 +4621,20 @@ function bindControls() {
     applyLiveTrackerSettings(); updateDetectorSettingsUi(); savePreferences();
     render(); showToast('Impostazioni v1 ripristinate ai valori predefiniti.');
   });
-  els.settingsDialog.addEventListener('click', (event) => {
-    const selected = event.target.closest('.setting-info');
-    const shouldOpen = selected && !selected.classList.contains('is-open');
-    els.settingsDialog.querySelectorAll('.setting-info.is-open').forEach((button) => button.classList.remove('is-open'));
-    if (shouldOpen) selected.classList.add('is-open');
-  });
-  els.settingsDialog.addEventListener('close', () => {
-    els.settingsDialog.querySelectorAll('.setting-info.is-open').forEach((button) => button.classList.remove('is-open'));
-  });
-  els.settingsDialog.addEventListener('click', closeSettingsFromBackdrop);
-  navigator.mediaDevices?.addEventListener('devicechange', () => {
-    if (Date.now() < state.ignoreAudioDeviceChangesUntil) return;
-    invalidateAudioOutputPreference(true);
-  });
   document.getElementById('admin-review').addEventListener('click', () => window.open('admin-review.html', 'choir-admin-review'));
   document.getElementById('exit-practice').addEventListener('click', openLibraryPicker);
   window.addEventListener('resize', () => { updateMobileChrome(); state.activeScoreSegment = null; render(); });
   window.addEventListener('resize', () => { if (!els.benchmarkAnalysis.hidden) drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); });
-  window.addEventListener('beforeunload', () => { savePitchHistory(); state.microphoneStream?.getTracks().forEach((track) => track.stop()); });
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'hidden') void suspendPracticeForBackground();
+  });
+  window.addEventListener('beforeunload', (event) => {
+    savePitchHistory();
+    if (state.personalRecording.capture || state.personalRecording.pending) {
+      event.preventDefault();
+      event.returnValue = '';
+    }
+  });
   document.addEventListener('keydown', (event) => {
     if (event.key === 'Escape' && !els.settingsMenu.hidden) {
       closeSettingsMenu(); els.settings.focus(); event.preventDefault(); return;
@@ -4041,6 +4672,7 @@ async function initialize() {
   if (!libraryResponse.ok) throw new Error('Libreria dei brani non disponibile');
   state.library = (await libraryResponse.json()).pieces ?? [];
   if (!state.library.length) throw new Error('Non ci sono brani MuseScore nella cartella sheets');
+  bindAudioOutputControls();
   bindLibraryPicker();
   window.addEventListener('message', (event) => {
     if (event.origin === location.origin && event.data?.type === 'choir-bundle-approval') location.reload();
@@ -4063,6 +4695,13 @@ async function initialize() {
 }
 
 function openLibraryPicker() {
+  if (state.personalRecording.capture || state.personalRecording.pending) {
+    els.personalRecordingStatus.textContent = 'Prima di cambiare brano interrompi la registrazione e scegli se salvarla o scartarla.';
+    if (!els.personalRecordingDialog.open && !state.personalRecording.capture) els.personalRecordingDialog.showModal();
+    showToast('Completa prima la registrazione personale.');
+    return;
+  }
+  if (state.personalRecording.replay) stopPersonalRecordingReplay();
   if (state.clock?.running) state.clock.pause();
   if (state.clock) updatePlaybackButton();
   const requested = new URLSearchParams(window.location.search).get('piece');
@@ -4120,7 +4759,7 @@ function bindLibraryPicker() {
     const piece = state.library.find((item) => item.piece_id === els.libraryPiece.value);
     void warmSelectedPiece(piece, els.libraryPart.value);
   });
-  els.libraryOpen.addEventListener('click', async () => {
+  const openSelectedPracticePiece = async () => {
     const pieceId = els.libraryPiece.value;
     const partId = els.libraryPart.value;
     els.libraryOpen.disabled = true;
@@ -4134,6 +4773,14 @@ function bindLibraryPicker() {
     } finally {
       els.libraryOpen.disabled = false;
     }
+  };
+  els.libraryOpen.addEventListener('click', () => requestAudioOutputForEntry(openSelectedPracticePiece));
+  document.querySelectorAll('a[href="voice-lab.html"]').forEach((link) => {
+    link.addEventListener('click', (event) => {
+      if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+      event.preventDefault();
+      requestAudioOutputForEntry(() => { window.location.href = link.href; });
+    });
   });
   els.libraryScore.addEventListener('click', () => {
     window.location.href = `score-viewer.html?piece=${encodeURIComponent(els.libraryPiece.value)}`;
@@ -4157,6 +4804,10 @@ function restartPractice() {
 }
 
 async function loadPracticePiece(pieceId, { partId = null, updateHistory = false } = {}) {
+  if (state.personalRecording.capture || state.personalRecording.pending) {
+    throw new Error('Salva o scarta la registrazione personale prima di cambiare brano.');
+  }
+  if (state.personalRecording.replay) stopPersonalRecordingReplay();
   const generation = ++practiceLoadGeneration;
   state.transportSeekToken += 1;
   state.transportSeekResumeRequested = false;
@@ -4176,6 +4827,7 @@ async function loadPracticePiece(pieceId, { partId = null, updateHistory = false
   state.glyphMap = glyphMap;
   state.backingManifest = backingManifest;
   state.bundleManifest = bundleManifest;
+  state.personalRecording.current = null;
   state.runtime = NormalizedScoreRuntime.fromNormalizedScore(bundleManifest.monodic ? monodicPracticePayload(payload) : payload);
   if (!bundleManifest || bundleManifest.score_version_id !== state.runtime.scoreVersionId) {
     throw new Error('Bundle musicale incoerente: versione score/runtime non corrispondente');

@@ -2,7 +2,7 @@
 
 **Status:** review baseline
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-13
+**Last reviewed:** 2026-10-15
 
 This document gives the independent security reviewer an explicit attack
 surface and reproducible acceptance criteria. It is not evidence that a
@@ -21,8 +21,11 @@ separate written authorization.
 | Published scores, SVG and rehearsal audio | Workers Static Assets | Active authorized singers only |
 | Exact singer email addresses | Clerk and private operator list | Clerk, operator and the singer concerned |
 | Email authorization digest | D1 | Worker and maintainer |
+| Member roles, groups and best-score metadata | D1 | Worker and maintainer |
+| Piano-roll best-score PNG | Private R2 | Owner, granted section viewers and director through Worker |
+| Personal voice recording and pitch replay | Private R2 | Recording owner only through Worker |
 | Clerk public JWT key and HMAC key | Cloudflare binding/password manager | Worker runtime and maintainer |
-| Microphone samples and local takes | Browser memory/IndexedDB | That browser only |
+| Live microphone samples and unsaved takes | Browser memory | That browser only |
 | MuseScore sources and local admin APIs | Maintainer workstation | Never Internet-facing |
 
 The HMAC digest reduces disclosure impact but is still pseudonymous personal
@@ -38,10 +41,13 @@ untrusted browser
 Cloudflare Worker -- verifies signature, issuer, expiry and authorized party
     | normalized verified email -> HMAC-SHA-256
     v
-D1 authorization row (active=1)
-    |
-    v
-ASSETS binding -> immutable release files
+D1 member (active=1), choir, roles, group grants, performance and recording metadata
+    |                       |
+    v                       v
+ASSETS binding          private R2 bucket
+immutable release       current piano-roll PNG / owner-only audio and pitch
+    |                       |
+    `------ scoped Worker responses ------> browser
 
 Clerk Frontend API/email channel -> identity proof and session lifecycle
 maintainer workstation -> private list digest sync and immutable release build
@@ -86,14 +92,35 @@ maintainer workstation -> private list digest sync and immutable release build
     encrypted binding.
 14. **Private source-list handling.** `.gitignore` rejects conventional member
     list filenames; the sync tool emits only digests and deletes its temporary
-   SQL file in a `finally` block. Full replacement additionally requires the
-   operator to confirm the exact validated member count.
+    SQL file in a `finally` block. Full replacement additionally requires the
+    operator to confirm the exact validated member count.
 15. **Existing release boundary.** Only repertoire explicitly approved by
     `deploy/repertoire.json` crosses into `dist/`; source scores, OMR and local
     administrative endpoints remain excluded.
 16. **Pre-deploy configuration gate.** The npm deployment path rejects
     placeholders, non-HTTPS origins, preview URLs, invalid D1 identifiers and
     any configuration that would let static assets bypass the Worker.
+17. **Scoped artifact delivery.** Performance metadata and PNG bytes are
+    returned only after same-choir owner/director/group-grant authorization;
+    the R2 bucket has no public hostname.
+18. **Owner-only mutation.** The authenticated member ID, never a client owner
+    field, controls create, replacement and deletion. Higher-score election is
+    conditional in D1.
+19. **Bounded artifact format.** Upload accepts only a validated PNG within the
+    configured byte and dimension limits; SVG and arbitrary active content are
+    rejected.
+20. **Retention cleanup.** Owner deletion removes the current D1 pointer and
+    object. A daily scheduled handler removes inactive-member artifacts after
+    30 days.
+21. **Separate recording authorization.** Personal recording metadata, audio
+    ranges and pitch JSON require exact active owner and choir matches. Group
+    grants and director/admin roles never expand access.
+22. **Explicit capture decision.** Each take requires storage consent and a
+    headphone self-attestation. The server records both and rejects uploads
+    without them; an existing take requires explicit replacement.
+23. **Bounded passive recording formats.** Audio is limited to validated
+    WebM/Ogg/MP4 containers and 32 MiB; pitch JSON is schema-checked and bounded
+    to 2 MiB, 30 minutes and 12,000 samples. Responses are private/no-store.
 
 ## Required adversarial tests
 
@@ -124,6 +151,25 @@ member data in reports.
   deployment URLs and any preview/version URL.
 - Revoke an active member while audio is playing and document what the browser
   already buffered versus what subsequent requests can retrieve.
+- Enumerate performance and group IDs as singer, section viewer, director and
+  admin. Confirm owner-only mutation, exact group intersections, no implicit
+  admin visibility and no cross-choir access.
+- Request an R2 object directly and through a stale image URL after revocation;
+  neither path may return the image.
+- Race higher, lower and equal candidate scores; the highest committed score
+  and its matching immutable PNG must remain current.
+- Upload malformed, oversized and misleading-content-type image bodies.
+- Enumerate recording IDs as another singer, section viewer, director and
+  admin. Every metadata, audio-range, pitch and delete request must fail unless
+  the caller is the exact owner in the same choir.
+- Upload recording requests without consent/headphone confirmation, malformed
+  audio signatures, oversized pitch arrays and invalid repertoire tuples.
+- Race two replacements and verify the D1 unique owner/piece pointer never
+  exposes another member's objects. Verify superseded objects are removed or
+  queued for cleanup.
+- Revoke the owner during replay and document already-buffered bytes versus
+  subsequent owner-only range requests. Test explicit delete and the inactive
+  member retention job.
 
 ### Web and browser controls
 
@@ -165,6 +211,13 @@ member data in reports.
 - Email verification, bot protection and allowed redirects are controls in the
   Clerk tenant rather than repository code. A dashboard configuration drift can
   invalidate assumptions even while all local tests pass.
+- Browser-generated scores and piano-roll images can be forged by an
+  authenticated member. They are rehearsal feedback, not verified evidence;
+  verification would require a separate structured-pitch retention decision.
+- Stored personal recordings contain identifiable voice and structured pitch
+  data. They carry greater privacy impact than shared PNGs even though only the
+  owner is authorized. Headphone confirmation is self-attestation because the
+  browser cannot prove the physical output route.
 - Application logs intentionally avoid email addresses, which limits forensic
   attribution. Cloudflare/Clerk retention and access should be reviewed against
   the privacy policy and incident-response needs.

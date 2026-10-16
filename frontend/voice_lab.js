@@ -35,7 +35,7 @@
     analysis: null, phase: 'idle', running: false,
     reviewing: false, generation: 0, audio: null, voiceOutput: null, voiceRoom: null,
     voiceVolume: 1, ambienceEnabled: true, voiceBuffers: new Map(), phraseBuffers: new Map(), padBuffers: new Map(),
-    sources: [], timers: [], animationFrame: null, stream: null, input: null, analyser: null,
+    sources: [], timers: [], animationFrame: null, stream: null, input: null, analyser: null, microphoneGeneration: 0,
     monitorFrame: null, monitorBuffer: null, monitorSmoother: null, monitorFilter: new OneEuroFilter(),
     detectorSettings: sharedPitch.detector, plumeSettings: sharedPitch.plume, frames: [], visualFrames: [],
     livePitch: null, elapsedSeconds: 0, previewAt: 0, countInAt: 0, takeAt: 0, endAt: 0,
@@ -290,15 +290,47 @@
     state.sources.push(oscillator); reportAudioEvent('metronome', at, { accented }); return oscillator;
   }
 
+  function releaseMicrophone() {
+    state.microphoneGeneration += 1;
+    if (state.monitorFrame) cancelAnimationFrame(state.monitorFrame);
+    state.monitorFrame = null; state.monitorBuffer = null; state.monitorSmoother = null; state.livePitch = null;
+    state.stream?.getTracks().forEach((track) => track.stop());
+    state.input?.disconnect(); state.analyser?.disconnect();
+    state.stream = null; state.input = null; state.analyser = null;
+    els.lab_level.value = 0;
+  }
+
   async function ensureMicrophone() {
     if (state.stream?.active) { startPitchMonitor(); return; }
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
       throw new Error('Il microfono richiede una connessione sicura.');
-    state.stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false,
+    const generation = ++state.microphoneGeneration;
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false,
       noiseSuppression: false, autoGainControl: true, channelCount: 1 }, video: false });
+    if (generation !== state.microphoneGeneration || document.visibilityState === 'hidden') {
+      stream.getTracks().forEach((track) => track.stop());
+      throw new DOMException('Pagina non visibile', 'AbortError');
+    }
     const context = audioContext(); await context.resume();
-    state.input = context.createMediaStreamSource(state.stream); state.analyser = context.createAnalyser();
+    if (generation !== state.microphoneGeneration || document.visibilityState === 'hidden') {
+      stream.getTracks().forEach((track) => track.stop());
+      throw new DOMException('Pagina non visibile', 'AbortError');
+    }
+    state.stream = stream; state.input = context.createMediaStreamSource(stream); state.analyser = context.createAnalyser();
     state.analyser.fftSize = 2048; state.input.connect(state.analyser); startPitchMonitor();
+  }
+
+  function suspendVoiceLabForBackground() {
+    if (document.visibilityState !== 'hidden') return;
+    const wasRunning = state.running;
+    state.generation += 1; stopRecorder(false); stopScheduledAudio(); setRunning(false); releaseMicrophone();
+    void state.audio?.suspend().catch(() => {});
+    if (wasRunning) {
+      state.phase = 'idle'; state.reviewing = false;
+      setPhase('idle', 'Prova sospesa');
+      els.warmup_instruction.textContent = 'La prova è stata interrotta e il microfono è stato disattivato.';
+      showScreen('prepare');
+    }
   }
 
   function startPitchMonitor() {
@@ -854,8 +886,13 @@
     if (pendingStart) { pendingStart = false; state.routineIndex = 0; void beginTrial(); }
   });
   window.addEventListener('resize', drawViews);
+  document.addEventListener('visibilitychange', suspendVoiceLabForBackground);
+  window.addEventListener('pagehide', () => {
+    state.generation += 1; stopRecorder(false); stopScheduledAudio(); setRunning(false); releaseMicrophone();
+    void state.audio?.suspend().catch(() => {});
+  });
   window.addEventListener('beforeunload', () => {
-    state.generation += 1; stopRecorder(false); stopScheduledAudio(); state.stream?.getTracks().forEach((track) => track.stop());
+    state.generation += 1; stopRecorder(false); stopScheduledAudio(); releaseMicrophone();
   });
 
   syncSetupChoices();

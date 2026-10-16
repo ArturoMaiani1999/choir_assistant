@@ -24,6 +24,11 @@ def valid_config() -> dict:
             "binding": "AUTH_DB",
             "database_id": "12345678-1234-4123-8123-123456789abc",
         }],
+        "r2_buckets": [{
+            "binding": "PERFORMANCE_BUCKET",
+            "bucket_name": "choir-performances",
+        }],
+        "triggers": {"crons": ["17 3 * * *"]},
     }
 
 
@@ -60,6 +65,14 @@ class DeployConfigTests(unittest.TestCase):
         config["routes"].append({"pattern": "alternate.example.org", "custom_domain": True})
         errors = MODULE.validate(config)
         self.assertTrue(any("custom domain" in error for error in errors))
+
+    def test_requires_private_performance_storage_and_cleanup_schedule(self) -> None:
+        config = valid_config()
+        config["r2_buckets"] = []
+        config["triggers"] = {}
+        errors = MODULE.validate(config)
+        self.assertTrue(any("PERFORMANCE_BUCKET" in error for error in errors))
+        self.assertTrue(any("crons" in error for error in errors))
 
 
 if __name__ == "__main__":

@@ -49,21 +49,54 @@ export function identityFromSessionClaims(
 export async function authenticateClerkRequest(
   request: Request,
   env: Env,
-): Promise<AuthenticatedIdentity | null> {
+): Promise<AuthenticatedIdentity | Response | null> {
   const expectedOrigin = appOrigin(env);
   const clerk = createClerkClient({
     publishableKey: env.CLERK_PUBLISHABLE_KEY,
+    secretKey: env.CLERK_SECRET_KEY,
     jwtKey: env.CLERK_JWT_KEY,
   });
   const state = await clerk.authenticateRequest(request, {
     authorizedParties: [expectedOrigin],
   });
+  const handshakeLocation = state.headers.get("Location");
+  if (handshakeLocation) {
+    console.info(JSON.stringify({
+      event: "clerk_auth_handshake",
+      reason: state.reason,
+      status: state.status,
+    }));
+    return new Response(null, {
+      status: 307,
+      headers: state.headers,
+    });
+  }
+  if (state.status === "handshake") {
+    throw new Error("Clerk returned a handshake state without a redirect location");
+  }
   if (!state.isAuthenticated) {
+    console.warn(JSON.stringify({
+      event: "clerk_auth_rejected",
+      hasAuthorizationHeader: request.headers.has("Authorization"),
+      hasSessionCookie: /(?:^|;\s*)__session=/.test(request.headers.get("Cookie") ?? ""),
+      reason: state.reason,
+      status: state.status,
+    }));
     return null;
   }
 
   const auth = state.toAuth();
-  return identityFromSessionClaims(auth.userId, auth.sessionClaims);
+  const identity = identityFromSessionClaims(auth.userId, auth.sessionClaims);
+  if (!identity) {
+    const claims = auth.sessionClaims as Record<string, unknown>;
+    console.warn(JSON.stringify({
+      event: "clerk_identity_rejected",
+      hasActorClaim: claims.act != null,
+      hasPrimaryEmailClaim: typeof claims.primaryEmail === "string",
+      hasUserId: typeof auth.userId === "string" && auth.userId.length > 0,
+    }));
+  }
+  return identity;
 }
 
 export function clerkFrontendOrigin(env: Env): string {

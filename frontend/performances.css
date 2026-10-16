@@ -1,0 +1,18 @@
+.performance-dialog { width: min(960px, calc(100vw - 28px)); max-height: min(820px, calc(100vh - 28px)); }
+.performance-dialog-header { display: flex; align-items: start; justify-content: space-between; gap: 20px; }
+.performance-dialog-header h2 { margin: 0 0 6px; }
+.performance-dialog-header p { margin: 0; color: #9db4b3; }
+.performance-tabs { display: flex; flex-wrap: wrap; gap: 8px; margin: 22px 0 16px; }
+.performance-tabs button { border: 1px solid rgba(164,196,191,.28); border-radius: 999px; padding: 8px 14px; background: rgba(7,25,31,.72); color: #dce9e6; }
+.performance-tabs button.is-active { border-color: #d9a85b; color: #f0cc91; }
+.performance-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 14px; min-height: 110px; }
+.performance-card { border: 1px solid rgba(164,196,191,.18); border-radius: 14px; overflow: hidden; background: rgba(5,18,24,.78); }
+.performance-card img { display: block; width: 100%; aspect-ratio: 16 / 7; object-fit: cover; background: #071419; }
+.performance-card-body { display: grid; grid-template-columns: 1fr auto; gap: 4px 12px; padding: 12px; }
+.performance-card-body strong { color: #f0e8d8; }
+.performance-card-body small { color: #91aaa8; }
+.performance-score { grid-row: span 2; font-size: 1.35rem; color: #e7bb72; }
+.performance-delete { margin: 0 12px 12px; }
+.performance-empty { color: #91aaa8; padding: 22px 4px; }
+@media (max-width: 680px) { .performance-dialog { max-height: calc(100vh - 12px); } }
+

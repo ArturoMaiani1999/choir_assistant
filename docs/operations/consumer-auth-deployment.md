@@ -2,7 +2,7 @@
 
 **Status:** canonical for `feature/consumer-auth`; not yet the live production procedure
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-13
+**Last reviewed:** 2026-10-15
 
 This runbook provisions the Clerk + D1 authorization path without weakening
 the currently deployed Cloudflare Access application. Perform the first deploy
@@ -13,7 +13,7 @@ under a distinct Worker name and hostname.
 ```powershell
 npm ci
 npm run check
-python -m unittest scripts.check_deploy_config_test scripts.sync_authorized_members_test
+python -m unittest scripts.check_deploy_config_test scripts.sync_authorized_members_test scripts.sync_choir_members_test
 ```
 
 `npm audit --audit-level=moderate` must report zero known vulnerabilities at
@@ -36,8 +36,11 @@ forced audit upgrade.
 }
 ```
 
-6. Record the publishable key, public JWT verification key and exact HTTPS
-   Frontend API origin. The Worker does not need a Clerk Backend API secret.
+6. Record the publishable key, public JWT verification key, backend Secret Key
+   and exact HTTPS Frontend API origin. The Secret Key is required by the
+   current `@clerk/backend` `authenticateRequest()` flow even when `jwtKey` is
+   supplied for networkless signature verification. Keep it out of files and
+   install it only as a Worker secret.
 
 The Worker rejects malformed email claims and Clerk impersonation sessions.
 The claim is accepted as a verified identifier only because the Clerk tenant
@@ -84,11 +87,14 @@ $bytes = New-Object byte[] 32
 $hmacKey = [Convert]::ToBase64String($bytes)
 $hmacKey | npx wrangler secret put AUTH_EMAIL_HMAC_KEY
 npx wrangler secret put CLERK_JWT_KEY
+npx wrangler secret put CLERK_SECRET_KEY
 Remove-Variable hmacKey,bytes
 ```
 
 Do not pass secrets as command-line arguments. Confirm that PowerShell
 transcription/history and CI logs do not capture piped secret values.
+Use `npx wrangler secret list` to verify the three binding names without
+printing their values.
 
 ## 5. Synchronize authorized members
 
@@ -119,6 +125,50 @@ members become inactive. Keep the source export so the prior active set can be
 restored deliberately if the wrong complete list was supplied.
 
 ## 6. Build and stage
+
+Before building the performance-sharing and personal-recording release, create
+the private R2 bucket and apply all D1 migrations, including
+`0005_personal_recordings.sql`:
+
+```powershell
+npx wrangler r2 bucket create choir-assistant-performances-staging
+npx wrangler d1 migrations apply choir-assistant-auth-staging --remote
+```
+
+The `PERFORMANCE_BUCKET` binding must name that bucket. It contains
+group-scoped PNGs under `performances/` and owner-only audio/pitch objects under
+`recordings/`; those prefixes do not share authorization rules. Do not enable
+public access or attach an R2 custom domain.
+
+Replace the email-only synchronization with a private CSV when roles and choir
+groups are ready. Supported columns are:
+
+```csv
+email,display_name,groups,roles,view_groups
+singer@example.invalid,Mario,Tenori,singer,
+viewer@example.invalid,Anna,Contralti,section_viewer,Contralti;Soprani
+director@example.invalid,Direttore,,director,
+```
+
+`groups` describes where the singer belongs; `view_groups` describes which
+groups a `section_viewer` may inspect. Multiple values use `;` or `|`.
+`director` sees all groups and `admin` remains a separate role without implicit
+performance visibility. The CSV stays outside Git.
+
+```powershell
+$env:CHOIR_AUTH_EMAIL_HMAC_KEY = '<retrieve from password manager>'
+python scripts/sync_choir_members.py C:\private\coristi-ruoli.csv --dry-run
+python scripts/sync_choir_members.py C:\private\coristi-ruoli.csv
+Remove-Item Env:\CHOIR_AUTH_EMAIL_HMAC_KEY
+```
+
+For a complete authoritative export, use `--replace` only after dry-run and
+confirm the exact validated count with `--confirm-replace-count`. Each included
+member's omitted roles, memberships and view grants are revoked. Members absent
+from the file are revoked only with `--replace`.
+
+The scheduled Worker cleanup removes best-performance rows and PNG objects 30
+days after member deactivation, in bounded daily batches.
 
 A clean repository remains preferable for shared releases. The personal
 instance may also publish a build marked with the `-dirty` suffix.

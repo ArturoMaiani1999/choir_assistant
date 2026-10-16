@@ -51,20 +51,26 @@ def read_addresses(path: Path) -> list[str]:
 
 def sql_for(digests: list[str], replace: bool) -> str:
     timestamp = datetime.now(timezone.utc).isoformat()
-    statements = ["BEGIN TRANSACTION;"]
+    # A SQL file is submitted by Wrangler as one D1 batch. D1 manages the
+    # transaction for that batch and rejects explicit transaction controls.
+    statements: list[str] = []
     if replace:
         statements.append(
             "UPDATE authorized_members SET active=0, updated_at='{0}', revoked_at='{0}' "
             "WHERE active=1;".format(timestamp)
         )
     for digest in digests:
+        member_id = f"m_{digest[:32]}"
+        display_name = f"Corista {digest[:8]}"
         statements.append(
-            "INSERT INTO authorized_members(email_digest,active,added_at,updated_at,revoked_at) "
-            f"VALUES('{digest}',1,'{timestamp}','{timestamp}',NULL) "
+            "INSERT INTO authorized_members(email_digest,active,added_at,updated_at,revoked_at,member_id,choir_id,display_name) "
+            f"VALUES('{digest}',1,'{timestamp}','{timestamp}',NULL,'{member_id}','choir_primary','{display_name}') "
             "ON CONFLICT(email_digest) DO UPDATE SET active=1, "
-            f"updated_at='{timestamp}', revoked_at=NULL;"
+            f"updated_at='{timestamp}', revoked_at=NULL, "
+            "member_id=COALESCE(authorized_members.member_id,excluded.member_id), "
+            "choir_id=COALESCE(authorized_members.choir_id,excluded.choir_id), "
+            "display_name=COALESCE(authorized_members.display_name,excluded.display_name);"
         )
-    statements.append("COMMIT;")
     return "\n".join(statements) + "\n"
 
 

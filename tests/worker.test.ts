@@ -28,13 +28,28 @@ function fakeEnv(options: { active?: boolean; dbError?: boolean } = {}): Env {
     },
   } as Fetcher;
   const database = {
-    prepare() {
+    prepare(query: string) {
       return {
         bind() {
           return {
             async first() {
               if (options.dbError) throw new Error("database unavailable");
+              if (query.includes("FROM authorized_members m JOIN choirs")) {
+                return {
+                  member_id: "member-test", choir_id: "choir-primary", display_name: "Singer",
+                  clerk_subject: IDENTITY.subject, active: options.active === false ? 0 : 1,
+                };
+              }
               return options.active === false ? { active: 0 } : { active: 1 };
+            },
+            async all() {
+              if (options.dbError) throw new Error("database unavailable");
+              if (query.includes("SELECT role FROM member_roles")) return { results: [{ role: "singer" }] };
+              return { results: [] };
+            },
+            async run() {
+              if (options.dbError) throw new Error("database unavailable");
+              return { success: true, meta: { changes: 1 } };
             },
           };
         },
@@ -49,6 +64,7 @@ function fakeEnv(options: { active?: boolean; dbError?: boolean } = {}): Env {
     CLERK_FRONTEND_API_ORIGIN: "https://clerk.choir.example.org",
     CLERK_JWT_KEY: "test-public-jwt-verification-key",
     CLERK_PUBLISHABLE_KEY: "pk_test_not-a-secret",
+    CLERK_SECRET_KEY: "sk_test_not-a-secret",
   };
 }
 
@@ -95,6 +111,7 @@ describe("post-authentication return URL", () => {
     "/\\attacker.example/path",
     "/auth/config",
     "/sign-in",
+    "/sign-up",
   ])("rejects unsafe target %s", (target) => {
     expect(safeReturnPath(target, origin)).toBe("/");
   });
@@ -145,6 +162,24 @@ describe("edge authorization", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
+  it("forwards the Clerk handshake response before applying authorization", async () => {
+    const handshake: RequestAuthenticator = async () => new Response(null, {
+      status: 307,
+      headers: {
+        Location: "https://clerk.choir.example.org/v1/client/handshake?redirect_url=x",
+        "Set-Cookie": "__clerk_handshake=test; Path=/; Secure; HttpOnly",
+      },
+    });
+    const response = await createWorker(handshake).fetch(
+      new Request("https://choir.example.org/", { headers: { Accept: "text/html" } }),
+      fakeEnv(),
+    );
+    expect(response.status).toBe(307);
+    expect(response.headers.get("Location")).toContain("/v1/client/handshake");
+    expect(response.headers.get("Set-Cookie")).toContain("__clerk_handshake=");
+    expect(response.headers.get("X-Content-Type-Options")).toBe("nosniff");
+  });
+
   it("does not redirect anonymous direct asset requests to an HTML page", async () => {
     const response = await createWorker(anonymous).fetch(
       new Request("https://choir.example.org/library-assets/song/bundle.json"),
@@ -169,7 +204,7 @@ describe("edge authorization", () => {
       fakeEnv({ active: false }),
     );
     expect(response.status).toBe(403);
-    expect(await response.text()).toBe("asset:/not-authorized.html");
+    expect(await response.text()).toBe("asset:/not-authorized");
     expect(response.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
   });
 
@@ -206,6 +241,30 @@ describe("edge authorization", () => {
     expect(response.headers.get("Vary")).toBe("Cookie, Authorization");
   });
 
+  it("resolves a stable member context for the private API", async () => {
+    const response = await createWorker(authenticated).fetch(
+      new Request("https://choir.example.org/api/me"),
+      fakeEnv(),
+    );
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      member: { id: "member-test", displayName: "Singer" },
+      roles: ["singer"],
+      canViewAllGroups: false,
+    });
+  });
+
+  it("rejects cross-origin performance mutations before member resolution", async () => {
+    const response = await createWorker(authenticated).fetch(
+      new Request("https://choir.example.org/api/performances/best", {
+        method: "POST",
+        headers: { Origin: "https://attacker.example" },
+      }),
+      fakeEnv(),
+    );
+    expect(response.status).toBe(403);
+  });
+
   it("exposes only the publishable Clerk key in the public config", async () => {
     const response = await createWorker(anonymous).fetch(
       new Request("https://choir.example.org/auth/config"),
@@ -224,10 +283,24 @@ describe("edge authorization", () => {
       fakeEnv(),
     );
     expect(response.status).toBe(200);
+    expect(await response.text()).toBe("asset:/sign-in");
     expect(response.headers.get("Content-Security-Policy")).toContain(
       "https://clerk.choir.example.org",
     );
     expect(response.headers.get("Content-Security-Policy")).toContain("frame-ancestors 'none'");
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+  });
+
+  it("serves the local first-access page with the same protections", async () => {
+    const response = await createWorker(anonymous).fetch(
+      new Request("https://choir.example.org/sign-up"),
+      fakeEnv(),
+    );
+    expect(response.status).toBe(200);
+    expect(await response.text()).toBe("asset:/sign-up");
+    expect(response.headers.get("Content-Security-Policy")).toContain(
+      "https://clerk.choir.example.org",
+    );
     expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 });

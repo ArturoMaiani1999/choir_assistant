@@ -18,13 +18,17 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 DEFAULT_CONFIG = ROOT / "deploy" / "repertoire.json"
 CORE_ASSETS = (
-    "styles.css", "studio.css", "score_viewer.css", "ui_preferences.js", "score_appearance.js",
+    "styles.css", "studio.css", "score_viewer.css", "performances.css", "ui_preferences.js", "score_appearance.js",
     "practice_math.js", "score_runtime.js", "pitch_detector.js",
     "pitch_detector_worker.js", "pitch_shared.js", "fluid_pitch_trail.js",
-    "vocal_feedback.js", "one_euro_filter.js", "pitch_shifter_worklet.js", "media_mixer.js", "app.js", "voice_lab_core.js",
+    "vocal_feedback.js", "one_euro_filter.js", "pitch_shifter_worklet.js", "media_mixer.js", "performance_client.js", "recording_client.js", "app.js", "voice_lab_core.js",
     "voice_lab.js", "score_viewer.js",
 )
 FORBIDDEN_TEXT = ("__pitchTestHooks", "/api/", "cdn.jsdelivr", "unpkg", "localhost")
+API_CLIENT_ROUTES = {
+    "performance_client.": ("/api/me", "/api/performances", "/api/groups"),
+    "recording_client.": ("/api/recordings",),
+}
 FORBIDDEN_SUFFIXES = (".mscz", ".env", ".py", ".map", ".musicxml", ".xml", ".onnx")
 MAX_FILE_BYTES = 25 * 1024 * 1024
 MAX_FILES = 20_000
@@ -38,6 +42,13 @@ PLACEHOLDER_RIGHTS_NOTES = {
 
 def sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def page_asset_sort_key(path: str | Path) -> tuple[str, int]:
+    """Sort MuseScore page assets numerically (1, 2, ... 10), not lexically."""
+    name = Path(path).name
+    match = re.search(r"-(\d+)\.svg$", name, re.IGNORECASE)
+    return (name[:match.start(1)], int(match.group(1))) if match else (name, -1)
 
 
 def worktree_is_dirty() -> bool:
@@ -226,7 +237,10 @@ def build_piece(piece: dict, destination: Path) -> dict:
         {"id": "mono-soprano", "name": "Soprano"}, {"id": "mono-contralto", "name": "Contralto"},
         {"id": "mono-tenore", "name": "Tenore"}, {"id": "mono-basso", "name": "Basso"},
     ] if metadata.get("monodic") else metadata["parts"])
-    part_pages = {key: [f"{root}/{name}" for name in value] for key, value in metadata["part_pages"].items()}
+    part_pages = {
+        key: [f"{root}/{name}" for name in sorted(value, key=page_asset_sort_key)]
+        for key, value in metadata["part_pages"].items()
+    }
     continuous_scores = {
         key: f"{root}/{name}"
         for key, name in metadata.get("continuous_part_scores", {}).items()
@@ -244,7 +258,7 @@ def build_piece(piece: dict, destination: Path) -> dict:
         "assets": {
             "score": f"{root}/score.json", "glyph_map": f"{root}/glyph-map.json",
             "audio_manifest": f"{root}/audio-manifest.json", "audio_root": root,
-            "full_score_pages": [f"{root}/{name}" for name in metadata["score_pages"]], "score_pages": part_pages,
+            "full_score_pages": [f"{root}/{name}" for name in sorted(metadata["score_pages"], key=page_asset_sort_key)], "score_pages": part_pages,
             "continuous_scores": continuous_scores,
         },
     }
@@ -270,6 +284,9 @@ def write_headers(destination: Path) -> None:
   Cache-Control: no-cache
 
 /sign-in.html
+  Cache-Control: no-store
+
+/sign-up.html
   Cache-Control: no-store
 
 /not-authorized.html
@@ -310,9 +327,21 @@ def audit(destination: Path) -> dict[str, str]:
             # ClerkJS contains provider API and dormant development-origin
             # strings. CSP prevents connections to localhost in production;
             # CDN and test-hook markers remain forbidden in the pinned bundle.
+            allowed_api_routes = next(
+                (routes for prefix, routes in API_CLIENT_ROUTES.items()
+                 if relative.startswith(prefix) and relative.endswith(".js")),
+                None,
+            )
+            if allowed_api_routes:
+                positions = [match.start() for match in re.finditer(r"/api/", text)]
+                if any(not any(text.startswith(route, position) for route in allowed_api_routes)
+                       for position in positions):
+                    raise ValueError(f"Route API non autorizzata in {relative}")
             forbidden = (
                 tuple(marker for marker in FORBIDDEN_TEXT if marker not in {"/api/", "localhost"})
                 if relative == "auth-client.js"
+                else tuple(marker for marker in FORBIDDEN_TEXT if marker != "/api/")
+                if allowed_api_routes
                 else FORBIDDEN_TEXT
             )
             for marker in forbidden:
@@ -348,7 +377,7 @@ def main() -> int:
         "mode": "production", "buildVersion": version, "libraryUrl": "library.json",
         "bundleUrlTemplate": "library-assets/{pieceId}/bundle.json", "benchmarkEventUrl": None,
         "crepeModelUrl": None, "crepeRuntimeScriptUrl": None, "crepeRuntimeBaseUrl": None,
-        "features": {"diagnostics": False, "crepe": False, "transpose": True},
+        "features": {"diagnostics": False, "crepe": False, "transpose": True, "performances": True},
     }, ensure_ascii=False, separators=(",", ":")) + ");\n"
     temporary_runtime = destination / "runtime-config.js"
     temporary_runtime.write_text(runtime, encoding="utf-8")
@@ -367,6 +396,7 @@ def main() -> int:
     viewer_index = viewer_index.replace("runtime-config.js", runtime_name)
     (destination / "score-viewer.html").write_text(viewer_index, encoding="utf-8")
     shutil.copy2(FRONTEND / "sign-in.html", destination / "sign-in.html")
+    shutil.copy2(FRONTEND / "sign-up.html", destination / "sign-up.html")
     shutil.copy2(FRONTEND / "not-authorized.html", destination / "not-authorized.html")
     lab_assets = destination / "voice-lab-assets"
     lab_assets.mkdir()

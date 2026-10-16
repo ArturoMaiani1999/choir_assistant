@@ -26,8 +26,8 @@ class BuildDistTest(unittest.TestCase):
                 "score_version_id": "test-v1",
                 "monodic": False,
                 "parts": [{"id": "P1", "name": "Soprano"}],
-                "score_pages": ["score-1.svg"],
-                "part_pages": {"P1": ["part-P1-1.svg"]},
+                "score_pages": ["score-1.svg", "score-10.svg", "score-2.svg"],
+                "part_pages": {"P1": ["part-P1-1.svg", "part-P1-10.svg", "part-P1-2.svg"]},
                 "continuous_part_scores": {"P1": "part-P1-continuous-1.svg"},
             }
             audio_manifest = {
@@ -37,7 +37,8 @@ class BuildDistTest(unittest.TestCase):
             }
             (source / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
             (source / "audio-manifest.json").write_text(json.dumps(audio_manifest), encoding="utf-8")
-            for name in ("score.json", "glyph-map.json", "score-1.svg", "part-P1-1.svg",
+            for name in ("score.json", "glyph-map.json", "score-1.svg", "score-2.svg", "score-10.svg",
+                         "part-P1-1.svg", "part-P1-2.svg", "part-P1-10.svg",
                          "part-P1-continuous-1.svg", "score.mp3"):
                 (source / name).write_text(name, encoding="utf-8")
 
@@ -51,6 +52,16 @@ class BuildDistTest(unittest.TestCase):
             )
             continuous = "library-assets/test-piece/part-P1-continuous-1.svg"
             self.assertEqual(bundle["assets"]["continuous_scores"], {"P1": continuous})
+            self.assertEqual(bundle["assets"]["full_score_pages"], [
+                "library-assets/test-piece/score-1.svg",
+                "library-assets/test-piece/score-2.svg",
+                "library-assets/test-piece/score-10.svg",
+            ])
+            self.assertEqual(bundle["assets"]["score_pages"]["P1"], [
+                "library-assets/test-piece/part-P1-1.svg",
+                "library-assets/test-piece/part-P1-2.svg",
+                "library-assets/test-piece/part-P1-10.svg",
+            ])
             self.assertTrue((destination / continuous).is_file())
             self.assertEqual(listing["title"], "Titolo pubblico")
 
@@ -87,6 +98,7 @@ class BuildDistTest(unittest.TestCase):
             names = build_dist.build_core_assets(destination)
 
             self.assertIn("ui_preferences.js", names)
+            self.assertIn("recording_client.js", names)
             self.assertIn("pitch_detector_worker.js", names)
             self.assertIn("pitch_shifter_worklet.js", names)
             for generated_name in names.values():
@@ -110,6 +122,17 @@ class BuildDistTest(unittest.TestCase):
             self.assertIn("score_viewer.js", names)
             self.assertIn("score_viewer.css", names)
 
+    def test_audit_allows_only_declared_api_client_routes(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            client = destination / "recording_client.123.js"
+            client.write_text("fetch('/api/recordings')", encoding="utf-8")
+            build_dist.audit(destination)
+
+            client.write_text("fetch('/api/admin')", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Route API non autorizzata"):
+                build_dist.audit(destination)
+
     def test_versioned_library_assets_are_immutable(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             destination = Path(directory)
@@ -118,6 +141,7 @@ class BuildDistTest(unittest.TestCase):
 
             self.assertIn("/library.json\n  Cache-Control: public, max-age=31536000, immutable", headers)
             self.assertIn("/library-assets/*\n  Cache-Control: public, max-age=31536000, immutable", headers)
+            self.assertIn("/sign-up.html\n  Cache-Control: no-store", headers)
             app = (build_dist.FRONTEND / "app.js").read_text(encoding="utf-8")
             viewer = (build_dist.FRONTEND / "score_viewer.js").read_text(encoding="utf-8")
             self.assertIn("releaseAssetUrl(RUNTIME_CONFIG.libraryUrl)", app)
@@ -128,6 +152,7 @@ class BuildDistTest(unittest.TestCase):
 
         self.assertIn('id="settings" type="button" aria-label="Impostazioni"', html)
         self.assertIn('id="settings-menu-mixer"', html)
+        self.assertIn('id="settings-menu-recording"', html)
         self.assertIn('id="settings-menu-basic"', html)
         self.assertIn('id="settings-menu-advanced"', html)
         self.assertNotIn("toolbar-more", html)
@@ -154,6 +179,7 @@ class BuildDistTest(unittest.TestCase):
         html = (build_dist.FRONTEND / "index.html").read_text(encoding="utf-8")
 
         self.assertIn('aria-label="La tua sezione"', html)
+        self.assertIn('id="library-voice-lab"', html)
         self.assertNotIn("Personalizza il nome", html)
         self.assertNotIn("La parte selezionata viene usata solo", html)
         self.assertNotIn("Note, intervalli e controllo vocale", html)

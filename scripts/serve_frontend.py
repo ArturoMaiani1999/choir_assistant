@@ -53,6 +53,13 @@ _IGNORED_MSCX_SCORE_TAGS = frozenset({"showInvisible", "showUnprintable", "showF
 _IGNORED_MSCX_META_TAGS = frozenset({"audioComUrl", "platform", "sourceRevisionId"})
 
 
+def _page_asset_sort_key(path: str | Path) -> tuple[str, int]:
+    """Sort MuseScore page assets numerically (1, 2, ... 10), not lexically."""
+    name = Path(path).name
+    match = re.search(r"-(\d+)\.svg$", name, re.IGNORECASE)
+    return (name[:match.start(1)], int(match.group(1))) if match else (name, -1)
+
+
 def _musescore() -> str:
     executable = shutil.which("MuseScore4") or shutil.which("musescore4")
     if executable:
@@ -550,7 +557,7 @@ def _export_part_svg(musicxml: Path, destination: Path, part_id: str, executable
         raise RuntimeError((result.stderr or result.stdout or "MuseScore part export failed").strip()[-600:])
     first_page = destination / f"part-{part_id}-1.svg"
     _wait_for_file(first_page)
-    return [path.name for path in sorted(destination.glob(f"part-{part_id}-*.svg"))]
+    return [path.name for path in sorted(destination.glob(f"part-{part_id}-*.svg"), key=_page_asset_sort_key)]
 
 
 def _prepare_continuous_part_musicxml(root: ET.Element) -> None:
@@ -637,7 +644,7 @@ def _export_continuous_part_svg(part_musicxml: Path, destination: Path, part_id:
         raise RuntimeError((result.stderr or result.stdout or "MuseScore continuous export failed").strip()[-600:])
     first_page = destination / f"part-{part_id}-continuous-1.svg"
     _wait_for_file(first_page)
-    pages = sorted(destination.glob(f"part-{part_id}-continuous-*.svg"))
+    pages = sorted(destination.glob(f"part-{part_id}-continuous-*.svg"), key=_page_asset_sort_key)
     if len(pages) != 1:
         raise RuntimeError(f"{part_id}: la vista continua ha prodotto {len(pages)} pagine")
     return pages[0].name
@@ -879,7 +886,7 @@ def _build_library_piece(source: Path) -> dict:
             "score_version_id": score_version_id,
             "parts": vocal_parts,
             "monodic": len(vocal_parts) == 1,
-            "score_pages": [path.name for path in sorted(destination.glob("score-*.svg"))],
+            "score_pages": [path.name for path in sorted(destination.glob("score-*.svg"), key=_page_asset_sort_key)],
             "part_pages": part_pages,
             "continuous_part_scores": continuous_part_scores,
             "voice_stems": voice_stems,
@@ -908,7 +915,7 @@ def _write_library_runtime_bundle(metadata: dict) -> dict:
     ] if metadata["monodic"] else metadata["parts"])
     root = f"library-assets/{piece_id}"
     part_pages = {
-        part_id: [f"{root}/{name}" for name in pages]
+        part_id: [f"{root}/{name}" for name in sorted(pages, key=_page_asset_sort_key)]
         for part_id, pages in metadata["part_pages"].items()
     }
     continuous_scores = {
@@ -944,7 +951,7 @@ def _write_library_runtime_bundle(metadata: dict) -> dict:
             "glyph_map": f"{root}/glyph-map.json",
             "audio_manifest": f"{root}/audio-manifest.json",
             "audio_root": root,
-            "full_score_pages": [f"{root}/{name}" for name in metadata["score_pages"]],
+            "full_score_pages": [f"{root}/{name}" for name in sorted(metadata["score_pages"], key=_page_asset_sort_key)],
             "score_pages": part_pages,
             "continuous_scores": continuous_scores,
         },

@@ -2,7 +2,7 @@
 
 **Status:** canonical index
 **Owner:** project maintainer
-**Last reviewed:** 2026-09-28
+**Last reviewed:** 2026-10-14
 
 ## Current contract
 
@@ -18,6 +18,7 @@ local diagnostic and is not shipped to singers.
 - [Real-vocal corpus plan](corpus-plan.md)
 - [Expert audit](expert-audit.md)
 - [Octave robustness plan](octave-robustness-plan.md)
+- [Dropout and range-rejection plan](dropout-and-range-rejection-plan.md)
 
 The implementation tracker records current execution state. The expert audit
 is a snapshot for external review and should be refreshed or date-stamped

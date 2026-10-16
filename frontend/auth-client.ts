@@ -1,4 +1,6 @@
 import { Clerk } from "@clerk/clerk-js";
+import { itIT } from "@clerk/localizations";
+import { ClerkUI } from "@clerk/ui/entry";
 import { safeReturnPath } from "./auth-url";
 
 interface PublicConfig {
@@ -18,7 +20,10 @@ async function main(): Promise<void> {
   if (!response.ok) throw new Error("Unable to load authentication configuration");
   const config = (await response.json()) as PublicConfig;
   const clerk = new Clerk(config.publishableKey);
-  await clerk.load();
+  await clerk.load({
+    localization: itIT,
+    ui: { ClerkUI },
+  });
   const returnPath = safeReturnPath(
     new URLSearchParams(location.search).get("return_url"),
     location.origin,
@@ -50,10 +55,20 @@ async function main(): Promise<void> {
   }
 
   status.textContent = "";
+  if (document.body.dataset.authMode === "sign-up") {
+    clerk.mountSignUp(mount, {
+      fallbackRedirectUrl: returnPath,
+      forceRedirectUrl: returnPath,
+      routing: "hash",
+      signInUrl: `/sign-in?return_url=${encodeURIComponent(returnPath)}`,
+    });
+    return;
+  }
   clerk.mountSignIn(mount, {
     fallbackRedirectUrl: returnPath,
     forceRedirectUrl: returnPath,
     routing: "hash",
+    signUpUrl: `/sign-up?return_url=${encodeURIComponent(returnPath)}`,
   });
 }
 

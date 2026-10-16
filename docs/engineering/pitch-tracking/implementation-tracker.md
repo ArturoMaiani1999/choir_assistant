@@ -219,6 +219,12 @@ Con la metrica temporale comune il cluster produce 1 episodio v1 e 2 episodi CRE
 - L'anticipo temporale predefinito per nuove preferenze e per “Ripristina predefinito” è `200 ms`; un valore già scelto dall'utente non viene sovrascritto.
 - Avviando Play, se il microfono non è già attivo, la webapp ne richiede automaticamente l'attivazione prima della riproduzione. Una negazione del permesso viene segnalata ma non impedisce l'ascolto del brano.
 
+### 2026-10-14 — Proposta per dropout e range rejection
+
+- Documentato il problema dei tagli visivi prodotti da singoli frame `low-confidence` in modalità normale e distinta la casistica da silenzio, octave flip e cambi di nota reali.
+- Definita una proposta `display-only` basata su finestra temporale, supporto robusto 6/10, range globale largo e bridge massimo 60–80 ms: [piano dropout e range rejection](dropout-and-range-rejection-plan.md).
+- Nessun parametro runtime o comportamento di scoring è stato modificato. L'adozione resta subordinata al corpus reale, alle sentinelle E01/E02 e alle metriche indicate nel piano.
+
 Comandi di verifica principali:
 
 ```text
