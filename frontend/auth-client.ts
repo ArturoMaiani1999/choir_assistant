@@ -32,15 +32,18 @@ async function main(): Promise<void> {
   if (clerk.user) {
     const denied = document.body.dataset.authReason === "not-authorized"
       || new URLSearchParams(location.search).get("reason") === "not-authorized";
+    const signingOut = document.body.dataset.authMode === 'sign-out';
+    if (!denied && !signingOut) { location.replace(returnPath); return; }
     status.textContent = denied
       ? "Questo indirizzo non è presente nella lista dei coristi autorizzati."
-      : "Accesso eseguito. Verifico l’autorizzazione all’apertura dell’app.";
+      : "";
     actions.hidden = false;
     if (!denied) {
       const continueLink = document.createElement("a");
       continueLink.className = "continue";
       continueLink.href = returnPath;
-      continueLink.textContent = "Continua";
+      continueLink.textContent = "Annulla";
+      continueLink.classList.add('secondary');
       actions.appendChild(continueLink);
       actions.appendChild(document.createTextNode(" "));
     }
@@ -48,9 +51,16 @@ async function main(): Promise<void> {
     logout.type = "button";
     logout.textContent = "Esci";
     logout.addEventListener("click", async () => {
-      await clerk.signOut({ redirectUrl: "/sign-in" });
+      logout.disabled = true;
+      try { await clerk.signOut({ redirectUrl: `/sign-in?return_url=${encodeURIComponent(returnPath)}` }); }
+      catch (_) { logout.disabled = false; status.textContent = 'Uscita non riuscita. Riprova.'; }
     });
     actions.appendChild(logout);
+    return;
+  }
+
+  if (document.body.dataset.authMode === 'sign-out') {
+    location.replace(`/sign-in?return_url=${encodeURIComponent(returnPath)}`);
     return;
   }
 
@@ -76,7 +86,9 @@ main().catch((error: unknown) => {
   const status = document.querySelector<HTMLElement>("#auth-status");
   if (status) {
     status.className = "error";
-    status.textContent = "Accesso temporaneamente non disponibile. Riprova più tardi.";
+    status.textContent = document.body.dataset.authMode === 'sign-out'
+      ? "Uscita temporaneamente non disponibile. Riprova più tardi."
+      : "Accesso temporaneamente non disponibile. Riprova più tardi.";
   }
   console.error(error instanceof Error ? error.message : "Authentication initialization failed");
 });

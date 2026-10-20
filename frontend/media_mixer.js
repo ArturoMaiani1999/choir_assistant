@@ -69,6 +69,8 @@
       this.transposeSemitones = 0;
       this.workletReady = false;
       this.workletPromise = null;
+      this.referenceOutput = null;
+      this.calibrationMuted = false;
     }
 
     async _ensureContext() {
@@ -92,8 +94,9 @@
       const gain = channel.gain.gain;
       const now = this.context?.currentTime ?? 0;
       if (typeof gain.cancelScheduledValues === 'function') gain.cancelScheduledValues(now);
-      if (typeof gain.setValueAtTime === 'function') gain.setValueAtTime(level, now);
-      else gain.value = level;
+      const audible = this.calibrationMuted ? 0 : level;
+      if (typeof gain.setValueAtTime === 'function') gain.setValueAtTime(audible, now);
+      else gain.value = audible;
     }
 
     _setPitchRatio(parameter, ratio) {
@@ -122,7 +125,7 @@
           source.connect(pitch);
           pitch.connect(gain);
         } else source.connect(gain);
-        gain.connect(this.context.destination);
+        gain.connect(this.referenceOutput || this.context.destination);
         const channel = { source, pitch, gain };
         this.channels.set(media, channel);
         media.volume = 1;
@@ -167,6 +170,33 @@
       // their default value for the first render quantum. Reapply on resume.
       this.setTranspose(this.transposeSemitones);
       return this.context.state !== 'suspended';
+    }
+
+    muteForCalibration(muted) {
+      this.calibrationMuted = Boolean(muted);
+      for (const [media, channel] of this.channels) this._setGain(channel, this.levels.get(media) ?? 1);
+    }
+
+    async setReferenceOutput(enabled) {
+      if (!enabled && !this.referenceOutput) return;
+      await this._ensureContext();
+      if (!this.context) throw new Error('Elaborazione audio non disponibile.');
+      if (!this.referenceOutput) {
+        this.referenceOutput = this.context.createGain();
+        this.referenceOutput.connect(this.context.destination);
+        for (const channel of this.channels.values()) {
+          channel.gain.disconnect(); channel.gain.connect(this.referenceOutput);
+        }
+      }
+      // A single acoustic reference is identifiable using a mono loudspeaker
+      // feed. Headphone mode restores the normal stereo channel negotiation.
+      this.referenceOutput.channelCount = enabled ? 1 : 2;
+      this.referenceOutput.channelCountMode = enabled ? 'explicit' : 'max';
+    }
+
+    referenceCovers(mediaElements) {
+      return Boolean(this.referenceOutput) && mediaElements.every(media =>
+        (this.levels.get(media) ?? 1) <= 0 || this.channels.has(media));
     }
 
     setTranspose(semitones) {

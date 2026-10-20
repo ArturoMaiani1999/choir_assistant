@@ -30,6 +30,8 @@ interface RecordingRow {
   playback_rate: number;
   transpose: number;
   consented_at: string;
+  shared_for_analysis: number;
+  analysis_consented_at: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -71,9 +73,82 @@ function summary(row: RecordingRow): Record<string, unknown> {
     transpose: row.transpose,
     createdAt: row.created_at,
     updatedAt: row.updated_at,
+    sharedForAnalysis: row.shared_for_analysis === 1,
+    analysisConsentedAt: row.analysis_consented_at,
     audioUrl: `/api/recordings/${encodeURIComponent(row.id)}/audio`,
     pitchUrl: `/api/recordings/${encodeURIComponent(row.id)}/pitch`,
   };
+}
+
+function requireDirector(member: MemberContext): Response | null {
+  return member.roles.includes("director") ? null : json({ error: "forbidden" }, 403);
+}
+
+async function automaticBestStatus(env: Env, member: MemberContext): Promise<Response> {
+  const row = await env.AUTH_DB.prepare(
+    `SELECT automatic_best_recording, consented_at, updated_at
+     FROM member_recording_preferences
+     WHERE member_id=?1 AND choir_id=?2 LIMIT 1`,
+  ).bind(member.memberId, member.choirId).first<{
+    automatic_best_recording: number;
+    consented_at: string | null;
+    updated_at: string;
+  }>();
+  return json({
+    enabled: row?.automatic_best_recording === 1,
+    consentedAt: row?.consented_at ?? null,
+    updatedAt: row?.updated_at ?? null,
+  });
+}
+
+async function updateAutomaticBest(
+  request: Request,
+  env: Env,
+  member: MemberContext,
+): Promise<Response> {
+  let payload: { enabled?: unknown };
+  try { payload = await request.json() as { enabled?: unknown }; }
+  catch { return json({ error: "invalid_consent" }, 400); }
+  if (typeof payload.enabled !== "boolean") return json({ error: "invalid_consent" }, 400);
+  const now = new Date().toISOString();
+  await env.AUTH_DB.prepare(
+    `INSERT INTO member_recording_preferences(
+       member_id, choir_id, automatic_best_recording, consented_at, updated_at)
+     VALUES(?1, ?2, ?3, ?4, ?5)
+     ON CONFLICT(member_id) DO UPDATE SET
+       choir_id=excluded.choir_id,
+       automatic_best_recording=excluded.automatic_best_recording,
+       consented_at=excluded.consented_at,
+       updated_at=excluded.updated_at`,
+  ).bind(member.memberId, member.choirId, payload.enabled ? 1 : 0,
+    payload.enabled ? now : null, now).run();
+  return json({ enabled: payload.enabled, consentedAt: payload.enabled ? now : null, updatedAt: now });
+}
+
+async function directorRecordingById(env: Env, member: MemberContext, id: string): Promise<RecordingRow | null> {
+  return env.AUTH_DB.prepare(
+    `SELECT r.* FROM personal_recordings r
+     JOIN authorized_members m ON m.member_id=r.member_id
+     WHERE r.id=?1 AND r.choir_id=?2 AND r.shared_for_analysis=1 AND m.active=1 LIMIT 1`,
+  ).bind(id, member.choirId).first<RecordingRow>();
+}
+
+async function listDirectorRecordings(request: Request, env: Env, member: MemberContext): Promise<Response> {
+  const denied = requireDirector(member);
+  if (denied) return denied;
+  const pieceId = new URL(request.url).searchParams.get("pieceId");
+  if (!validId(pieceId)) return json({ error: "invalid_recording" }, 400);
+  const result = await env.AUTH_DB.prepare(
+    `SELECT r.*,m.display_name,m.voice_part FROM personal_recordings r
+     JOIN authorized_members m ON m.member_id=r.member_id
+     WHERE r.choir_id=?1 AND r.piece_id=?2 AND r.shared_for_analysis=1 AND m.active=1
+     ORDER BY m.display_name,r.updated_at DESC`,
+  ).bind(member.choirId, pieceId).all<RecordingRow & { display_name: string; voice_part: string | null }>();
+  return json({ recordings: (result.results ?? []).map(row => ({
+    ...summary(row), memberId: row.member_id, displayName: row.display_name, voicePart: row.voice_part,
+    audioUrl: `/api/cockpit/recordings/${encodeURIComponent(row.id)}/audio`,
+    pitchUrl: `/api/cockpit/recordings/${encodeURIComponent(row.id)}/pitch`,
+  })) });
 }
 
 export function inspectAudioHeader(bytes: ArrayBuffer, contentType: string): boolean {
@@ -126,6 +201,22 @@ async function recordingForPiece(env: Env, member: MemberContext, pieceId: strin
   ).bind(member.memberId, member.choirId, pieceId).first<RecordingRow>();
 }
 
+async function updateSharing(request: Request, env: Env, member: MemberContext, id: string): Promise<Response> {
+  let payload: { sharedForAnalysis?: unknown };
+  try { payload = await request.json() as { sharedForAnalysis?: unknown }; }
+  catch { return json({ error: "invalid_recording" }, 400); }
+  if (typeof payload.sharedForAnalysis !== "boolean") return json({ error: "invalid_recording" }, 400);
+  const now = new Date().toISOString();
+  const row = await env.AUTH_DB.prepare(
+    `UPDATE personal_recordings
+     SET shared_for_analysis=?1, analysis_consented_at=?2, updated_at=?3
+     WHERE id=?4 AND member_id=?5 AND choir_id=?6
+     RETURNING *`,
+  ).bind(payload.sharedForAnalysis ? 1 : 0, payload.sharedForAnalysis ? now : null,
+    now, id, member.memberId, member.choirId).first<RecordingRow>();
+  return row ? json({ recording: summary(row) }) : json({ error: "recording_not_found" }, 404);
+}
+
 async function listMine(request: Request, env: Env, member: MemberContext): Promise<Response> {
   const pieceId = new URL(request.url).searchParams.get("pieceId");
   if (pieceId != null && !validId(pieceId)) return json({ error: "invalid_recording" }, 400);
@@ -175,6 +266,37 @@ async function readObject(
   return new Response(object.body, { headers });
 }
 
+async function readDirectorObject(
+  request: Request,
+  env: Env,
+  member: MemberContext,
+  id: string,
+  kind: "audio" | "pitch",
+): Promise<Response> {
+  const denied = requireDirector(member);
+  if (denied) return denied;
+  if (!env.PERFORMANCE_BUCKET) throw new Error("recording bucket unavailable");
+  const row = await directorRecordingById(env, member, id);
+  if (!row) return json({ error: "recording_not_found" }, 404);
+  const key = kind === "audio" ? row.audio_key : row.pitch_key;
+  const rangeRequested = kind === "audio" && request.headers.has("Range");
+  const object = await env.PERFORMANCE_BUCKET.get(key, rangeRequested ? { range: request.headers } : undefined);
+  if (!object) throw new Error("referenced recording object missing");
+  const headers = new Headers({
+    "Content-Type": kind === "audio" ? row.audio_type : "application/json; charset=utf-8",
+    "Content-Length": String(object.size), ETag: object.httpEtag,
+    "Cache-Control": "private, no-store", "X-Content-Type-Options": "nosniff",
+  });
+  if (kind === "audio") headers.set("Accept-Ranges", "bytes");
+  if (rangeRequested && object.range && "offset" in object.range && "length" in object.range && Number.isFinite(object.range.length)) {
+    const start = object.range.offset ?? 0; const length = object.range.length as number;
+    headers.set("Content-Length", String(length));
+    headers.set("Content-Range", `bytes ${start}-${start + length - 1}/${row.audio_size}`);
+    return new Response(object.body, { status: 206, headers });
+  }
+  return new Response(object.body, { headers });
+}
+
 async function submitRecording(request: Request, env: Env, member: MemberContext): Promise<Response> {
   if (!env.PERFORMANCE_BUCKET) throw new Error("recording bucket unavailable");
   const declaredLength = Number(request.headers.get("Content-Length"));
@@ -189,6 +311,7 @@ async function submitRecording(request: Request, env: Env, member: MemberContext
   const replaceExisting = form.get("replaceExisting") === "true";
   const consent = form.get("consent") === "true";
   const headphonesConfirmed = form.get("headphonesConfirmed") === "true";
+  const sharedForAnalysis = form.get("sharedForAnalysis") === "true";
   const durationMs = Number(form.get("durationMs"));
   const audioOffsetMs = Number(form.get("audioOffsetMs"));
   const playbackRate = Number(form.get("playbackRate"));
@@ -251,8 +374,9 @@ async function submitRecording(request: Request, env: Env, member: MemberContext
          id, choir_id, member_id, piece_id, score_version_id, part_id,
          audio_key, audio_etag, audio_size, audio_type,
          pitch_key, pitch_etag, pitch_size, duration_ms, audio_offset_ms,
-         playback_rate, transpose, consented_at, headphones_confirmed, created_at, updated_at)
-       VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, 1, ?18, ?18)
+         playback_rate, transpose, consented_at, headphones_confirmed, shared_for_analysis,
+         analysis_consented_at, created_at, updated_at)
+       VALUES(?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, 1, ?19, ?20, ?18, ?18)
        ON CONFLICT(member_id, piece_id) DO UPDATE SET
          score_version_id=excluded.score_version_id, part_id=excluded.part_id,
          audio_key=excluded.audio_key, audio_etag=excluded.audio_etag,
@@ -261,15 +385,16 @@ async function submitRecording(request: Request, env: Env, member: MemberContext
          pitch_size=excluded.pitch_size, duration_ms=excluded.duration_ms,
          audio_offset_ms=excluded.audio_offset_ms, playback_rate=excluded.playback_rate,
          transpose=excluded.transpose, consented_at=excluded.consented_at,
-         headphones_confirmed=1, updated_at=excluded.updated_at
-       WHERE ?19 = 1
+         headphones_confirmed=1, shared_for_analysis=excluded.shared_for_analysis,
+         analysis_consented_at=excluded.analysis_consented_at, updated_at=excluded.updated_at
+       WHERE ?21 = 1
        RETURNING id`,
     ).bind(
       crypto.randomUUID(), member.choirId, member.memberId, pieceId, scoreVersionId,
       partId, audioKey, storedAudio.etag, audio.size, audio.type, pitchKey,
       storedPitch.etag, new TextEncoder().encode(normalizedPitch).byteLength,
       Math.round(durationMs), Math.round(audioOffsetMs), playbackRate, transpose,
-      now, replaceExisting ? 1 : 0,
+      now, sharedForAnalysis ? 1 : 0, sharedForAnalysis ? now : null, replaceExisting ? 1 : 0,
     ).first<{ id: string }>();
     if (!accepted) {
       await env.PERFORMANCE_BUCKET.delete([audioKey, pitchKey]);
@@ -316,26 +441,46 @@ export async function handlePersonalRecordingApi(
   member: MemberContext,
 ): Promise<Response | null> {
   const url = new URL(request.url);
+  if (url.pathname === "/api/recordings/automatic-best") {
+    if (request.method === "GET") return automaticBestStatus(env, member);
+    if (request.method === "PATCH") return updateAutomaticBest(request, env, member);
+  }
   if (request.method === "GET" && url.pathname === "/api/recordings/mine") return listMine(request, env, member);
   if (request.method === "POST" && url.pathname === "/api/recordings") return submitRecording(request, env, member);
+  if (request.method === "GET" && url.pathname === "/api/cockpit/recordings") return listDirectorRecordings(request, env, member);
+  const directorObjectMatch = /^\/api\/cockpit\/recordings\/([^/]+)\/(audio|pitch)$/.exec(url.pathname);
+  if (request.method === "GET" && directorObjectMatch) {
+    return readDirectorObject(request, env, member, decodeURIComponent(directorObjectMatch[1]), directorObjectMatch[2] as "audio" | "pitch");
+  }
   const objectMatch = /^\/api\/recordings\/([^/]+)\/(audio|pitch)$/.exec(url.pathname);
   if (request.method === "GET" && objectMatch) {
     return readObject(request, env, member, decodeURIComponent(objectMatch[1]), objectMatch[2] as "audio" | "pitch");
   }
+  const sharingMatch = /^\/api\/recordings\/([^/]+)\/sharing$/.exec(url.pathname);
+  if (request.method === "PATCH" && sharingMatch) {
+    return updateSharing(request, env, member, decodeURIComponent(sharingMatch[1]));
+  }
   const deleteMatch = /^\/api\/recordings\/([^/]+)$/.exec(url.pathname);
   if (request.method === "DELETE" && deleteMatch) return deleteOwn(env, member, decodeURIComponent(deleteMatch[1]));
-  return url.pathname.startsWith("/api/recordings") ? json({ error: "api_not_found" }, 404) : null;
+  return url.pathname.startsWith("/api/recordings") || url.pathname.startsWith("/api/cockpit/recordings")
+    ? json({ error: "api_not_found" }, 404) : null;
 }
 
-export async function purgeExpiredPersonalRecordings(env: Env, retentionDays = 30): Promise<number> {
+export async function purgeExpiredPersonalRecordings(
+  env: Env,
+  inactiveRetentionDays = 30,
+  activeRetentionDays = 365,
+): Promise<number> {
   if (!env.PERFORMANCE_BUCKET) return 0;
-  const cutoff = new Date(Date.now() - retentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const inactiveCutoff = new Date(Date.now() - inactiveRetentionDays * 24 * 60 * 60 * 1000).toISOString();
+  const activeCutoff = new Date(Date.now() - activeRetentionDays * 24 * 60 * 60 * 1000).toISOString();
   const expired = await env.AUTH_DB.prepare(
     `SELECT r.id, r.audio_key, r.pitch_key FROM personal_recordings r
      JOIN authorized_members m ON m.member_id = r.member_id
-     WHERE m.active = 0 AND m.revoked_at IS NOT NULL AND m.revoked_at <= ?1
-     ORDER BY m.revoked_at LIMIT 100`,
-  ).bind(cutoff).all<{ id: string; audio_key: string; pitch_key: string }>();
+     WHERE (m.active = 0 AND m.revoked_at IS NOT NULL AND m.revoked_at <= ?1)
+        OR r.updated_at <= ?2
+     ORDER BY r.updated_at LIMIT 100`,
+  ).bind(inactiveCutoff, activeCutoff).all<{ id: string; audio_key: string; pitch_key: string }>();
   let removed = 0;
   for (const item of expired.results ?? []) {
     try {

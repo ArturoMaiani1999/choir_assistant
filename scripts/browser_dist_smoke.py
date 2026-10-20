@@ -173,7 +173,7 @@ def main() -> int:
             assert visual_delay["initial"]["beat"] < visual_delay["actualBeat"], visual_delay
             assert visual_delay["bluetooth"] == {
                 "type": "bluetooth", "delay": 270, "advance": 320, "stored": "bluetooth", "max": "600",
-                "firstSettingId": "settings-audio-output-heading",
+                "firstSettingId": "settings-calibration-heading",
             }, visual_delay
             assert visual_delay["expired"] is True, visual_delay
             assert visual_delay["changed"]["ms"] == visual_delay["changed"]["stored"] == 410, visual_delay
@@ -233,6 +233,10 @@ def main() -> int:
               const canSeekToBefore = () => [...Array(els.backingAudio.seekable.length).keys()]
                 .some(index => els.backingAudio.seekable.start(index) <= beforeSwitch
                   && els.backingAudio.seekable.end(index) + .01 >= beforeSwitch);
+              // Exercise the full-mix optimization explicitly. Singer defaults
+              // now have unequal voice levels and correctly use isolated stems.
+              allIds.forEach(id => state.voiceLevels.set(id, 1));
+              state.accompanimentEnabled = true; state.accompanimentLevel = 1;
               await applyVoiceSelection(allIds);
               const full = {
                 kind: state.playbackPlan?.kind,
@@ -333,7 +337,10 @@ def main() -> int:
             })()""")
             call_id += 1
             microphone = evaluate(socket, call_id, """(async () => {
-              await toggleMicrophone();
+              // Live detection belongs to an active exercise; idle dialogs and
+              // paused practice intentionally release the microphone.
+              await state.clock.play();
+              if (state.microphoneStatus !== 'active') await toggleMicrophone();
               await new Promise(resolve => setTimeout(resolve, 700));
               const result = {
                 status: state.microphoneStatus,
@@ -341,6 +348,7 @@ def main() -> int:
                 workerDisabled: state.pitchWorkerDisabled
               };
               await stopMicrophone();
+              state.clock.pause();
               return result;
             })()""")
             call_id += 1
@@ -614,12 +622,14 @@ def main() -> int:
                 assert all(abs(value - expected_ratio) < .001 for value in custom["pitchRatios"]), custom
                 navigation = voice_mix["navigation"]
                 assert navigation["running"], navigation
-                assert navigation["expectedBeat"] <= navigation["actualBeat"] < navigation["expectedBeat"] + .2, navigation
+                # Media seconds→beats conversion can round a boundary just below
+                # its exact integer (e.g. 3.99999913 instead of 4).
+                assert navigation["expectedBeat"] - .00001 <= navigation["actualBeat"] < navigation["expectedBeat"] + .2, navigation
                 assert "ingresso da 2" in navigation["cue"].lower(), navigation
             assert microphone == {"status": "active", "worker": True, "workerDisabled": False}, microphone
             assert preliminary_result["pausedWithoutDialog"] and preliminary_result["feedbackVisible"], preliminary_result
             assert preliminary_result["open"] and preliminary_result["preliminary"] == "true", preliminary_result
-            assert preliminary_result["heading"] == "Risultati preliminari", preliminary_result
+            assert preliminary_result["heading"] == "Analisi preliminare", preliminary_result
             assert "75%" in preliminary_result["text"] and "battuta" in preliminary_result["progress"], preliminary_result
             assert preliminary_result["resumeVisible"], preliminary_result
             assert preliminary_result["attemptActive"] and not preliminary_result["running"], preliminary_result
@@ -654,12 +664,16 @@ def main() -> int:
             command(socket, call_id, "Page.navigate", {"url": viewer_url})
             call_id += 1
             for _ in range(160):
-                viewer_ready = evaluate(socket, call_id, """Boolean(
+                viewer_ready = evaluate(socket, call_id, """(() => {
+                  // Validate every score page, including those deferred offscreen.
+                  document.querySelectorAll('.viewer-page img').forEach(image => { image.loading = 'eager'; });
+                  return Boolean(
                   document.querySelectorAll('.viewer-page').length
                   && [...document.querySelectorAll('.viewer-page img')]
                     .every(image => image.complete && image.naturalWidth)
                   && document.querySelector('#viewer-audio')?.readyState >= 2
-                )""")
+                  );
+                })()""")
                 call_id += 1
                 if viewer_ready:
                     break
@@ -698,6 +712,20 @@ def main() -> int:
                 "type": "keyUp", "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
             })
             call_id += 1
+            viewer_keyboard_mixer = evaluate(socket, call_id, r"""(() => {
+              const dialog = document.querySelector('#viewer-mixer');
+              const opensPaused = dialog.open && document.querySelector('#viewer-audio').paused;
+              document.querySelector('#viewer-mixer-close').click();
+              document.querySelector('#viewer-scroll').focus();
+              return opensPaused;
+            })()""")
+            call_id += 1
+            assert viewer_keyboard_mixer, 'Space on the focused Mixer button must open the paused mixer'
+            for key_type in ('keyDown', 'keyUp'):
+                command(socket, call_id, "Input.dispatchKeyEvent", {
+                    "type": key_type, "key": " ", "code": "Space", "windowsVirtualKeyCode": 32,
+                })
+                call_id += 1
             viewer_start = evaluate(socket, call_id, r"""(async () => {
               const audio = document.querySelector('#viewer-audio');
               const mixerDialog = document.querySelector('#viewer-mixer');
@@ -731,6 +759,7 @@ def main() -> int:
               }
               const mixerEditsStayPaused = audio.paused && mixerDialog.open;
               document.querySelector('#viewer-mixer-close').click();
+              document.querySelector('#viewer-scroll').focus();
               return {keyboardPausedPlayback, mixerOpensPaused, mixerChannels: mixerChannels.length,
                 mixerEditsStayPaused, mixerDialogOpen: mixerDialog.open};
             })()""")

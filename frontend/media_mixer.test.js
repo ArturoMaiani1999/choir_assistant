@@ -121,9 +121,24 @@ async function run() {
   assert.equal(media.muted, true, 'a zero-level media element must remain muted after Web Audio attaches');
   assert.equal(mixer.context.gains[0].gain.value, 0);
 
+  await mixer.setReferenceOutput(true);
+  assert.equal(mixer.channels.get(media).gain.target, mixer.referenceOutput, 'reference must include channel gain');
+  assert.equal(mixer.referenceOutput.target, mixer.context.destination, 'reference must be the actual speaker feed');
+  assert.equal(mixer.referenceOutput.channelCount, 1);
+  assert.equal(mixer.referenceCovers([media]), true);
+  assert.equal(mixer.referenceCovers([fakeMedia()]), false, 'unrouted audio must fail the speaker-mode gate');
+  await mixer.setReferenceOutput(false);
+  assert.equal(mixer.referenceOutput.channelCountMode, 'max');
+
   mixer.setLevel(media, 0.5);
   assert.equal(media.muted, false);
   assert.equal(mixer.context.gains[0].gain.value, 0.5);
+  mixer.muteForCalibration(true);
+  mixer.setLevel(media,.6);
+  assert.equal(mixer.context.gains[0].gain.value,0,'gain changes cannot leak music during warmup');
+  assert.equal(media.muted,false,'the media decoder remains active');
+  mixer.muteForCalibration(false);
+  assert.equal(mixer.context.gains[0].gain.value,.6,'restore the chosen mixer level');
   mixer.setLevel(media, 0.8, { forceMuted: true });
   assert.equal(media.muted, true);
   assert.equal(mixer.context.gains[0].gain.value, 0);

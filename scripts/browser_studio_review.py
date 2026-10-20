@@ -38,10 +38,10 @@ def main():
                 for width, height in [(1440, 900), (1366, 768), (390, 844)]:
                     command(socket, 2, 'Emulation.setDeviceMetricsOverride', {'width': width, 'height': height, 'deviceScaleFactor': 1, 'mobile': False})
                     for name, path, action, selector in [
-                        ('warmup', '/voice-lab.html', "document.querySelector('#lab-settings-close')?.click()", '#warmup-start'),
-                        ('inner-ear', '/voice-lab.html', "document.querySelector('#lab-settings-close')?.click();document.querySelector('[data-mode=inner-ear]')?.click()", '#warmup-start'),
-                        ('arpeggios', '/voice-lab.html', "document.querySelector('#lab-settings-close')?.click();document.querySelector('[data-family=arpeggio]')?.click()", '#warmup-start'),
-                        ('degrees', '/voice-lab.html', "document.querySelector('#lab-settings-close')?.click();document.querySelector('[data-family=degree]')?.click();document.querySelector('[data-degree-level=advanced]')?.click()", '#warmup-start'),
+                        ('warmup', '/voice-lab.html', "document.querySelector('[data-path=scale]')?.click()", '#warmup-start'),
+                        ('inner-ear', '/voice-lab.html', "document.querySelector('[data-path=ear]')?.click()", '#warmup-start'),
+                        ('arpeggios', '/voice-lab.html', "document.querySelector('[data-path=chords]')?.click();document.querySelector('[data-family=arpeggio]')?.click()", '#warmup-start'),
+                        ('degrees', '/voice-lab.html', "document.querySelector('[data-path=ear]')?.click();document.querySelector('[data-family=degree]')?.click();document.querySelector('[data-degree-level=advanced]')?.click()", '#warmup-start'),
                         ('practice', '/index.html?piece=o-sacrum', "document.querySelectorAll('dialog[open]').forEach(d=>d.close())", '#toggle-playback'),
                     ]:
                         command(socket, 3, 'Page.navigate', {'url': BASE + path})

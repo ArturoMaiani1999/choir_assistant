@@ -6,35 +6,49 @@
     <meta name="theme-color" content="#081419" />
     <title>Choir Assistant · Il tuo studio</title>
     <script src="ui_preferences.js?v=2-lyrics-only"></script>
-    <link rel="stylesheet" href="styles.css?v=20261015-private-recording" />
+    <link rel="stylesheet" href="styles.css?v=20261019-roll-navigation" />
     <link rel="stylesheet" href="studio.css?v=20261013-mobile-speed-settings" />
-    <link rel="stylesheet" href="performances.css?v=20261014-rbac" />
+    <link rel="stylesheet" href="performances.css?v=20261019-roll-navigation" />
+    <link rel="stylesheet" href="home.css" />
+    <script src="lissajous.js" defer></script>
+    <script src="home.js" defer></script>
     <script src="score_appearance.js?v=3-settings-groups"></script>
     <script src="runtime-config.js" defer></script>
+    <script src="session-client.js" defer></script>
     <script src="practice_math.js?v=20261013-mobile-four-measures" defer></script>
     <script src="score_runtime.js?v=20261012-tonal-roles" defer></script>
     <script src="pitch_detector.js?v=20261003-weak-voice" defer></script>
     <script src="pitch_shared.js?v=20261013-live-history-visible" defer></script>
+    <script src="microphone_calibration.js" defer></script>
+    <script src="microphone_calibration_ui.js" defer></script>
+    <script src="echo_cancellation.js" defer></script>
+    <script src="echo_delay.js" defer></script>
+    <script src="echo_cancellation_ui.js" defer></script>
+    <script src="echo_diagnostics.js" defer></script>
     <script src="fluid_pitch_trail.js?v=20261013-live-history-visible" defer></script>
     <script src="vocal_feedback.js?v=20260928-feedback-v1" defer></script>
     <script src="one_euro_filter.js?v=20260927-phase2" defer></script>
     <script src="media_mixer.js?v=20261013-pitch-param-sync" defer></script>
-    <script src="performance_client.js?v=20261014-rbac" defer></script>
+    <script src="piano_roll.js?v=20261019-roll-navigation" defer></script>
+    <script src="performance_client.js?v=20261019-roll-navigation" defer></script>
+    <script src="performance_review.js?v=20261019-roll-navigation" defer></script>
     <script src="recording_client.js?v=20261015-private-recording" defer></script>
+    <script src="progress_client.js?v=20261016-cockpit" defer></script>
+    <script src="aggregate_pitch.js?v=20261016-cockpit" defer></script>
     <script src="pitch_test_harness.js?v=20260927-phase0" defer></script>
-    <script src="app.js?v=20261015-private-recording" defer></script>
+    <script src="app.js?v=20261019-roll-navigation" defer></script>
   </head>
-  <body>
+  <body data-view="home">
     <main class="practice-shell" id="practice-shell" aria-label="Strumento di prova">
       <header class="practice-toolbar" id="practice-toolbar">
         <a class="mode-button voice-lab-link" href="voice-lab.html">Allena la voce</a>
-        <button class="mode-button change-piece-button" id="exit-practice" type="button">Cambia brano</button>
+        <button class="mode-button change-piece-button" id="exit-practice" type="button">Scelta brani</button>
         <div class="piece-identity" aria-live="polite">
           <button class="piece-picker-button" id="piece-picker" type="button" aria-label="Scegli un brano"><strong id="piece-title">Caricamento…</strong></button>
           <label class="part-control"><span class="sr-only">Parte vocale</span><select id="part-selector" aria-label="Parte vocale"></select></label>
         </div>
         <div class="toolbar-actions">
-          <button class="mode-button" id="performances" type="button" hidden>I risultati</button>
+          <a class="mode-button" id="cockpit-link" href="cockpit.html" hidden>Direzione</a>
           <label class="compact-select transpose-control"><span>Transp</span><select id="transpose" aria-label="Trasposizione"></select><output id="transpose-value" aria-live="polite">±0</output></label>
           <label class="compact-select speed-control"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità del brano"><option value="1" selected>100%</option><option value="0.9">90%</option><option value="0.8">80%</option></select></label>
           <button class="mode-button accompaniment-select" id="accompaniment-mode" type="button">Voci</button>
@@ -43,8 +57,11 @@
           <div class="settings-menu-wrap" id="settings-menu-wrap">
             <button class="mode-button settings-button" id="settings" type="button" aria-label="Impostazioni" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-menu"><span class="settings-label">Impostazioni</span><svg class="settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.7 2h4.6l.6 2.3c.5.2 1 .5 1.5.9l2.3-.7 2.3 4-1.7 1.6a8 8 0 0 1 0 1.8l1.7 1.6-2.3 4-2.3-.7c-.5.4-1 .7-1.5.9l-.6 2.3H9.7l-.6-2.3c-.5-.2-1-.5-1.5-.9l-2.3.7-2.3-4 1.7-1.6a8 8 0 0 1 0-1.8L3 8.5l2.3-4 2.3.7c.5-.4 1-.7 1.5-.9L9.7 2Z"/><circle cx="12" cy="11" r="3"/></svg></button>
             <div class="settings-menu" id="settings-menu" role="menu" hidden>
+              <button id="settings-menu-profile" type="button" role="menuitem"><strong>Il mio profilo</strong><small>Parte vocale, nome e uscita</small></button>
+              <button id="settings-menu-repertoire" type="button" role="menuitem"><strong>Il mio repertorio</strong><small>Brani assegnati e avanzamento</small></button>
               <button class="settings-menu-mixer" id="settings-menu-mixer" type="button" role="menuitem"><strong>Mixer</strong><small>Voci e accompagnamento</small></button>
               <button id="settings-menu-recording" type="button" role="menuitem"><strong>La mia registrazione</strong><small>Registra, riascolta e analizza</small></button>
+              <button id="settings-menu-relax" type="button" role="menuitem"><strong>Relax mode</strong><small>Una pausa di luce e colore</small></button>
               <button id="settings-menu-basic" type="button" role="menuitem"><strong>Base</strong><small>Audio, testo e colore carta</small></button>
               <button id="settings-menu-advanced" type="button" role="menuitem"><strong>Avanzate</strong><small>Microfono e sincronizzazione</small></button>
             </div>
@@ -53,7 +70,8 @@
         </div>
       </header>
 
-      <button class="mobile-chrome-toggle mobile-toolbar-toggle" id="mobile-toolbar-toggle" type="button" aria-controls="practice-toolbar" aria-expanded="true" aria-label="Nascondi i comandi superiori" title="Nascondi i comandi superiori"><span class="mobile-chrome-chevron" aria-hidden="true"></span></button>
+      <button class="mobile-chrome-toggle mobile-toolbar-toggle" id="mobile-toolbar-toggle" type="button" aria-controls="practice-toolbar" aria-expanded="true" aria-label="Nascondi i comandi superiori" title="Nascondi i comandi superiori"><span class="mobile-chrome-symbol" aria-hidden="true">≡</span></button>
+      <button class="practice-return" id="practice-return" type="button">Brani</button>
 
       <aside class="asset-status" id="asset-status" role="alert" hidden></aside>
 
@@ -70,9 +88,9 @@
       <div class="score-pitch-divider" id="score-pitch-divider" role="separator" aria-orientation="horizontal" aria-label="Regola altezza spartito" aria-valuemin="96" tabindex="0"><span class="sr-only">Trascina verso il basso per ingrandire lo spartito, verso l'alto per ingrandire il piano roll.</span></div>
 
       <section class="pitch-region" aria-label="Intonazione e tempo">
-        <canvas id="pitch-lane" role="img" aria-describedby="pitch-description"></canvas>
+        <canvas id="pitch-lane" tabindex="0" aria-describedby="pitch-description"></canvas>
         <canvas id="pitch-fluid-layer" aria-hidden="true"></canvas>
-        <p class="sr-only" id="pitch-description">In pausa, trascina orizzontalmente il piano roll per ispezionare liberamente il tentativo. Il punto di ripresa non cambia: premendo play, la traccia parte una battuta prima e la registrazione riprende dal punto in cui era stata messa in pausa. La traiettoria mostra l’intonazione rilevata dal microfono.</p>
+        <p class="sr-only" id="pitch-description">In pausa, trascina sui due assi e usa Vista per lo zoom di tempo e altezza. Tocca una nota della melodia per ascoltarla. Tastiera: frecce per spostarti, pi? e meno per lo zoom, Maiusc per l?altezza, Alt e frecce per scegliere una nota, Invio per ascoltarla. Il punto di ripresa non cambia.</p>
         <div class="intonation-readout" id="intonation-readout" aria-live="polite" hidden><strong id="live-note">—</strong><span id="live-cents">— ¢</span><small id="live-state">in attesa</small></div>
         <div class="lane-legend" aria-label="Tracce visibili nel piano roll">
           <label class="pitch-layer-toggle voice-key"><input id="pitch-layer-v1" type="checkbox" checked /> La tua voce</label>
@@ -81,23 +99,25 @@
         </div>
         <output class="neural-live-status" id="neural-live-status" hidden aria-live="polite"><span>CREPE v5</span><strong id="neural-live-note">—</strong><small id="neural-live-timing">in attesa</small></output>
         <meter id="microphone-level" min="0" max="0.08" value="0" aria-label="Livello del microfono" title="Livello del microfono"></meter>
+        <button id="echo-live-status" class="echo-live-status" type="button" aria-haspopup="dialog" aria-controls="calibration-dialog" hidden>Rientro · automatico</button>
       </section>
 
       <footer class="practice-transport" id="practice-transport">
         <div class="transport-position"><span id="measure-counter">Battuta 1 / 12</span><span class="scoring-cue" id="scoring-cue">Ingresso da 1</span><small id="build-version" hidden></small></div>
         <div class="transport-controls" role="group" aria-label="Trasporto"><button class="transport-button restart-transport" id="restart-transport" type="button" aria-label="Ricomincia il brano dalla battuta uno" title="Ricomincia il brano">↺</button><button class="transport-button" id="previous-measure" type="button" aria-label="Battuta precedente" title="Battuta precedente">|‹</button><button class="play-button" id="toggle-playback" type="button" aria-label="Avvia la prova" aria-pressed="false"><span aria-hidden="true">▶</span></button><button class="transport-button" id="next-measure" type="button" aria-label="Battuta successiva" title="Battuta successiva">›|</button></div>
-        <div class="transport-controls" aria-label="Feedback"><button class="mode-button feedback-button" id="show-feedback" type="button" hidden>Mostra feedback</button></div>
+        <div class="transport-controls" aria-label="Analisi"><button class="mode-button feedback-button" id="show-feedback" type="button" hidden>Analisi</button></div>
         <div class="mixer-controls">
           <label class="volume-control"><span aria-hidden="true">◖</span><span class="sr-only">Volume accompagnamento</span><input id="volume" type="range" min="0" max="100" value="62" aria-label="Volume accompagnamento" /></label>
           <label class="volume-control metronome-control"><button id="metronome-toggle" type="button" aria-label="Attiva metronomo" aria-pressed="false" title="Metronomo">♩</button><span class="sr-only">Volume metronomo</span><input id="metronome-volume" type="range" min="0" max="100" value="0" aria-label="Volume metronomo" /></label>
         </div>
       </footer>
-      <button class="mobile-chrome-toggle mobile-transport-toggle" id="mobile-transport-toggle" type="button" aria-controls="practice-transport" aria-expanded="true" aria-label="Nascondi i controlli di riproduzione" title="Nascondi i controlli di riproduzione"><span class="mobile-chrome-chevron is-down" aria-hidden="true"></span></button>
+      <button class="mobile-chrome-toggle mobile-transport-toggle" id="mobile-transport-toggle" type="button" aria-controls="practice-transport" aria-expanded="true" aria-label="Nascondi i controlli di riproduzione" title="Nascondi i controlli di riproduzione"><span class="mobile-chrome-symbol" aria-hidden="true">≡</span></button>
       <audio id="backing-audio" preload="metadata"></audio>
       <audio id="personal-recording-replay-audio" preload="metadata"></audio>
       <div class="toast" id="toast" role="status" aria-live="polite" hidden></div>
       <aside class="benchmark-recording" id="benchmark-recording" aria-live="assertive" hidden><span><b>● Registrazione benchmark</b><small id="benchmark-live-scenario"></small></span><button id="benchmark-stop-live" type="button" onclick="window.ChoirBenchmarkStop?.()">Interrompi take</button></aside>
       <aside class="personal-recording-live" id="personal-recording-live" aria-live="assertive" hidden><span><b id="personal-recording-live-title">● Registrazione personale</b><small id="personal-recording-live-detail">Il microfono sta registrando la tua voce.</small></span><button id="personal-recording-stop-live" type="button">Interrompi</button></aside>
+      <aside class="personal-recording-live" id="echo-test-live" hidden><span><b>● Test rientro</b><small id="echo-test-remaining" role="timer">60 s · voce, base e segnale trattato</small></span><button id="echo-test-stop" type="button">Termina test</button></aside>
     </main>
     <dialog id="voice-mixer-dialog" class="practice-dialog" aria-labelledby="voice-mixer-heading">
       <h2 id="voice-mixer-heading">Voci da ascoltare</h2>
@@ -114,27 +134,46 @@
       <div class="dialog-actions"><button id="voice-mixer-own" type="button">Solo la mia parte</button><button id="voice-mixer-all" type="button">Tutte le voci</button><button id="voice-mixer-close" type="button">Chiudi</button></div>
     </dialog>
     <dialog id="settings-dialog" class="practice-dialog detector-settings-dialog" aria-labelledby="settings-heading">
-      <h2 id="settings-heading">Impostazioni</h2>
+      <header class="calibration-header"><h2 id="settings-heading">Impostazioni</h2><button id="settings-close" type="button" aria-label="Chiudi impostazioni">×</button></header>
       <section id="settings-basic-panel" class="settings-panel" data-settings-panel="basic">
+      <section class="detector-setting calibration-entry" aria-labelledby="settings-calibration-heading">
+        <div><h3 id="settings-calibration-heading">Calibrazione audio</h3><output id="settings-calibration-status">Da calibrare</output></div>
+        <button id="settings-calibrate" type="button">Calibra audio</button>
+      </section>
       <section class="detector-setting audio-output-setting" aria-labelledby="settings-audio-output-heading">
         <div><h3 id="settings-audio-output-heading">Uscita audio in uso <button class="setting-info" type="button" aria-label="Informazioni sull’uscita audio" data-tooltip="La scelta vale 30 minuti. Il ritardo del piano roll resta a 270 ms; l’anticipo della traccia vocale passa a 320 ms con Bluetooth e a 270 ms senza Bluetooth.">i</button></h3><output id="settings-audio-output-status">Da confermare</output></div>
         <div class="audio-output-choices" role="radiogroup" aria-label="Uscita audio in uso">
           <label class="audio-output-choice" for="settings-audio-output-standard">
             <input id="settings-audio-output-standard" name="settings-audio-output" type="radio" value="standard" />
-            <span><strong>Cavo o altoparlanti del dispositivo</strong></span>
+            <span><strong>Cavo o dispositivo</strong></span>
           </label>
           <label class="audio-output-choice" for="settings-audio-output-bluetooth">
             <input id="settings-audio-output-bluetooth" name="settings-audio-output" type="radio" value="bluetooth" />
-            <span><strong>Cuffie o altoparlante Bluetooth</strong></span>
+            <span><strong>Bluetooth</strong></span>
           </label>
         </div>
         <p id="settings-audio-output-description" hidden>La scelta vale per 30 minuti in questa scheda e verrà richiesta di nuovo se cambia un dispositivo audio.</p>
       </section>
+      <section class="audio-listening-setting" aria-label="Modalità di ascolto">
+        <label class="echo-enable-control" for="echo-enabled">
+          <input id="echo-enabled" type="checkbox" />
+          <span class="echo-enable-switch" aria-hidden="true"><i></i></span>
+          <span class="echo-enable-copy"><strong>Uso gli altoparlanti</strong><small>Calibra audio include la riduzione del rientro.</small></span>
+        </label>
+        <output id="echo-entry-status" class="audio-echo-status" aria-live="polite">Non attiva</output>
+        <details class="echo-test-details"><summary>Assistenza e test audio</summary>
+          <p>Con gli altoparlanti la riduzione del rientro è sperimentale. Mantieni fermi dispositivo e volume.</p>
+          <p class="echo-recording-note"><strong>Con gli altoparlanti il best audio automatico è sospeso.</strong> Il test diagnostico si salva separatamente.</p>
+          <button id="echo-test-open" type="button">Registra test rientro</button>
+        </details>
+      </section>
+      <details id="settings-appearance" class="settings-appearance"><summary>Aspetto dello spartito</summary>
       <section class="detector-setting" aria-labelledby="settings-text-scale-heading">
         <div><h3 id="settings-text-scale-heading">Dimensione testo sul piano roll <button class="setting-info" type="button" aria-label="Informazioni sulla dimensione del testo" data-tooltip="Regola la dimensione delle sillabe sopra le note. Il valore predefinito è 150%.">i</button></h3><output id="settings-text-scale-value">150%</output></div>
         <input id="settings-text-scale" type="range" min="100" max="200" step="10" value="150" />
         <div class="detector-setting-scale"><span>100% · normale</span><span>200% · molto grande</span></div>
       </section>
+      </details>
       </section>
       <select id="note-names" hidden aria-hidden="true"><option value="italian">Do, Re, Mi…</option><option value="international">C, D, E…</option></select>
       <section id="settings-advanced-panel" class="settings-panel settings-advanced" data-settings-panel="advanced" hidden>
@@ -150,6 +189,7 @@
         <input id="settings-v1-rms" type="range" min="0" max="100" step="1" value="8" aria-describedby="settings-v1-rms-description" />
         <div class="detector-setting-scale"><span>Più sensibile</span><span>Più selettiva</span></div>
         <p id="settings-v1-rms-description" hidden>Valore predefinito: filtra silenzio e rumore debole.</p>
+        <p id="settings-calibration-effective" hidden></p>
         <label class="weak-voice-toggle" for="settings-weak-voice-mode">
           <input id="settings-weak-voice-mode" type="checkbox" />
           <span><strong>Modalità voce debole</strong></span>
@@ -184,56 +224,188 @@
       <div class="dialog-actions"><button id="settings-reset" type="button">Ripristina predefinito</button></div>
       </section>
     </dialog>
-    <dialog id="result-dialog" class="practice-dialog" aria-labelledby="result-heading">
-      <h2 id="result-heading">Prova completata</h2><p id="result-text"></p><p id="result-progress"></p>
-      <div class="dialog-actions"><button id="retry" type="button">Riprova</button><button id="result-resume" type="button" hidden>Riprendi</button><button id="result-close" type="button">Chiudi</button></div>
+    <dialog id="calibration-dialog" class="practice-dialog calibration-dialog" aria-labelledby="calibration-heading" aria-describedby="calibration-intro">
+      <header class="calibration-header"><h2 id="calibration-heading">Calibra audio</h2><button id="calibration-close" type="button" aria-label="Chiudi calibrazione">×</button></header>
+      <p id="calibration-intro">Una sola guida per microfono, voce e altoparlanti. Canta solo al segnale «Canta».</p>
+      <div class="calibration-cue"><div class="calibration-cue-copy"><p id="calibration-step">Prima di iniziare</p><p id="calibration-instruction" role="status" aria-live="assertive" aria-atomic="true">Segui i segnali</p><p id="calibration-hint">Scegli una nota comoda: non devi imitarne una precisa.</p></div><div class="calibration-timer"><span id="calibration-countdown" role="timer" aria-label="Secondi rimanenti nella fase">30</span><span id="calibration-timer-label">secondi totali</span></div></div>
+      <p id="calibration-next">Prima il silenzio, poi due vocali: normale e più piano.</p>
+      <figure id="calibration-signal" class="calibration-signal">
+        <figcaption><span>Livello microfono</span><span id="calibration-level-status">In attesa</span></figcaption>
+        <div id="calibration-meter" role="meter" aria-label="Livello audio del microfono" aria-valuemin="-72" aria-valuemax="0" aria-valuenow="-72" aria-valuetext="Microfono spento"><canvas id="calibration-level" aria-hidden="true"></canvas></div>
+      </figure>
+      <progress id="calibration-progress" max="1" value="0" aria-label="Avanzamento del controllo"></progress>
+      <section id="calibration-report" class="calibration-report" aria-label="Risultati del controllo" hidden>
+        <p id="calibration-comparison"></p>
+        <p id="calibration-acoustic-result" hidden></p>
+        <dl><div><dt>Voce riconosciuta</dt><dd id="calibration-voice"></dd></div><div><dt>Pause rispettate</dt><dd id="calibration-silence"></dd></div><div><dt>Media bilanciata</dt><dd id="calibration-balanced"></dd></div></dl>
+        <p class="calibration-estimate">Stime sulla guida, non precisione delle note.</p>
+      </section>
+      <p id="calibration-status" role="status">Il microfono si attiva premendo «Avvia controllo».</p>
+      <div class="dialog-actions calibration-actions"><button id="calibration-start" type="button">Avvia controllo</button><button id="calibration-done" type="button" hidden>Fatto</button></div>
+      <details class="calibration-details"><summary>Dettagli della calibrazione</summary><p>L’audio viene analizzato sul dispositivo e poi eliminato. Le regolazioni verificate si applicano automaticamente. Il profilo vocale resta su questo browser per 7 giorni; a una nuova apertura del microfono riverifichiamo il percorso audio. Ripeti la guida se cambi ambiente.</p><pre id="calibration-details"></pre><div class="calibration-profile-actions"><button id="calibration-reset" type="button">Reimposta</button></div></details>
     </dialog>
-    <dialog id="performance-dialog" class="practice-dialog performance-dialog" aria-labelledby="performance-heading">
-      <header class="performance-dialog-header"><div><h2 id="performance-heading">I risultati</h2><p id="performance-identity">Best score condivisi</p><p>Il tuo best è visibile a te, ai referenti autorizzati del tuo settore e al direttore.</p></div><button id="performance-close" type="button">Chiudi</button></header>
-      <nav id="performance-tabs" class="performance-tabs" aria-label="Ambito risultati"></nav>
-      <p id="performance-status" class="performance-empty" role="status">Caricamento…</p>
-      <section id="performance-list" class="performance-list" aria-live="polite"></section>
+    <dialog id="echo-test-dialog" class="practice-dialog calibration-dialog" aria-labelledby="echo-test-heading">
+      <header class="calibration-header"><h2 id="echo-test-heading">Test rientro</h2><button id="echo-test-close" type="button" aria-label="Chiudi test rientro">×</button></header>
+      <p id="echo-test-intro">Registra fino a 60 secondi per analizzare gli errori con gli altoparlanti.</p>
+      <h3 id="echo-test-instruction">Registra voce e base</h3>
+      <label id="echo-test-consent-row" class="echo-test-consent"><input id="echo-test-consent" type="checkbox" /> Autorizzo registrazione e salvataggio del test, condiviso con i direttori e l’assistenza tecnica per 7 giorni.</label>
+      <p id="echo-test-status" role="status">Il test avvia la prova dal punto selezionato.</p>
+      <div class="dialog-actions"><button id="echo-test-start" type="button" disabled>Avvia test e Play</button><button id="echo-test-retry" type="button" hidden>Riprova salvataggio</button><button id="echo-test-discard" type="button" hidden>Scarta</button><button id="echo-test-done" type="button" hidden>Fatto</button><button id="echo-test-delete" type="button" hidden>Elimina test salvato</button></div>
+      <details class="calibration-details"><summary>Dati e salvataggio</summary><p>Il test salva automaticamente microfono, base, segnale trattato e impostazioni nel tuo profilo per la diagnosi. Sostituisce il test precedente dello stesso brano, separatamente dal best audio. Puoi eliminarlo qui; scade dopo 7 giorni. L’invio usa circa 46 MB per 60 secondi a 48 kHz. Se la rete non funziona, resta in questa pagina per riprovare.</p></details>
     </dialog>
+    <dialog id="result-dialog" class="practice-dialog performance-dialog analysis-dialog" aria-labelledby="result-heading">
+      <header class="performance-dialog-header"><div><p class="dialog-eyebrow">ANALISI DELLA PROVA</p><h2 id="result-heading">Prova completata</h2></div><button id="result-close" type="button">Chiudi</button></header>
+      <section class="analysis-current-result" aria-labelledby="result-heading">
+        <p id="result-text"></p><p id="result-progress"></p>
+        <div class="dialog-actions"><button id="retry" type="button">Riprova</button><button id="result-resume" type="button" hidden>Riprendi</button></div>
+      </section>
+      <section id="performance-section" class="analysis-results" aria-labelledby="performance-heading" hidden>
+        <header><h3 id="performance-heading">Risultati</h3><p id="performance-identity">Best score condivisi</p><p>Il tuo best è visibile a te, ai referenti autorizzati del tuo settore e al direttore.</p></header>
+        <nav id="performance-tabs" class="performance-tabs" aria-label="Ambito risultati"></nav>
+        <p id="performance-status" class="performance-empty" role="status">Caricamento…</p>
+        <section id="performance-list" class="performance-list" aria-live="polite"></section>
+      </section>
+    </dialog>
+    <section id="performance-review" class="performance-review" aria-labelledby="performance-review-title" hidden>
+      <header class="performance-review-header">
+        <button id="performance-review-back" class="performance-review-back" type="button">Risultati</button>
+        <div class="performance-review-heading"><p>ANALISI DEL BEST</p><h1 id="performance-review-title">Esecuzione</h1><span id="performance-review-meta"></span></div>
+        <div class="performance-review-score"><strong id="performance-review-score">—</strong><span id="performance-review-coverage">—</span></div>
+        <button id="performance-review-practice" class="performance-review-practice" type="button" hidden>Prova questo brano</button>
+      </header>
+      <main class="performance-review-main">
+        <section class="performance-review-workspace">
+          <div class="performance-review-score-strip" id="performance-review-score-scroller">
+            <img id="performance-review-score-image" alt="Spartito sincronizzato con il piano roll" />
+            <span id="performance-review-score-cursor" class="performance-review-score-cursor" aria-hidden="true"></span>
+            <output id="performance-review-measure">Battuta —</output>
+          </div>
+          <div class="performance-review-toolbar">
+            <div><p>PIANO ROLL COMPLETO</p><h2 id="performance-review-inspect">Trascina per esplorare · rotella per lo zoom</h2></div>
+            <div class="performance-review-actions"><button id="performance-review-zoom-out" type="button" aria-label="Riduci zoom">−</button><output id="performance-review-zoom">100%</output><button id="performance-review-zoom-in" type="button" aria-label="Aumenta zoom">+</button><button id="performance-review-reset" type="button">Mostra tutto</button></div>
+          </div>
+          <div id="performance-review-canvas-wrap" class="performance-review-canvas-wrap">
+            <canvas id="performance-review-canvas" tabindex="0" aria-label="Piano roll interattivo con errori e suggerimenti"></canvas>
+            <img id="performance-review-legacy-image" alt="Piano roll del best condiviso" hidden />
+          </div>
+          <footer class="performance-review-footer"><span><i class="legend-target"></i>Melodia</span><span><i class="legend-good"></i>Intonazione corretta</span><span><i class="legend-warning"></i>Da correggere</span><span><i class="legend-error"></i>Errore marcato</span></footer>
+        </section>
+        <aside class="performance-review-feedback" aria-labelledby="performance-review-feedback-title">
+          <div><p id="performance-review-feedback-kicker">DA RIVEDERE</p><h2 id="performance-review-feedback-title">Suggerimenti nel contesto</h2><span id="performance-review-feedback-intro">Clicca un punto ! per aprire il suggerimento.</span></div>
+          <ol id="performance-review-suggestions"></ol>
+          <p id="performance-review-empty" class="performance-review-empty" hidden></p>
+        </aside>
+      </main>
+    </section>
     <dialog id="personal-recording-dialog" class="practice-dialog personal-recording-dialog" aria-labelledby="personal-recording-heading">
-      <p class="dialog-eyebrow">REGISTRAZIONE PERSONALE</p>
-      <h2 id="personal-recording-heading">La mia registrazione</h2>
-      <p>Puoi conservare nel tuo profilo una sola registrazione per brano. Audio e replay del pitch restano privati: non sono visibili al direttore o agli altri cantori.</p>
+      <header class="personal-recording-heading">
+        <div><p class="dialog-eyebrow">AUDIO PER PITCH LAB</p><h2 id="personal-recording-heading">La mia registrazione <button class="setting-info" type="button" aria-label="Come funziona la registrazione personale" data-tooltip="Puoi conservare una registrazione per brano. Audio e replay restano privati finché non scegli di condividerli con il direttore.">i</button></h2></div>
+        <button id="personal-recording-close" class="personal-recording-close" type="button" aria-label="Chiudi">×</button>
+      </header>
+      <section class="personal-recording-automatic">
+        <label><input id="personal-recording-auto-best" type="checkbox" /><span><strong>Best audio automatico</strong><small id="personal-recording-auto-best-status" role="status">Verifica…</small></span></label>
+        <button class="setting-info" type="button" aria-label="Informazioni sul best audio automatico" data-tooltip="Autorizzi una volta sola e confermi l’uso delle cuffie. Nelle prove complete, senza interruzioni, in tonalità originale e al 100%, l’audio sostituisce il precedente solo quando ottieni un nuovo best. Le prove peggiori vengono scartate.">i</button>
+      </section>
       <section class="personal-recording-current" id="personal-recording-current" hidden>
-        <strong>Registrazione salvata</strong>
+        <div class="personal-recording-current-heading"><strong>Registrazione attuale</strong><button class="setting-info" type="button" aria-label="Informazioni sulla registrazione attuale" data-tooltip="È l’unico audio conservato per questo brano. Puoi riascoltarlo, revocare l’accesso del direttore o eliminarlo.">i</button></div>
         <p id="personal-recording-current-summary"></p>
+        <div class="personal-recording-current-actions"><button id="personal-recording-replay" type="button" hidden>Riascolta</button><button id="personal-recording-sharing" type="button">Condividi</button><button id="personal-recording-delete" type="button" hidden>Elimina</button></div>
       </section>
-      <fieldset class="personal-recording-consent" id="personal-recording-consent">
-        <legend>Prima di registrare</legend>
-        <label><input id="personal-recording-headphones" type="checkbox" /> <span><strong>Sto usando cuffie</strong><small>Gli altoparlanti non sono ammessi: entrerebbero nella registrazione e nel rilevamento.</small></span></label>
-        <label><input id="personal-recording-storage-consent" type="checkbox" /> <span><strong>Acconsento a registrazione e salvataggio</strong><small>La voce e la traiettoria del pitch saranno memorizzate nel mio profilo privato finché non le sostituisco o elimino.</small></span></label>
-      </fieldset>
-      <p id="personal-recording-status" class="personal-recording-status" role="status">Caricamento…</p>
-      <section id="personal-recording-review" class="personal-recording-review" hidden>
-        <h3>Registrazione pronta</h3>
-        <p id="personal-recording-review-summary">Ascoltala prima di decidere.</p>
-        <audio id="personal-recording-preview" controls preload="metadata"></audio>
-        <div class="dialog-actions"><button id="personal-recording-save" type="button">Salva nel profilo</button><button id="personal-recording-discard" type="button">Scarta</button></div>
-      </section>
-      <div class="dialog-actions personal-recording-actions" id="personal-recording-actions">
-        <button id="personal-recording-start" type="button" disabled>Registra dal principio</button>
-        <button id="personal-recording-replay" type="button" hidden>Riascolta sul brano</button>
-        <button id="personal-recording-delete" type="button" hidden>Elimina</button>
-        <button id="personal-recording-close" type="button">Chiudi</button>
-      </div>
+      <details class="personal-recording-manual">
+        <summary><span><strong>Registrazione manuale</strong><small>Facoltativa</small></span><span aria-hidden="true">⌄</span></summary>
+        <fieldset class="personal-recording-consent" id="personal-recording-consent">
+          <legend class="sr-only">Consensi per la registrazione manuale</legend>
+          <div><label><input id="personal-recording-headphones" type="checkbox" /><strong>Sto usando cuffie</strong></label><button class="setting-info" type="button" aria-label="Perché servono le cuffie" data-tooltip="Gli altoparlanti entrerebbero nella registrazione e altererebbero il rilevamento.">i</button></div>
+          <div><label><input id="personal-recording-storage-consent" type="checkbox" /><strong>Salva nel mio profilo</strong></label><button class="setting-info" type="button" aria-label="Informazioni sul salvataggio" data-tooltip="Voce e traiettoria pitch restano nel tuo profilo per massimo 12 mesi, oppure finché non le sostituisci o elimini.">i</button></div>
+          <div><label><input id="personal-recording-analysis-consent" type="checkbox" /><strong>Condividi con il direttore</strong></label><button class="setting-info" type="button" aria-label="Informazioni sulla condivisione" data-tooltip="Facoltativo. Solo i direttori potranno ascoltare ed elaborare questa registrazione nel Pitch Lab.">i</button></div>
+        </fieldset>
+        <p id="personal-recording-status" class="personal-recording-status" role="status">Caricamento…</p>
+        <section id="personal-recording-review" class="personal-recording-review" hidden>
+          <h3>Registrazione pronta</h3>
+          <p id="personal-recording-review-summary">Ascoltala prima di decidere.</p>
+          <audio id="personal-recording-preview" controls preload="metadata"></audio>
+          <div class="dialog-actions"><button id="personal-recording-save" type="button">Salva</button><button id="personal-recording-discard" type="button">Scarta</button></div>
+        </section>
+        <div class="dialog-actions personal-recording-actions" id="personal-recording-actions"><button id="personal-recording-start" type="button" disabled>Registra dal principio</button></div>
+      </details>
     </dialog>
-    <dialog id="piece-picker-dialog" class="practice-dialog piece-picker-dialog" aria-labelledby="piece-picker-heading">
-      <div class="studio-welcome"><span class="studio-wordmark">CHOIR ASSISTANT</span><h2 id="piece-picker-heading">La tua voce.<br>Il tuo prossimo passo.</h2><p>Ritrova la tua parte, <span class="studio-phrase">una frase alla volta.</span></p><div class="studio-staff" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div></div>
-      <div class="studio-library-form"><p class="studio-section-label">IL TUO REPERTORIO</p>
-      <label>Brano <select id="library-piece" aria-label="Brano"></select></label>
-      <label>La tua sezione <select id="library-part" aria-label="La tua sezione"></select></label>
-      <p id="library-note" class="library-note" hidden></p>
-      <p class="studio-mode-heading">SCEGLI LA MODALITÀ</p>
-      <div class="studio-mode-picker" aria-label="Modalità">
-        <button class="studio-mode-entry is-primary" id="library-open" type="button"><span class="studio-mode-icon" aria-hidden="true">●</span><span class="studio-mode-copy"><strong>Canta brano</strong></span><span class="studio-mode-action">Apri</span></button>
-        <button class="studio-mode-entry" id="library-score" type="button"><span class="studio-mode-icon" aria-hidden="true">▤</span><span class="studio-mode-copy"><strong>Mostra partitura</strong></span><span class="studio-mode-action">Apri</span></button>
-        <a class="studio-mode-entry" id="library-voice-lab" href="voice-lab.html"><span class="studio-mode-icon" aria-hidden="true">♪</span><span class="studio-mode-copy"><strong>Allena la voce</strong></span><span class="studio-mode-action">Apri</span></a>
+    <dialog id="monitoring-consent-dialog" class="practice-dialog monitoring-consent-dialog" aria-labelledby="monitoring-consent-heading">
+      <p class="dialog-eyebrow">AVANZAMENTO DEL REPERTORIO</p>
+      <h2 id="monitoring-consent-heading">Condivisione delle metriche di studio</h2>
+      <p>Per mostrare i tuoi progressi, Choir Assistant invia automaticamente dati derivati dalla voce: brano, parte, copertura, intonazione e piano roll. I direttori vedono il tuo nome e il tuo andamento.</p>
+      <p><strong>L’audio personale resta privato</strong> e non viene usato dal cockpit. Le metriche contribuiscono anche agli aggregati della tua sezione; nei gruppi piccoli i risultati possono essere riconducibili ai partecipanti.</p>
+      <label class="monitoring-consent-check"><input id="monitoring-consent-check" type="checkbox" /> Ho letto e accetto l’informativa sul monitoraggio delle prove.</label>
+      <p id="monitoring-consent-status" role="status"></p>
+      <div class="dialog-actions"><button id="monitoring-consent-accept" type="button" disabled>Accetta e continua</button><button id="monitoring-consent-decline" type="button">Non ora</button></div>
+    </dialog>
+    <dialog id="member-profile-dialog" class="practice-dialog member-profile-dialog" aria-labelledby="member-profile-heading">
+      <p class="dialog-eyebrow">IL TUO PROFILO</p>
+      <h2 id="member-profile-heading">Il mio profilo</h2>
+      <form id="member-profile-form">
+        <label>La tua parte<select id="member-profile-voice"><option value="">Scegli la tua parte</option><option value="soprano">Soprano</option><option value="contralto">Contralto</option><option value="tenore">Tenore</option><option value="basso">Basso</option></select></label>
+        <label>Nome<input id="member-profile-first-name" name="firstName" type="text" maxlength="60" autocomplete="given-name" required /></label>
+        <label>Cognome<input id="member-profile-last-name" name="lastName" type="text" maxlength="60" autocomplete="family-name" required /></label>
+        <p id="member-profile-status" role="status"></p>
+        <div class="dialog-actions"><button id="member-profile-save" type="submit">Salva e continua</button><button id="member-profile-cancel" type="button">Annulla</button></div>
+      </form>
+      <button id="settings-menu-account" class="profile-sign-out" type="button">Esci dall’account</button>
+    </dialog>
+    <dialog id="piece-picker-dialog" class="practice-dialog piece-picker-dialog" aria-labelledby="piece-picker-heading" data-step="mode">
+      <header class="home-utilities">
+        <span class="home-brand">Epistrophe</span>
+        <details id="home-settings" class="home-settings">
+          <summary aria-label="Profilo e impostazioni" aria-expanded="false" aria-controls="home-account-menu">
+            <span class="home-avatar"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="8" r="3.25"/><path d="M5 21v-3a7 7 0 0 1 14 0v3"/></svg></span>
+            <span class="home-profile-label">Il mio profilo</span><span class="home-profile-indicator" aria-hidden="true">+</span>
+          </summary>
+          <div id="home-account-menu" class="home-settings-menu" role="group" aria-label="Profilo e impostazioni">
+            <button type="button" id="library-profile">Il mio profilo</button>
+            <div class="home-settings-section" role="group" aria-labelledby="home-settings-label">
+            <p id="home-settings-label">Impostazioni</p>
+            <button id="home-pause" type="button" aria-pressed="false">Pausa animazione</button>
+            <a href="relax.html?return=%2Findex.html">Relax mode</a>
+            <button id="home-basic" type="button">Base</button>
+            <button id="home-advanced" type="button">Avanzate</button>
+            </div>
+            <button id="home-sign-out" type="button">Esci dall’account</button>
+          </div>
+        </details>
+      </header>
+      <div class="home-main">
+      <div class="home-scene" aria-hidden="true"><canvas id="home-glow"></canvas><canvas id="home-canvas"></canvas></div>
+      <div class="studio-library-form">
+        <button type="button" class="studio-step-back" id="library-back" hidden>Indietro</button>
+        <div class="home-step-heading"><h2 id="piece-picker-heading" tabindex="-1">Menù</h2><p id="library-step-hint"></p></div>
+        <section id="library-mode-step" class="studio-step" aria-label="Modalità di studio">
+          <button class="studio-route-entry" id="library-sing" type="button">Canta brani</button>
+          <button class="studio-route-entry" id="library-read" type="button">Vedi partitura</button>
+          <a class="studio-route-entry" id="library-voice-lab" href="voice-lab.html">Allena la voce</a>
+        </section>
+        <section id="library-source-step" class="studio-step" aria-label="Scegli i brani" hidden>
+          <a class="studio-route-entry" id="library-assigned" href="repertorio.html"><span class="studio-route-icon" aria-hidden="true">≡</span><span><strong>Brani assegnati</strong><small>Il programma del coro</small></span></a>
+          <button class="studio-route-entry" id="library-custom" type="button"><span class="studio-route-icon" aria-hidden="true">♪</span><span><strong>Brani custom</strong><small>Scegli dal catalogo</small></span></button>
+        </section>
+        <section id="library-piece-step" class="studio-step" aria-label="Scegli un brano" hidden>
+          <label>Brano <select id="library-piece" aria-label="Brano"></select></label>
+          <label hidden>La tua sezione <select id="library-part" aria-label="La tua sezione"></select></label>
+          <p id="library-voice-summary" class="library-note"></p>
+          <p id="library-note" class="library-note" hidden></p>
+          <div class="studio-mode-picker">
+            <button class="studio-mode-entry is-primary" id="library-open" type="button"><span class="studio-mode-copy"><strong>Canta brano</strong></span><span class="studio-mode-action">Apri</span></button>
+            <button class="studio-mode-entry is-primary" id="library-score" type="button" hidden><span class="studio-mode-copy"><strong>Vedi partitura</strong></span><span class="studio-mode-action">Apri</span></button>
+          </div>
+        </section>
+        <section id="library-part-step" class="studio-step" aria-label="Scegli la parte vocale" hidden>
+          <div class="studio-voice-choices">
+            <button type="button" data-preferred-voice="soprano">Soprano</button><button type="button" data-preferred-voice="contralto">Contralto</button>
+            <button type="button" data-preferred-voice="tenore">Tenore</button><button type="button" data-preferred-voice="basso">Basso</button>
+          </div>
+          <p class="library-note">Puoi cambiarla in Il mio profilo.</p>
+        </section>
+        <p id="library-status" class="library-note" role="status"></p>
+        <button class="studio-return" id="library-close" type="button" hidden>Torna alla prova</button>
       </div>
-      <button class="studio-return" type="button" onclick="this.closest('dialog').close()">Torna alla prova</button></div>
+      </div>
     </dialog>
     <dialog id="ground-truth-dialog" class="practice-dialog" aria-labelledby="ground-truth-heading">
       <h2 id="ground-truth-heading">Campione di riferimento</h2>
@@ -269,7 +441,7 @@
     </dialog>
     <section class="benchmark-analysis feedback-review" id="benchmark-analysis" hidden aria-label="Revisione dell’esecuzione">
       <header class="benchmark-analysis-header">
-        <button class="analysis-back" id="benchmark-analysis-back" type="button">← Torna alla prova</button>
+        <button class="analysis-back" id="benchmark-analysis-back" type="button">Fatto</button>
         <div class="analysis-title"><p>LA TUA REGISTRAZIONE</p><h1>Revisione dell’esecuzione</h1></div>
         <label class="analysis-take-picker">Registrazione <select id="benchmark-analysis-take" aria-label="Registrazione da rivedere"></select></label>
       </header>

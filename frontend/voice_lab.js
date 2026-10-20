@@ -18,7 +18,13 @@
     'warmup-feedback-title', 'warmup-feedback-message', 'warmup-feedback-summary', 'warmup-segments',
     'warmup-retry', 'warmup-step-up', 'warmup-next', 'warmup-choose', 'warmup-prepare', 'warmup-workspace',
     'warmup-back-choose', 'warmup-ear-exercises', 'warmup-prepare-kicker', 'warmup-prepare-title',
-    'warmup-preview-steps', 'warmup-feedback-details'];
+    'warmup-feedback-details', 'warmup-navigation', 'warmup-location',
+    'warmup-back-prepare', 'warmup-lesson-intro',
+    'warmup-lesson-score', 'warmup-lesson-key', 'warmup-lesson-notes',
+    'warmup-instructions', 'warmup-instructions-dialog', 'warmup-demo-close', 'warmup-demo-replay',
+    'warmup-demo-step', 'warmup-demo-title', 'warmup-demo-copy', 'warmup-demo-score',
+    'warmup-demo-beats', 'warmup-demo-caption', 'warmup-demo-tempo',
+    'warmup-position-options', 'warmup-level-options'];
   const els = Object.fromEntries(ids.map((id) => [id.replaceAll('-', '_'), $(id)]));
   const STORE = 'choir-voice-lab:v2';
   const MAX_RESULTS = 300;
@@ -43,6 +49,7 @@
   };
   let needsRoleSetup = true;
   let pendingStart = false;
+  let voiceProfileReady = Promise.resolve();
   try {
     const role = localStorage.getItem(`${STORE}:role`) || localStorage.getItem('choir-voice-lab:v1:role');
     if (role && Core.ROLE_RANGES[role]) { state.role = role; needsRoleSetup = false; }
@@ -192,13 +199,13 @@
     let phrase = null;
     if (supportsRenderedPhrase(exercise)) {
       try { phrase = await loadGuidePhrase(exercise); }
-      catch (error) { console.warn('Voice Lab: frase continua non disponibile, uso il campionatore.', error); }
+      catch (_) { throw new Error('La voce guida non è disponibile. Premi Comincia per riprovare.'); }
     }
     const pitches = phrase ? [exercise.rootMidi] : [exercise.rootMidi, ...exercise.events.map((event) => event.midi)];
     await Promise.all([...new Set(pitches)].map((midi) => loadVoiceSample(midi)));
     if (state.ambienceEnabled && supportsRenderedPhrase(exercise)) {
       try { await loadPad(exercise); }
-      catch (error) { console.warn('Voice Lab: pad non disponibile, continuo senza accompagnamento.', error); }
+      catch (_) { throw new Error('L’accompagnamento non è disponibile. Riprova o disattivalo in Impostazioni.'); }
     }
   }
 
@@ -322,6 +329,7 @@
 
   function suspendVoiceLabForBackground() {
     if (document.visibilityState !== 'hidden') return;
+    if (els.warmup_instructions_dialog.open) closeDemo();
     const wasRunning = state.running;
     state.generation += 1; stopRecorder(false); stopScheduledAudio(); setRunning(false); releaseMicrophone();
     void state.audio?.suspend().catch(() => {});
@@ -394,12 +402,30 @@
   }
 
   const SCREEN_ORDER = ['choose', 'prepare', 'session', 'review'];
-  function showScreen(screen) {
+  const PATH_ORDER = ['scale', 'chords', 'ear'];
+  const PATH_NAMES = ['Scala', 'Accordi', 'Orecchio'];
+  let historyDepth = Number(history.state?.voiceLabDepth) || 0;
+  let restoringHistory = false;
+  let pendingNavigationPath = null;
+  function navigationConfig() {
+    return { path: state.path, family: state.family, mode: state.mode, bpm: state.bpm,
+      inversion: state.inversion, degreeLevel: state.degreeLevel, degreeSeed: state.degreeSeed };
+  }
+  function showScreen(screen, { historyMode = 'replace' } = {}) {
+    if (historyMode === 'push' && state.screen === 'prepare' && !restoringHistory) {
+      history.replaceState({ ...history.state, voiceLabConfig: navigationConfig() }, '', location.href);
+    }
     state.screen = screen;
     document.body.dataset.screen = screen;
     els.warmup_choose.hidden = screen !== 'choose';
     els.warmup_prepare.hidden = screen !== 'prepare';
     els.warmup_workspace.hidden = !['session', 'review'].includes(screen);
+    els.warmup_navigation.hidden = screen === 'choose';
+    els.warmup_back_prepare.hidden = !['session', 'review'].includes(screen);
+    document.querySelector('.warmup-back').hidden = screen !== 'choose';
+    const pathIndex = PATH_ORDER.indexOf(state.path);
+    els.warmup_location.textContent = `${pathIndex + 1} / ${PATH_ORDER.length} · ${PATH_NAMES[pathIndex]}`;
+    document.querySelector('[data-journey="prepare"]').disabled = screen === 'choose';
     const activeIndex = SCREEN_ORDER.indexOf(screen);
     document.querySelectorAll('[data-journey]').forEach((item) => {
       const itemIndex = SCREEN_ORDER.indexOf(item.dataset.journey);
@@ -409,7 +435,12 @@
       else item.removeAttribute('aria-current');
     });
     const route = { choose: 'scegli', prepare: 'prepara', session: 'canta', review: 'risultato' }[screen];
-    if (route && location.hash !== `#${route}`) history.replaceState({ voiceLabScreen: screen }, '', `#${route}`);
+    if (route && !restoringHistory) {
+      if (historyMode === 'push') historyDepth += 1;
+      const navigation = { voiceLabScreen: screen, voiceLabDepth: historyDepth,
+        voiceLabConfig: navigationConfig() };
+      history[historyMode === 'push' ? 'pushState' : 'replaceState'](navigation, '', `#${route}`);
+    }
     if (screen === 'session' || screen === 'review') requestAnimationFrame(drawViews);
     if (screen === 'choose' || screen === 'prepare') document.querySelector('.warmup-shell')?.scrollTo({ top: 0 });
   }
@@ -439,10 +470,11 @@
     state.takeAt = state.countInAt + exercise.countInSeconds; state.endAt = state.takeAt + exercise.durationSeconds;
     if (exercise.mode === 'model') {
       const previewBeat = 60 / exercise.previewBpm;
-      const hasPhrase = supportsRenderedPhrase(exercise) && playGuidePhrase(exercise, previewAt);
-      if (!hasPhrase) exercise.events.forEach((event) => playChoirNote(event.midi, previewAt + event.beat * previewBeat,
+      if (supportsRenderedPhrase(exercise)) {
+        if (!playGuidePhrase(exercise, previewAt)) throw new Error('La voce guida non è pronta. Riprova.');
+        playPad(exercise, previewAt, state.takeAt - .08);
+      } else exercise.events.forEach((event) => playChoirNote(event.midi, previewAt + event.beat * previewBeat,
         event.durationBeats * previewBeat * 1.06, .14, 'model-note'));
-      if (supportsRenderedPhrase(exercise)) playPad(exercise, previewAt, state.takeAt - .08);
       playChoirNote(exercise.rootMidi, state.countInAt, exercise.countInSeconds + exercise.durationSeconds + .08, .025, 'root-drone');
     } else playInnerEarRoot(exercise, previewAt, state.countInAt, state.endAt);
     const beatSeconds = 60 / exercise.bpm;
@@ -453,12 +485,13 @@
 
   async function beginTrial() {
     if (state.running || !state.routine) return;
-    showScreen('session');
+    showScreen('session', { historyMode: state.screen === 'prepare' && historyDepth < 2 ? 'push' : 'replace' });
     state.exercise = state.pendingExercise || state.routine.exercises[state.routineIndex]; state.pendingExercise = null;
     state.reviewing = false; state.analysis = null;
+    els.warmup_plan_detail.parentElement.classList.remove('has-error');
     els.warmup_feedback.hidden = true; state.frames = []; state.visualFrames = []; state.elapsedSeconds = 0;
     renderExerciseHeader(); drawViews();
-    setRunning(true); setPhase('loading', 'Preparo Muse Choir e microfono');
+    setRunning(true); setPhase('loading', 'Preparo audio e microfono');
     const generation = ++state.generation;
     try {
       await Promise.all([ensureMicrophone(), preloadExercise(state.exercise)]); await audioContext().resume();
@@ -466,9 +499,11 @@
       scheduleTrial(state.exercise); animateTrial(generation);
     } catch (error) {
       if (generation !== state.generation) return;
+      releaseMicrophone();
       setRunning(false); setPhase('idle', 'Impossibile iniziare');
       els.warmup_instruction.textContent = error.message;
       els.warmup_plan_detail.textContent = error.message;
+      els.warmup_plan_detail.parentElement.classList.add('has-error');
       showScreen('prepare');
     }
   }
@@ -519,7 +554,7 @@
 
   function finishTrial(generation) {
     if (!state.running || generation !== state.generation) return;
-    stopRecorder(true); stopScheduledAudio(); setRunning(false); state.reviewing = true; state.phase = 'review';
+    stopRecorder(true); stopScheduledAudio(); releaseMicrophone(); setRunning(false); state.reviewing = true; state.phase = 'review';
     state.elapsedSeconds = state.exercise.durationSeconds;
     state.analysis = Core.analyseSequence(state.exercise, state.frames, { minConfidence: activeRecognitionSettings().minConfidence });
     saveResult(Core.result({ exercise: state.exercise, analysis: state.analysis, role: state.role,
@@ -527,11 +562,11 @@
       deviceAndLatencyConfig: { detector: { ...state.detectorSettings },
         minConfidence: activeRecognitionSettings().minConfidence,
         plumeAdvanceMs: state.plumeSettings.timeAdvanceMs } }));
-    setPhase('review', 'Target rivelato', 'Fine'); renderExerciseHeader(); renderFeedback(); showScreen('review'); drawViews();
+    setPhase('review', 'Confronta la tua voce', 'Fine'); renderExerciseHeader(); renderFeedback(); showScreen('review'); drawViews();
   }
 
   function cancelRoutine() {
-    state.generation += 1; stopRecorder(false); stopScheduledAudio(); setRunning(false); state.phase = 'idle';
+    state.generation += 1; stopRecorder(false); stopScheduledAudio(); releaseMicrophone(); setRunning(false); state.phase = 'idle';
     state.reviewing = false; state.routineIndex = 0; state.pendingExercise = null; state.ascentSteps = 0;
     state.frames = []; state.visualFrames = []; state.elapsedSeconds = 0;
     els.warmup_feedback.hidden = true; setPhase('idle', 'Routine interrotta'); updateBeatDots(-1); showScreen('prepare');
@@ -589,11 +624,15 @@
       els.warmup_step_up.disabled = !next;
       els.warmup_step_up.textContent = next ? 'Sali di un semitono' : state.ascentSteps >= Core.MAX_ASCENT_SEMITONES ? 'Limite +3 raggiunto' : 'Limite vocale raggiunto';
     }
-    els.warmup_next.textContent = manualScale ? 'Termina' : last ? 'Nuova routine' : `Continua · ${state.routineIndex + 2} di ${state.routine.exercises.length}`;
+    els.warmup_next.textContent = manualScale || last ? 'Termina' : `Continua · ${state.routineIndex + 2} di ${state.routine.exercises.length}`;
   }
 
   function renderPlan() {
+    if (state.screen === 'prepare' && !restoringHistory && history.state?.voiceLabScreen === 'prepare') {
+      history.replaceState({ ...history.state, voiceLabConfig: navigationConfig() }, '', location.href);
+    }
     document.body.dataset.family = state.family;
+    els.warmup_plan_detail.parentElement.classList.remove('has-error');
     state.reviewing = false; state.analysis = null; state.frames = []; state.visualFrames = []; state.elapsedSeconds = 0;
     state.pendingExercise = null; state.ascentSteps = 0;
     els.warmup_feedback.hidden = true;
@@ -606,17 +645,18 @@
       els.warmup_start.disabled = false; els.warmup_main_action.disabled = false;
       els.warmup_plan_kicker.textContent = `${state.routine.exercises.length} ${state.routine.exercises.length === 1 ? 'ESERCIZIO' : 'ESERCIZI'}`;
       els.warmup_plan_title.textContent = state.routine.label;
-      const preview = state.mode === 'model' ? `Modello a ${state.bpm} BPM` : 'Sola fondamentale, target nascosto';
-      const route = state.family === 'scale' ? 'Dopo ogni take puoi scegliere se salire di un semitono, fino a +3'
+      const preview = state.mode === 'model' ? 'Ascolta, poi canta' : 'Canta senza voce guida';
+      const route = state.family === 'scale' ? 'Alla fine puoi scegliere se salire di un semitono'
         : state.family === 'arpeggio' ? `Maggiore e minore alternati · ${state.routine.positionLabel}`
           : state.family === 'degree' ? state.degreeLevel === 'base' ? 'Quattro gradi diatonici in ordine casuale' : 'Dodici suoni cromatici in ordine casuale'
             : 'Una tonalità di riferimento';
-      els.warmup_plan_detail.textContent = `${preview}, quattro pulsazioni. ${route}.`;
+      els.warmup_plan_detail.textContent = `${preview}. ${route}.`;
       renderExerciseHeader(); drawViews();
     } catch (error) {
       state.routine = null; state.exercise = null; els.warmup_start.disabled = true; els.warmup_main_action.disabled = true;
       els.warmup_plan_kicker.textContent = 'ESTENSIONE NON COMPATIBILE'; els.warmup_plan_title.textContent = 'Modifica il profilo vocale';
       els.warmup_plan_detail.textContent = error.message; els.warmup_instruction.textContent = error.message; drawViews();
+      els.warmup_plan_detail.parentElement.classList.add('has-error');
     }
   }
 
@@ -636,22 +676,211 @@
     els.warmup_progress.textContent = state.exercise.family === 'scale'
       ? `${state.exercise.rootName.replace(/\d+$/, '')} · ${state.exercise.bpm} BPM`
       : `${state.routineIndex + 1} di ${state.routine.exercises.length} · ${state.exercise.bpm} BPM`;
-    els.warmup_instruction.textContent = state.mode === 'model'
-      ? `Ascolta a ${state.exercise.previewBpm} BPM, poi canta con fondamentale e metronomo.`
-      : 'Usa la fondamentale e i gradi: il target apparirà soltanto alla fine.';
-    els.warmup_score_caption.textContent = state.mode === 'inner-ear' && !state.reviewing ? 'Ritmo e gradi · altezze nascoste' : 'Note e gradi';
-    els.warmup_roll_caption.textContent = state.mode === 'inner-ear' && !state.reviewing ? 'Solo la tua voce · target nascosto' : 'Target e voce rilevata';
+    const root = state.exercise.rootName.replace(/\d+$/, '');
+    els.warmup_instruction.textContent = `${root} è la nota 1. ${state.exercise.family === 'degree'
+      ? `Raggiungi ${state.exercise.events[0].degree} e tienilo per quattro battiti.`
+      : state.exercise.family === 'triad'
+        ? `Parti da ${Core.midiToName(state.exercise.events[0].midi).replace(/\d+$/, '')} (${state.exercise.events[0].degree}) e canta una nota per battito.`
+        : 'Segui le note e canta una nota per battito.'}`;
+    els.warmup_score_caption.textContent = 'Note e numeri da cantare';
+    els.warmup_roll_caption.textContent = state.mode === 'inner-ear' && !state.reviewing ? 'Solo la tua voce · confronto alla fine' : 'Note da cantare e tua voce';
+    renderLesson();
   }
 
+  function renderLesson() {
+    const exercise = state.exercise, root = exercise.rootName.replace(/\d+$/, '');
+    const names = exercise.events.map(event => Core.midiToName(event.midi).replace(/\d+$/, ''));
+    const first = exercise.events[0];
+    els.warmup_lesson_intro.textContent = exercise.family === 'scale'
+      ? `Parti da ${root}: è la nota 1 della scala. Sali fino a 5, poi torna a 1.`
+      : exercise.family === 'degree'
+        ? `${root} è la nota 1. Ascoltala, poi trova la nota ${first.degree} e tienila per quattro battiti.`
+        : `${root} è la nota 1. Canta le note dell’accordo una alla volta, salendo e tornando indietro.`;
+    const key = `${exercise.patternId}-r${exercise.rootMidi}-${state.role}`;
+    els.warmup_lesson_score.src = `voice-lab-assets/scores/${key}.svg`;
+    const sequence = exercise.events.map((event, index) => `${event.degree}: ${names[index]}`).join(', ');
+    els.warmup_lesson_score.alt = `${exercise.name}. Note da cantare: ${sequence}.`;
+    els.lab_score_image.alt = els.warmup_lesson_score.alt;
+    els.lab_score.setAttribute('aria-label', els.warmup_lesson_score.alt);
+    els.warmup_lesson_key.textContent = `${root} · ${exercise.family === 'degree' ? 'Una nota' : exercise.quality === 'minor' ? 'Minore' : 'Maggiore'}`;
+    els.warmup_lesson_notes.textContent = names.join(' · ');
+
+  }
+
+  // The demonstration shares the score assets, guide and AudioContext clock with
+  // practice, but never enters a trial or requests microphone access.
+  const demo = { generation: 0, frame: null, svg: null, notes: [], stems: [], phase: '', active: -1, exercise: null, caption: '' };
+  const reducedDemoMotion = matchMedia('(prefers-reduced-motion: reduce)');
+
+  function stopDemo() {
+    demo.generation += 1;
+    if (demo.frame !== null) cancelAnimationFrame(demo.frame);
+    demo.frame = null;
+    stopScheduledAudio();
+  }
+
+  function closeDemo() {
+    stopDemo();
+    els.warmup_instructions_dialog.close();
+  }
+
+  function demoStatus(phase, step, title, copy) {
+    if (demo.phase === phase) return;
+    demo.phase = phase;
+    els.warmup_instructions_dialog.dataset.phase = phase;
+    els.warmup_demo_step.textContent = step;
+    els.warmup_demo_title.textContent = title;
+    els.warmup_demo_copy.textContent = copy;
+  }
+
+  function highlightDemoNote(index) {
+    if (index === demo.active) return;
+    demo.active = index;
+    demo.notes.forEach((note, i) => note.classList.toggle('demo-note-active', i === index));
+    demo.stems.forEach((stem, i) => stem.classList.toggle('demo-note-active', i === index));
+    const event = demo.exercise?.events[index];
+    els.warmup_demo_caption.textContent = event
+      ? `${index + 1} / ${demo.notes.length} · ${Core.midiToName(event.midi).replace(/\d+$/, '')}` : demo.caption;
+  }
+
+  function bounceDemoSymbol(selector, elapsed, beatSeconds, enabled) {
+    // Ballistic flight at 0.75 × 9.8 m/s², rendered at 32 CSS px per metre.
+    // Converting CSS pixels to score units keeps the jump small on every screen.
+    const flight = ((Math.max(0, elapsed) % beatSeconds) + beatSeconds) % beatSeconds;
+    const pixels = enabled && !reducedDemoMotion.matches
+      ? -.5 * (.75 * 9.8) * flight * (beatSeconds - flight) * 32 : 0;
+    const units = demo.svg.viewBox.baseVal.width / Math.max(1, demo.svg.getBoundingClientRect().width);
+    demo.svg.querySelectorAll(selector).forEach(symbol => {
+      symbol.setAttribute('transform', `translate(0 ${pixels * units})`);
+    });
+  }
+
+  async function playDemo() {
+    stopDemo();
+    const generation = demo.generation, exercise = state.exercise;
+    if (!exercise) return;
+    demo.exercise = exercise;
+    demo.phase = ''; demo.active = -1;
+    demo.svg = null; demo.notes = []; demo.stems = [];
+    els.warmup_demo_score.replaceChildren();
+    els.warmup_demo_replay.disabled = true;
+    els.warmup_demo_replay.textContent = 'Rivedi';
+    els.warmup_demo_tempo.textContent = `${exercise.bpm} BPM`;
+    demo.caption = els.warmup_lesson_key.textContent;
+    els.warmup_demo_caption.textContent = demo.caption;
+    els.warmup_demo_score.setAttribute('aria-label', els.warmup_lesson_score.alt);
+    [...els.warmup_demo_beats.children].forEach(dot => { dot.className = ''; });
+    demoStatus('loading', 'ISTRUZIONI', 'Un momento…', 'Preparo la dimostrazione.');
+    try {
+      const context = audioContext();
+      // Resume inside the button gesture, before any downloads (mobile Safari).
+      const resumed = context.resume();
+      const score = fetch(els.warmup_lesson_score.src).then(response => {
+        if (!response.ok) throw new Error('Spartito non disponibile. Riprova.');
+        return response.text();
+      });
+      const guide = exercise.mode === 'model' ? loadGuidePhrase(exercise) : loadVoiceSample(exercise.rootMidi);
+      const [markup] = await Promise.all([score, guide, resumed]);
+      if (generation !== demo.generation || !els.warmup_instructions_dialog.open) return;
+      const documentSvg = new DOMParser().parseFromString(markup, 'image/svg+xml');
+      if (documentSvg.querySelector('parsererror') || documentSvg.documentElement.localName !== 'svg')
+        throw new Error('Spartito non disponibile. Riprova.');
+      const svg = document.importNode(documentSvg.documentElement, true);
+      svg.querySelectorAll('script, foreignObject, image, use, a').forEach(node => node.remove());
+      svg.querySelectorAll('*').forEach(node => [...node.attributes].forEach(attribute => {
+        if (/^on/i.test(attribute.name)) node.removeAttribute(attribute.name);
+      }));
+      svg.setAttribute('aria-hidden', 'true');
+      els.warmup_demo_score.replaceChildren(svg); demo.svg = svg;
+      const byX = (a, b) => a.getBBox().x - b.getBBox().x;
+      demo.notes = [...svg.querySelectorAll('.Note')].sort(byX);
+      demo.stems = [...svg.querySelectorAll('.Stem')].sort(byX);
+      const beatSeconds = 60 / exercise.bpm;
+      const previewAt = context.currentTime + .12;
+      // Leave room for the rendered phrase's natural release before the count-in.
+      const countInAt = previewAt + exercise.previewSeconds + (exercise.mode === 'model' ? 1 : .12);
+      const takeAt = countInAt + exercise.countInSeconds;
+      const endAt = takeAt + exercise.durationSeconds + (exercise.mode === 'model' ? 1 : 0);
+      if (exercise.mode === 'model') {
+        if (!playGuidePhrase(exercise, previewAt) || !playGuidePhrase(exercise, takeAt))
+          throw new Error('Voce guida non disponibile. Riprova.');
+      } else {
+        playChoirNote(exercise.rootMidi, previewAt, exercise.previewSeconds, .075, 'demo-root');
+      }
+      for (let beat = 0; beat < exercise.countInBeats; beat += 1)
+        metronomeClick(countInAt + beat * beatSeconds, beat === 0);
+      for (let beat = 0; beat < exercise.totalBeats; beat += 1)
+        metronomeClick(takeAt + beat * beatSeconds, beat % 4 === 0);
+      reportAudioEvent('demonstration', previewAt, { exercise, countInAt, takeAt, endAt });
+      function animateDemo() {
+        if (generation !== demo.generation || !els.warmup_instructions_dialog.open) return;
+        const now = context.currentTime;
+        const preview = now < countInAt, countIn = !preview && now < takeAt, finished = now >= endAt;
+        const elapsed = now - takeAt;
+        let noteIndex = -1;
+        if (!finished && now >= takeAt) {
+          const beat = elapsed / beatSeconds;
+          noteIndex = exercise.events.findIndex(event => beat >= event.beat && beat < event.beat + event.durationBeats);
+        }
+        highlightDemoNote(noteIndex);
+        bounceDemoSymbol('.Clef', now - previewAt, beatSeconds, preview && now >= previewAt);
+        bounceDemoSymbol('.TimeSig', now - countInAt, beatSeconds, countIn);
+        const countBeat = countIn ? Math.floor((now - countInAt) / beatSeconds) : -1;
+        [...els.warmup_demo_beats.children].forEach((dot, index) => {
+          dot.classList.toggle('active', index === countBeat);
+          dot.classList.toggle('done', countIn && index < countBeat);
+        });
+        if (finished) {
+          demoStatus('finished', '3 / 3', 'Ora tocca a te', 'Chiudi le istruzioni e premi Comincia.');
+          stopScheduledAudio(); demo.frame = null;
+          els.warmup_demo_replay.disabled = false;
+          return;
+        }
+        if (preview) demoStatus('preview', '1 / 3', exercise.mode === 'model' ? 'Ascolta la melodia' : 'Ascolta la nota 1',
+          exercise.mode === 'model' ? 'Ascolta la voce guida.' : `${exercise.rootName.replace(/\d+$/, '')} è il tuo riferimento. Tienilo a mente.`);
+        else if (countIn) demoStatus('count-in', '2 / 3', 'Aspetta 4 battiti', 'Entra sul battito successivo.');
+        else demoStatus('take', '3 / 3', 'Segui le note', exercise.family === 'degree'
+          ? `Trova la nota ${exercise.events[0].degree} e tienila per quattro battiti.`
+          : exercise.mode === 'inner-ear' ? 'Immagina il suono delle note. Una per battito.' : 'Ascolta melodia e metronomo. Una nota per battito.');
+        demo.frame = requestAnimationFrame(animateDemo);
+      }
+      animateDemo();
+    } catch (_) {
+      if (generation !== demo.generation || !els.warmup_instructions_dialog.open) return;
+      stopDemo();
+      demoStatus('error', 'ISTRUZIONI', 'Dimostrazione non disponibile', 'Controlla la connessione e riprova.');
+      els.warmup_demo_replay.disabled = false; els.warmup_demo_replay.textContent = 'Riprova';
+    }
+  }
+
+  els.warmup_instructions.addEventListener('click', () => {
+    if (!state.exercise || state.running) return;
+    els.warmup_instructions_dialog.showModal();
+    void playDemo();
+  });
+  els.warmup_demo_replay.addEventListener('click', () => { void playDemo(); });
+  els.warmup_demo_close.addEventListener('click', closeDemo);
+  els.warmup_instructions_dialog.addEventListener('close', () => {
+    // Native close events are queued. A quick reopen must keep its new clock.
+    if (els.warmup_instructions_dialog.open) return;
+    if (!state.running) stopDemo();
+    els.warmup_instructions.focus({ preventScroll: true });
+  });
+  els.warmup_instructions_dialog.addEventListener('cancel', stopDemo);
+  els.warmup_instructions_dialog.addEventListener('click', event => {
+    if (event.target !== els.warmup_instructions_dialog) return;
+    const bounds = els.warmup_instructions_dialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom)
+      closeDemo();
+  });
+
   function drawScore() {
-    const hidden = state.mode === 'inner-ear' && !state.reviewing;
     const scoreKey = state.exercise ? `${state.exercise.patternId}-r${state.exercise.rootMidi}-${state.role}` : '';
     const officialAvailable = scoreKey && els.lab_score_image.dataset.failedFor !== scoreKey;
-    if (!hidden && officialAvailable) {
+    if (officialAvailable) {
       els.lab_score.hidden = true; els.lab_score_image.hidden = false;
       if (els.lab_score_image.dataset.scoreKey !== scoreKey) {
         els.lab_score_image.dataset.scoreKey = scoreKey;
-        els.lab_score_image.alt = `Spartito MuseScore: ${state.exercise.name}`;
         els.lab_score_image.src = `voice-lab-assets/scores/${scoreKey}.svg`;
       }
       return;
@@ -661,20 +890,6 @@
     ctx.fillStyle = '#eee8dc'; ctx.fillRect(0, 0, width, height);
     if (!state.exercise) return;
     const left = 54, right = width - 22, events = state.exercise.events, slot = (right - left) / events.length;
-    if (hidden) {
-      ctx.fillStyle = '#4e5d59'; ctx.font = '600 11px system-ui'; ctx.fillText('GRADI DA CANTARE', left, 42);
-      const centerY = height * .55;
-      ctx.strokeStyle = '#9a9a8f'; ctx.lineWidth = 1; ctx.beginPath(); ctx.moveTo(left, centerY); ctx.lineTo(right, centerY); ctx.stroke();
-      events.forEach((event, index) => {
-        const x = left + slot * (index + .5), active = state.phase === 'take' && currentDegree(state.elapsedSeconds)?.index === index;
-        ctx.fillStyle = active ? '#d6ac63' : '#ded5c4'; ctx.strokeStyle = active ? '#9a6c29' : '#a99e8c';
-        ctx.beginPath(); ctx.roundRect(x - Math.min(30, slot * .4), centerY - 24, Math.min(60, slot * .8), 48, 8); ctx.fill(); ctx.stroke();
-        ctx.fillStyle = '#23332f'; ctx.font = `${active ? '750' : '650'} ${slot < 55 ? 10 : 12}px system-ui`; ctx.textAlign = 'center';
-        ctx.fillText(event.degree, x, centerY + 4);
-      });
-      ctx.textAlign = 'left'; ctx.fillStyle = '#68736f'; ctx.font = '10px system-ui';
-      ctx.fillText(`Fondamentale: ${state.exercise.rootName}`, left, height - 18); return;
-    }
     const staffTop = Math.max(48, height * .31), lineGap = Math.min(13, height * .075);
     ctx.strokeStyle = '#7b7a70'; ctx.lineWidth = 1;
     for (let line = 0; line < 5; line += 1) { const y = staffTop + line * lineGap; ctx.beginPath(); ctx.moveTo(left - 14, y); ctx.lineTo(right, y); ctx.stroke(); }
@@ -778,32 +993,52 @@
     document.querySelectorAll('[data-degree-level]').forEach((button) => button.classList.toggle('active', button.dataset.degreeLevel === state.degreeLevel));
     els.warmup_ear_exercises.hidden = state.path !== 'ear';
     els.warmup_inversions.hidden = state.family !== 'arpeggio';
+    els.warmup_position_options.hidden = state.family !== 'arpeggio';
     els.warmup_degree_levels.hidden = state.family !== 'degree';
+    els.warmup_level_options.hidden = state.family !== 'degree';
     els.warmup_mode_copy.textContent = state.mode === 'model'
-      ? 'Ascolta il modello alla velocità scelta, poi canta con fondamentale e metronomo.'
-      : 'Ascolta soltanto la fondamentale: altezze target nascoste fino al confronto.';
+      ? 'La voce guida ti fa sentire la melodia prima del tuo turno.'
+      : 'Ascolterai solo la nota 1. Lo spartito ti aiuta, la melodia la immagini tu.';
     const content = state.path === 'scale'
-      ? ['SCALDA LA VOCE', 'Prepariamo la tua scala']
+      ? ['SCALDA LA VOCE', 'La tua prima scala']
       : state.path === 'chords'
         ? ['ACCORDI E ARPEGGI', 'Scegli il tuo arpeggio']
         : ['ORECCHIO INTERNO', state.family === 'degree' ? 'Trova la nota dentro di te' : 'Canta senza la voce guida'];
     els.warmup_prepare_kicker.textContent = content[0];
     els.warmup_prepare_title.textContent = content[1];
-    els.warmup_preview_steps.innerHTML = state.mode === 'inner-ear'
-      ? '<li><span>1</span><p><strong>Ascolta</strong><small>Memorizza la fondamentale.</small></p></li><li><span>2</span><p><strong>Immagina</strong><small>Costruisci le note nella mente.</small></p></li><li><span>3</span><p><strong>Canta</strong><small>Scopri il target soltanto alla fine.</small></p></li>'
-      : '<li><span>1</span><p><strong>Ascolta</strong><small>Metti in orecchio la melodia.</small></p></li><li><span>2</span><p><strong>Preparati</strong><small>Segui quattro pulsazioni.</small></p></li><li><span>3</span><p><strong>Canta</strong><small>La tua intonazione apparirà sullo schermo.</small></p></li>';
+
   }
 
   function selectPath(path) {
-    if (state.running) return;
+    if (!PATH_ORDER.includes(path)) return;
+    const fromMenu = state.screen === 'choose';
+    if (state.running) cancelRoutine();
+    if (!fromMenu && historyDepth > 1) {
+      pendingNavigationPath = path;
+      history.go(1 - historyDepth);
+      return;
+    }
     state.path = path;
     if (path === 'scale') { state.mode = 'model'; state.family = 'scale'; }
     else if (path === 'chords') { state.mode = 'model'; state.family = 'arpeggio'; }
     else { state.mode = 'inner-ear'; state.family = 'scale'; }
-    syncSetupChoices(); renderPlan(); showScreen('prepare');
+    syncSetupChoices(); renderPlan(); showScreen('prepare', { historyMode: fromMenu ? 'push' : 'replace' });
+    els.warmup_prepare_title.focus({ preventScroll: true });
+  }
+
+  function navigateTo(screen) {
+    if (state.running) cancelRoutine();
+    const targetDepth = screen === 'choose' ? 0 : 1;
+    if (historyDepth > targetDepth) { history.go(targetDepth - historyDepth); return; }
+    if (screen === 'prepare') renderPlan();
+    showScreen(screen);
+    const title = screen === 'choose' ? $('warmup-choose-title') : els.warmup_prepare_title;
+    title.setAttribute('tabindex', '-1'); title.focus({ preventScroll: true });
   }
 
   function openSettings(firstUse = false) {
+    if (state.running) cancelRoutine();
+    else releaseMicrophone();
     els.lab_role.value = state.role; els.lab_low.value = state.range.lowMidi; els.lab_high.value = state.range.highMidi;
     els.lab_pad_enabled.checked = state.ambienceEnabled;
     const heading = els.lab_settings_dialog.querySelector('.lab-range-dialog-heading');
@@ -812,7 +1047,8 @@
     renderRangeKeyboard(); els.lab_settings_dialog.showModal();
   }
 
-  function requestStart() {
+  async function requestStart() {
+    await voiceProfileReady;
     if (needsRoleSetup) { pendingStart = true; openSettings(true); return; }
     state.routineIndex = 0; state.pendingExercise = null; state.ascentSteps = 0; void beginTrial();
   }
@@ -827,7 +1063,9 @@
 
   document.querySelectorAll('[data-mode]').forEach((button) => button.addEventListener('click', () => selectMode(button.dataset.mode)));
   document.querySelectorAll('[data-path]').forEach((button) => button.addEventListener('click', () => selectPath(button.dataset.path)));
-  els.warmup_back_choose.addEventListener('click', () => showScreen('choose'));
+  els.warmup_back_choose.addEventListener('click', () => navigateTo('choose'));
+  els.warmup_back_prepare.addEventListener('click', () => navigateTo('prepare'));
+  document.querySelectorAll('button[data-journey]').forEach(button => button.addEventListener('click', () => navigateTo(button.dataset.journey)));
   document.querySelectorAll('[data-family]').forEach((button) => button.addEventListener('click', () => {
     if (state.running) return;
     state.family = button.dataset.family;
@@ -852,7 +1090,7 @@
   }));
   els.warmup_start.addEventListener('click', requestStart);
   els.warmup_main_action.addEventListener('click', requestStart);
-  els.warmup_cancel.addEventListener('click', cancelRoutine);
+  els.warmup_cancel.addEventListener('click', () => { cancelRoutine(); navigateTo('prepare'); });
   els.warmup_retry.addEventListener('click', retryTrial); els.warmup_step_up.addEventListener('click', nextSemitone);
   els.warmup_next.addEventListener('click', nextTrial);
   els.warmup_replay.addEventListener('click', () => { if (state.audioUrl) void new Audio(state.audioUrl).play(); });
@@ -869,8 +1107,23 @@
   });
   for (let midi = 36; midi <= 84; midi += 1) { els.lab_low.add(new Option(Core.midiToName(midi), midi)); els.lab_high.add(new Option(Core.midiToName(midi), midi)); }
   els.lab_settings.addEventListener('click', () => openSettings(false));
+  document.getElementById('lab-relax').addEventListener('click', event => {
+    if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    pendingStart = false;
+    els.lab_settings_dialog.close();
+    const returnPath = location.pathname + location.search + location.hash;
+    location.assign(`relax.html?return=${encodeURIComponent(returnPath)}`);
+  });
   els.lab_settings_close.addEventListener('click', () => { pendingStart = false; els.lab_settings_dialog.close(); });
   els.lab_settings_dialog.addEventListener('cancel', () => { pendingStart = false; });
+  els.lab_settings_dialog.addEventListener('click', event => {
+    if (event.target !== els.lab_settings_dialog) return;
+    const bounds = els.lab_settings_dialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) {
+      pendingStart = false; els.lab_settings_dialog.close();
+    }
+  });
   els.lab_role.addEventListener('change', () => {
     const preset = Core.ROLE_RANGES[els.lab_role.value]; els.lab_low.value = preset.lowMidi; els.lab_high.value = preset.highMidi; renderRangeKeyboard();
   });
@@ -886,15 +1139,62 @@
     if (pendingStart) { pendingStart = false; state.routineIndex = 0; void beginTrial(); }
   });
   window.addEventListener('resize', drawViews);
+  window.addEventListener('popstate', event => {
+    if (!event.state?.voiceLabScreen) return;
+    if (els.warmup_instructions_dialog.open) closeDemo();
+    restoringHistory = true;
+    if (state.running) cancelRoutine();
+    historyDepth = Number(event.state.voiceLabDepth) || 0;
+    restoreNavigationConfig(event.state.voiceLabConfig);
+    syncSetupChoices(); renderPlan();
+    const screen = event.state.voiceLabScreen === 'choose' ? 'choose' : 'prepare';
+    showScreen(screen);
+    restoringHistory = false;
+    // Forward navigation restores preparation, never a microphone or a take.
+    showScreen(screen);
+    if (pendingNavigationPath) {
+      const path = pendingNavigationPath;
+      pendingNavigationPath = null;
+      selectPath(path);
+      return;
+    }
+    const heading = $(screen === 'choose' ? 'warmup-choose-title' : 'warmup-prepare-title');
+    heading.tabIndex = -1; heading.focus({ preventScroll: true });
+  });
   document.addEventListener('visibilitychange', suspendVoiceLabForBackground);
   window.addEventListener('pagehide', () => {
+    if (els.warmup_instructions_dialog.open) closeDemo();
     state.generation += 1; stopRecorder(false); stopScheduledAudio(); setRunning(false); releaseMicrophone();
     void state.audio?.suspend().catch(() => {});
   });
   window.addEventListener('beforeunload', () => {
+    if (els.warmup_instructions_dialog.open) closeDemo();
     state.generation += 1; stopRecorder(false); stopScheduledAudio(); releaseMicrophone();
   });
 
+  function restoreNavigationConfig(config) {
+    if (!config || !PATH_ORDER.includes(config.path)) return;
+    state.path = config.path;
+    state.family = ['scale', 'arpeggio', 'degree'].includes(config.family) ? config.family : 'scale';
+    state.mode = config.path === 'ear' ? 'inner-ear' : 'model';
+    if (Core.TEMPOS.includes(config.bpm)) state.bpm = config.bpm;
+    if ([...Core.TRIAD_INVERSIONS, 'all'].includes(config.inversion)) state.inversion = config.inversion;
+    if (Object.hasOwn(Core.DEGREE_LEVELS, config.degreeLevel)) state.degreeLevel = config.degreeLevel;
+    if (Number.isInteger(config.degreeSeed)) state.degreeSeed = config.degreeSeed;
+    document.querySelectorAll('[data-bpm]').forEach(button => button.classList.toggle('active', Number(button.dataset.bpm) === state.bpm));
+  }
+  const savedNavigation = history.state;
+  restoreNavigationConfig(savedNavigation?.voiceLabConfig);
   syncSetupChoices();
-  renderPlan(); setPhase('idle', 'Configura e inizia'); updateBeatDots(-1); showScreen('choose');
+  renderPlan(); setPhase('idle', 'Configura e inizia'); updateBeatDots(-1);
+  showScreen(savedNavigation?.voiceLabScreen && savedNavigation.voiceLabScreen !== 'choose' ? 'prepare' : 'choose');
+  if (window.ChoirRuntimeConfig?.mode === 'production') {
+    voiceProfileReady = (window.ChoirAuthFetch || fetch)('/api/me', { credentials: 'same-origin', cache: 'no-store' })
+      .then(response => response.ok ? response.json() : null).then(me => {
+        const role = { soprano: 'soprano', contralto: 'alto', tenore: 'tenor', basso: 'bass' }[me?.preferredVoicePart];
+        if (!role || state.running) return;
+        if (state.role !== role) state.range = { ...Core.ROLE_RANGES[role] };
+        state.role = role; needsRoleSetup = false; renderPlan();
+      }).catch(() => {});
+  }
 })();

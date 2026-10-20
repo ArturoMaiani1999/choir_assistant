@@ -1,4 +1,4 @@
-import type { AuthenticatedIdentity, ChoirRole, Env, MemberContext } from "./types";
+import type { AuthenticatedIdentity, ChoirRole, Env, MemberContext, VoicePart } from "./types";
 
 const encoder = new TextEncoder();
 
@@ -45,6 +45,11 @@ interface MemberRow {
   member_id: string | null;
   choir_id: string | null;
   display_name: string | null;
+  first_name: string | null;
+  last_name: string | null;
+  profile_completed_at: string | null;
+  voice_part: VoicePart | null;
+  preferred_voice_part: VoicePart | null;
   clerk_subject: string | null;
   active: number;
 }
@@ -54,13 +59,18 @@ async function values<T>(statement: D1PreparedStatement): Promise<T[]> {
   return result.results ?? [];
 }
 
+function validVoicePart(value: VoicePart | null): VoicePart | null {
+  return value != null && ["soprano", "contralto", "tenore", "basso"].includes(value) ? value : null;
+}
+
 export async function resolveMember(
   identity: AuthenticatedIdentity,
   env: Env,
 ): Promise<MemberContext | null> {
   const digest = await emailDigest(identity.primaryEmail, env.AUTH_EMAIL_HMAC_KEY);
   let row = await env.AUTH_DB.prepare(
-    `SELECT m.member_id, m.choir_id, m.display_name, m.clerk_subject, m.active
+    `SELECT m.member_id, m.choir_id, m.display_name, m.first_name, m.last_name,
+            m.profile_completed_at, m.voice_part, m.preferred_voice_part, m.clerk_subject, m.active
        FROM authorized_members m JOIN choirs c ON c.id = m.choir_id
        WHERE m.email_digest = ?1 AND c.active = 1 LIMIT 1`,
   ).bind(digest).first<MemberRow>();
@@ -74,7 +84,8 @@ export async function resolveMember(
        WHERE member_id = ?3 AND clerk_subject IS NULL`,
     ).bind(identity.subject, new Date().toISOString(), row.member_id).run();
     row = await env.AUTH_DB.prepare(
-      `SELECT m.member_id, m.choir_id, m.display_name, m.clerk_subject, m.active
+      `SELECT m.member_id, m.choir_id, m.display_name, m.first_name, m.last_name,
+              m.profile_completed_at, m.voice_part, m.preferred_voice_part, m.clerk_subject, m.active
        FROM authorized_members m JOIN choirs c ON c.id = m.choir_id
        WHERE m.email_digest = ?1 AND c.active = 1 LIMIT 1`,
     ).bind(digest).first<MemberRow>();
@@ -103,6 +114,11 @@ export async function resolveMember(
     memberId: row.member_id,
     choirId: row.choir_id,
     displayName: row.display_name,
+    firstName: row.first_name,
+    lastName: row.last_name,
+    profileCompleted: row.profile_completed_at != null,
+    voicePart: validVoicePart(row.voice_part),
+    preferredVoicePart: validVoicePart(row.preferred_voice_part),
     roles: [...roles],
     groupIds: groupRows.map(({ group_id }) => group_id),
     viewableGroupIds: grantRows.map(({ group_id }) => group_id),

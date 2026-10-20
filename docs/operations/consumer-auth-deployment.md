@@ -2,11 +2,16 @@
 
 **Status:** canonical for `feature/consumer-auth`; not yet the live production procedure
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-15
+**Last reviewed:** 2026-10-20
 
 This runbook provisions the Clerk + D1 authorization path without weakening
 the currently deployed Cloudflare Access application. Perform the first deploy
 under a distinct Worker name and hostname.
+
+Ultimo rilascio staging: [navigazione, profilo SATB e uscita,
+2026-10-20](releases/2026-10-20-navigation-ux.md). La migrazione
+`0011_preferred_voice_part.sql` precede la versione del Worker che legge la
+preferenza vocale; non cambia la sezione ufficiale o i permessi del corista.
 
 ## 1. Local prerequisites
 

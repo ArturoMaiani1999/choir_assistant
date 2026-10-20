@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="theme-color" content="#081419" />
+    <title>Epistrophe · Direzione</title>
+    <link rel="stylesheet" href="cockpit.css" />
+    <link rel="stylesheet" href="performances.css" />
+    <link rel="stylesheet" href="pitch_lab.css" />
+    <link rel="stylesheet" href="ambient.css" />
+    <script src="session-client.js" defer></script>
+    <script src="score_runtime.js" defer></script>
+    <script src="piano_roll.js" defer></script>
+    <script src="pitch_lab_core.js" defer></script>
+    <script src="pitch_lab.js" defer></script>
+    <script src="performance_review.js" defer></script>
+    <script src="aggregate_pitch.js" defer></script>
+    <script src="cockpit.js" defer></script>
+  </head>
+  <body class="ambient-respiro-page ambient-respiro-page--subtle">
+    <div class="ambient-respiro" aria-hidden="true">
+      <i class="ambient-respiro__glow ambient-respiro__glow--cool"></i>
+      <i class="ambient-respiro__glow ambient-respiro__glow--warm"></i>
+    </div>
+    <header class="cockpit-header">
+      <div><span class="eyebrow">EPISTROPHE</span><h1>Direzione</h1><p>Programma del coro, avanzamento e difficoltà condivise.</p></div>
+      <nav aria-label="Navigazione principale"><a href="repertorio.html">Il mio repertorio</a></nav>
+    </header>
+    <main>
+      <p id="cockpit-status" class="status" role="status">Caricamento…</p>
+      <section id="cockpit-content" hidden>
+        <div id="summary" class="summary" aria-label="Riepilogo"></div>
+        <section class="panel">
+          <div class="panel-heading"><div><span class="eyebrow">PROGRAMMA DEL CORO</span><h2>Scegli i brani da preparare</h2></div><p>I brani evidenziati sono visibili nel repertorio personale di tutti i coristi.</p></div>
+          <div class="assignment-table-wrap">
+            <table class="assignment-table">
+              <caption class="sr-only">Programma del coro, avanzamento e azioni per ciascun brano</caption>
+              <thead><tr><th scope="col">Brano</th><th scope="col">Preparazione</th><th scope="col">Programma</th><th class="assignment-actions-heading" scope="col">Azioni</th></tr></thead>
+              <tbody id="assignments"></tbody>
+            </table>
+          </div>
+        </section>
+      </section>
+    </main>
+    <section id="performance-review" class="performance-review" aria-labelledby="performance-review-title" hidden>
+      <header class="performance-review-header">
+        <button id="performance-review-back" class="performance-review-back" type="button">Direzione</button>
+        <div class="performance-review-heading"><p>ANALISI DEL BRANO</p><h1 id="performance-review-title">Esecuzioni</h1><span id="performance-review-meta"></span></div>
+        <div class="performance-review-score"><strong id="performance-review-score"></strong><span id="performance-review-coverage"></span></div>
+      </header>
+      <main class="performance-review-main">
+        <section class="performance-review-workspace">
+          <div class="performance-review-score-strip" id="performance-review-score-scroller">
+            <img id="performance-review-score-image" alt="Spartito sincronizzato con il piano roll" />
+            <span id="performance-review-score-cursor" class="performance-review-score-cursor" aria-hidden="true"></span>
+            <output id="performance-review-measure">Battuta —</output>
+          </div>
+          <div class="performance-review-toolbar">
+            <div><p>PIANO ROLL COMPLETO</p><h2 id="performance-review-inspect">Trascina per esplorare · rotella per lo zoom</h2></div>
+            <div class="performance-review-actions"><button id="performance-review-zoom-out" type="button" aria-label="Riduci zoom">−</button><output id="performance-review-zoom">100%</output><button id="performance-review-zoom-in" type="button" aria-label="Aumenta zoom">+</button><button id="performance-review-reset" type="button">Mostra tutto</button></div>
+          </div>
+          <div class="performance-review-canvas-wrap">
+            <canvas id="performance-review-canvas" tabindex="0" aria-label="Piano roll interattivo con le tracce dei coristi"></canvas>
+            <img id="performance-review-legacy-image" alt="Piano roll condiviso" hidden />
+          </div>
+          <footer class="performance-review-footer"><span><i class="legend-target"></i>Melodia</span><span><i class="legend-good"></i>Tracce individuali</span><span><i class="legend-warning"></i>Da correggere</span><span><i class="legend-error"></i>Errore marcato</span></footer>
+        </section>
+        <aside class="performance-review-feedback" aria-labelledby="performance-review-feedback-title">
+          <div><p id="performance-review-feedback-kicker">ESECUZIONI</p><h2 id="performance-review-feedback-title">Tracce sovrapposte</h2><span id="performance-review-feedback-intro">Seleziona le tracce da confrontare.</span></div>
+          <ol id="performance-review-suggestions"></ol>
+        </aside>
+      </main>
+    </section>
+    <section id="pitch-lab" class="pitch-lab" aria-labelledby="pitch-lab-title" hidden>
+      <header class="pitch-lab-header">
+        <button id="pitch-lab-back" type="button">Analisi del brano</button>
+        <div><p>PITCH DETECTION LAB</p><h1 id="pitch-lab-title">Ablation Lab</h1><span id="pitch-lab-meta"></span></div>
+        <div class="pitch-lab-header-actions"><button id="pitch-lab-export-json" type="button">JSON</button><button id="pitch-lab-export-csv" type="button">CSV</button></div>
+      </header>
+      <main class="pitch-lab-layout">
+        <section class="pitch-lab-workspace">
+          <div class="pitch-lab-transport">
+            <button id="pitch-lab-play" type="button">▶ Riproduci</button>
+            <output id="pitch-lab-time">00:00.000</output>
+            <input id="pitch-lab-scrub" type="range" min="0" max="1" step="0.001" value="0" aria-label="Posizione audio" />
+            <audio id="pitch-lab-audio" preload="metadata"></audio>
+          </div>
+          <div class="pitch-lab-graph-heading">
+              <div><p>CONFRONTO TEMPORALE</p><h2>Curve F0 sullo stesso audio</h2></div>
+            <div><button id="pitch-lab-zoom-out" type="button">−</button><output id="pitch-lab-zoom">100%</output><button id="pitch-lab-zoom-in" type="button">+</button><button id="pitch-lab-reset-view" type="button">Mostra tutto</button></div>
+          </div>
+          <div class="pitch-lab-canvas-wrap"><canvas id="pitch-lab-canvas" class="pitch-lab-canvas" tabindex="0" aria-label="Confronto interattivo degli algoritmi di pitch detection"></canvas></div>
+          <div id="pitch-lab-layers" class="pitch-lab-layers" aria-label="Curve visibili"></div>
+          <section class="pitch-lab-inspector" aria-labelledby="pitch-lab-inspector-title">
+            <div><p>FRAME SELEZIONATO</p><h2 id="pitch-lab-inspector-title">Seleziona un istante</h2></div>
+            <dl id="pitch-lab-inspector-values"></dl>
+            <details><summary>Candidati e decoder</summary><pre id="pitch-lab-candidates"></pre></details>
+          </section>
+          <section class="pitch-lab-problems" aria-labelledby="pitch-lab-problems-title">
+            <div><p>GAP E DISACCORDI</p><h2 id="pitch-lab-problems-title">Segmenti da ispezionare</h2></div>
+            <div id="pitch-lab-problem-filters" class="pitch-lab-problem-filters"></div>
+            <ol id="pitch-lab-problem-list"></ol>
+          </section>
+          <section class="pitch-lab-metrics" aria-labelledby="pitch-lab-metrics-title">
+            <div><p>CONFRONTO</p><h2 id="pitch-lab-metrics-title">Metriche diagnostiche</h2></div>
+            <p class="pitch-lab-science-note">La distanza dal MIDI target misura aderenza musicale, non accuratezza del detector. L’accuratezza F0 compare soltanto con ground truth acustico indipendente.</p>
+            <div class="pitch-lab-table-wrap"><table><thead><tr><th>Esperimento</th><th>Audio</th><th>Calcolo</th><th>RTF</th><th>Raw F0</th><th>Tracked F0</th><th>Gap</th><th>Rifiuti</th><th>Discont.</th><th>Ottave</th><th>Target valutabile</th><th>Target |¢|</th><th>Intonazione*</th><th>RPA30†</th><th>RPA50†</th><th>RCA50†</th><th>Voicing recall†</th><th>Voicing FAR†</th><th>Octave error†</th><th>MAE†</th><th>OA30†</th><th>Precision*</th><th>F1*</th><th>Mediana cents*</th><th>P95 cents*</th><th>GPE*</th><th>Dropout*</th><th>Riferimento*</th><th>ms/frame</th></tr></thead><tbody id="pitch-lab-metrics-body"></tbody></table></div>
+          </section>
+        </section>
+        <aside class="pitch-lab-controls">
+          <div class="pitch-lab-controls-heading"><p>ESPERIMENTO</p><h2>Configurazione</h2><span id="pitch-lab-status" role="status">Caricamento registrazione…</span></div>
+          <label>Modalità<select id="pitch-lab-mode"><option value="single">Esperimento singolo</option><option value="ab">Confronto A/B</option><option value="sweep">Ablazione parametro</option><option value="tune">Ricerca automatica (6 prove)</option></select></label>
+          <label>Algoritmo<select id="pitch-lab-algorithm"><option value="yin">YIN · ricalcolo offline</option><option value="pyin">pYIN · probabilistico offline</option></select></label>
+          <label>Preset<select id="pitch-lab-preset"></select></label>
+          <div id="pitch-lab-sweep" hidden><label>Parametro<select id="pitch-lab-sweep-parameter"></select></label><label>Valori (max 6)<input id="pitch-lab-sweep-values" value="0.20, 0.30, 0.42, 0.55" /></label></div>
+          <label>Ground truth acustico (JSON, facoltativo)<input id="pitch-lab-ground-truth" type="file" accept="application/json,.json" /><small>Intervalli {startSec, endSec, hz}; usa hz:null per unvoiced.</small></label>
+          <details class="pitch-lab-config-details"><summary>Parametri avanzati</summary><form id="pitch-lab-parameters"></form></details>
+          <div class="pitch-lab-run"><button id="pitch-lab-run" type="button">Calcola inferenza</button><button id="pitch-lab-cancel" type="button" hidden>Interrompi</button><progress id="pitch-lab-progress" max="1" value="0" hidden></progress></div>
+          <p class="pitch-lab-local-note">L’audio viene decodificato ed elaborato soltanto in questo browser. Nessuna inferenza remota.</p>
+        </aside>
+      </main>
+    </section>
+  </body>
+</html>

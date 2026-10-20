@@ -22,12 +22,14 @@ ROOT = Path(__file__).resolve().parents[1]
 SECRET_ENV = "CHOIR_AUTH_EMAIL_HMAC_KEY"
 CHOIR_ID = "choir_primary"
 VALID_ROLES = {"singer", "section_viewer", "director", "admin"}
+VALID_VOICE_PARTS = {"soprano", "contralto", "tenore", "basso"}
 
 
 @dataclass(frozen=True)
 class MemberRecord:
     email: str
     display_name: str
+    voice_part: str
     groups: tuple[str, ...]
     roles: tuple[str, ...]
     view_groups: tuple[str, ...]
@@ -74,6 +76,9 @@ def read_records(path: Path) -> list[MemberRecord]:
             display_name = raw_name or ""
             if len(display_name) > 80 or any(ord(char) < 32 for char in display_name):
                 raise ValueError(f"display_name non valido per {email}")
+            voice_part = row.get(fields.get("voice_part", ""), "").strip().casefold()
+            if voice_part and voice_part not in VALID_VOICE_PARTS:
+                raise ValueError(f"Parte vocale non valida per {email}: {voice_part!r}")
             groups = split_values(row.get(fields.get("groups", ""), ""))
             roles = tuple(role.casefold() for role in split_values(row.get(fields.get("roles", ""), ""))) or ("singer",)
             invalid = set(roles) - VALID_ROLES
@@ -82,7 +87,7 @@ def read_records(path: Path) -> list[MemberRecord]:
             view_groups = split_values(row.get(fields.get("view_groups", ""), ""))
             if view_groups and "section_viewer" not in roles and "director" not in roles:
                 raise ValueError(f"{email}: view_groups richiede section_viewer o director")
-            records.append(MemberRecord(email, display_name, groups, roles, view_groups))
+            records.append(MemberRecord(email, display_name, voice_part, groups, roles, view_groups))
     if not records:
         raise ValueError("La lista membri è vuota")
     return records
@@ -104,7 +109,7 @@ def sql_for(records: list[MemberRecord], secret: str, replace: bool) -> str:
         view_groups = tuple((group_code(name), name) for name in record.view_groups)
         for code, name in groups + view_groups:
             group_names.setdefault(code, name)
-        prepared.append((digest, member_id, display_name, groups, record.roles, view_groups))
+        prepared.append((digest, member_id, display_name, record.voice_part, groups, record.roles, view_groups))
 
     # Wrangler sends all statements from one SQL file to D1 as a batch. D1
     # wraps that batch in its own transaction and rejects explicit BEGIN,
@@ -122,13 +127,16 @@ def sql_for(records: list[MemberRecord], secret: str, replace: bool) -> str:
             f"{quoted(group_id)},{quoted(CHOIR_ID)},{quoted(code)},{quoted(name)},1,{quoted(now)},{quoted(now)}) "
             "ON CONFLICT(choir_id,code) DO UPDATE SET name=excluded.name,active=1,updated_at=excluded.updated_at;"
         )
-    for digest, member_id, display_name, groups, roles, view_groups in prepared:
+    for digest, member_id, display_name, voice_part, groups, roles, view_groups in prepared:
         statements.append(
-            "INSERT INTO authorized_members(email_digest,active,added_at,updated_at,revoked_at,member_id,choir_id,display_name) VALUES("
-            f"{quoted(digest)},1,{quoted(now)},{quoted(now)},NULL,{quoted(member_id)},{quoted(CHOIR_ID)},{quoted(display_name)}) "
+            "INSERT INTO authorized_members(email_digest,active,added_at,updated_at,revoked_at,member_id,choir_id,display_name,voice_part) VALUES("
+            f"{quoted(digest)},1,{quoted(now)},{quoted(now)},NULL,{quoted(member_id)},{quoted(CHOIR_ID)},{quoted(display_name)},{quoted(voice_part) if voice_part else 'NULL'}) "
             "ON CONFLICT(email_digest) DO UPDATE SET active=1,updated_at=excluded.updated_at,revoked_at=NULL,"
             "member_id=COALESCE(authorized_members.member_id,excluded.member_id),"
-            "choir_id=excluded.choir_id,display_name=excluded.display_name;"
+            "choir_id=excluded.choir_id,"
+            "display_name=CASE WHEN authorized_members.profile_completed_at IS NULL "
+            "THEN excluded.display_name ELSE authorized_members.display_name END,"
+            "voice_part=excluded.voice_part;"
         )
         statements.extend([
             f"UPDATE member_roles SET active=0,revoked_at={quoted(now)} WHERE member_id={quoted(member_id)};",
@@ -157,6 +165,7 @@ def sql_for(records: list[MemberRecord], secret: str, replace: bool) -> str:
             )
         audit_details = json.dumps({
             "roles": sorted(set(roles) | {"singer"}),
+            "voice_part": voice_part or None,
             "groups": sorted(code for code, _ in groups),
             "view_groups": sorted(code for code, _ in view_groups),
         }, ensure_ascii=True, separators=(",", ":"))
@@ -177,7 +186,7 @@ def validate_replace(replace: bool, dry_run: bool, count: int, confirmation: int
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("source", type=Path, help="CSV privato: email,display_name,groups,roles,view_groups")
+    parser.add_argument("source", type=Path, help="CSV privato: email,display_name,voice_part,groups,roles,view_groups")
     parser.add_argument("--database", default="choir-assistant-auth-staging")
     parser.add_argument("--replace", action="store_true", help="revoca anche i membri assenti")
     parser.add_argument("--confirm-replace-count", type=int)
@@ -201,10 +210,14 @@ def main() -> int:
         npx = shutil.which("npx")
         if not npx:
             raise ValueError("Node/npm non trovato; eseguire npm install")
+        # The HMAC key is needed only to pseudonymize email addresses locally.
+        # Never expose it to Wrangler or any other network-capable child process.
+        child_environment = os.environ.copy()
+        child_environment.pop(SECRET_ENV, None)
         subprocess.run([
             npx, "wrangler", "d1", "execute", args.database,
             "--local" if args.local else "--remote", "--file", str(temporary_path),
-        ], cwd=ROOT, check=True)
+        ], cwd=ROOT, check=True, env=child_environment)
     finally:
         if temporary_path and temporary_path.exists():
             temporary_path.unlink()

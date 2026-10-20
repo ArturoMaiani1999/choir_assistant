@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-09-28
+**Last reviewed:** 2026-10-19
 
 ## Obiettivo
 
@@ -88,7 +88,10 @@ Comportamento implementato: ricalcolo dello scroll verso la battuta attiva; ness
 
 Rischio: microfono lasciato impegnato fino al cleanup del browser.
 
-Comportamento implementato: rilascio esplicito degli stream su `pagehide`. Il salvataggio della posizione sarà introdotto quando esisterà un’identità utente.
+Comportamento implementato: rilascio esplicito degli stream su `pagehide`.
+Il percorso prova → partitura → prova conserva brano, parte e posizione nel
+collegamento di ritorno e ripristina una prova in pausa, senza microfono.
+Non equivale al recupero generalizzato di una sessione dopo la chiusura del browser.
 
 ## Feedback e tono
 

@@ -109,6 +109,19 @@ class BuildDistTest(unittest.TestCase):
             self.assertIn(names["pitch_detector_worker.js"], app)
             self.assertIn(names["pitch_shifter_worklet.js"], app)
             self.assertIn(names["pitch_detector.js"], worker)
+            calibration_worker = (destination / names["microphone_calibration_worker.js"]).read_text(encoding="utf-8")
+            calibration_ui = (destination / names["microphone_calibration_ui.js"]).read_text(encoding="utf-8")
+            self.assertIn(names["microphone_calibration_worker.js"], calibration_ui)
+            self.assertIn(names["pitch_detector.js"], calibration_worker)
+            self.assertIn(names["microphone_calibration.js"], calibration_worker)
+            echo_worker = (destination / names["echo_cancellation_worker.js"]).read_text(encoding="utf-8")
+            echo_ui = (destination / names["echo_cancellation_ui.js"]).read_text(encoding="utf-8")
+            self.assertIn(names["echo_cancellation.js"], echo_worker)
+            self.assertIn(names["echo_cancellation_worker.js"], echo_ui)
+            self.assertIn(names["echo_capture_worklet.js"], echo_ui)
+            self.assertIn(names["echo_monitor_worklet.js"], echo_ui)
+            diagnostic = (destination / names["echo_diagnostics.js"]).read_text(encoding="utf-8")
+            self.assertIn(names["echo_diagnostic_worklet.js"], diagnostic)
             build_dist.audit_local_references(destination)
 
             (destination / names["pitch_detector_worker.js"]).unlink()
@@ -142,6 +155,7 @@ class BuildDistTest(unittest.TestCase):
             self.assertIn("/library.json\n  Cache-Control: public, max-age=31536000, immutable", headers)
             self.assertIn("/library-assets/*\n  Cache-Control: public, max-age=31536000, immutable", headers)
             self.assertIn("/sign-up.html\n  Cache-Control: no-store", headers)
+            self.assertIn("/sign-out.html\n  Cache-Control: no-store", headers)
             app = (build_dist.FRONTEND / "app.js").read_text(encoding="utf-8")
             viewer = (build_dist.FRONTEND / "score_viewer.js").read_text(encoding="utf-8")
             self.assertIn("releaseAssetUrl(RUNTIME_CONFIG.libraryUrl)", app)
@@ -159,6 +173,17 @@ class BuildDistTest(unittest.TestCase):
         self.assertNotIn('id="library"', html)
         self.assertNotIn('id="restart-practice"', html)
 
+    def test_practice_analysis_unifies_current_feedback_and_shared_results(self) -> None:
+        html = (build_dist.FRONTEND / "index.html").read_text(encoding="utf-8")
+
+        self.assertIn('id="show-feedback" type="button" hidden>Analisi</button>', html)
+        self.assertNotIn('id="performances"', html)
+        self.assertNotIn("Mostra feedback", html)
+        dialog = html[html.index('id="result-dialog"'):html.index('</dialog>', html.index('id="result-dialog"'))]
+        self.assertIn('id="result-text"', dialog)
+        self.assertIn('id="performance-section"', dialog)
+        self.assertIn('id="performance-list"', dialog)
+
     def test_audio_output_choice_is_first_and_bluetooth_supports_500_ms(self) -> None:
         html = (build_dist.FRONTEND / "index.html").read_text(encoding="utf-8")
 
@@ -173,7 +198,7 @@ class BuildDistTest(unittest.TestCase):
         self.assertNotIn('Come mostrare la tua intonazione', dialog)
         self.assertIn('id="settings-v1-plume-advance" type="range" min="0" max="600"', dialog)
         score_appearance = (build_dist.FRONTEND / "score_appearance.js").read_text(encoding="utf-8")
-        self.assertIn("basicPanel.appendChild(section)", score_appearance)
+        self.assertIn("getElementById('settings-appearance') || basicPanel", score_appearance)
 
     def test_piece_picker_uses_compact_mode_and_section_labels(self) -> None:
         html = (build_dist.FRONTEND / "index.html").read_text(encoding="utf-8")

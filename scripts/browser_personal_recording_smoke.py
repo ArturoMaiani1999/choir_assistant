@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import base64
 import json
 import subprocess
 import tempfile
@@ -14,11 +15,15 @@ import websocket
 
 from browser_practice_smoke import CHROME, command, evaluate
 
+ROOT = Path(__file__).resolve().parents[1]
+ARTIFACTS = ROOT / "artifacts" / "personal-recording"
+
 
 def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("--url", default="http://127.0.0.1:5173/")
     args = parser.parse_args()
+    ARTIFACTS.mkdir(parents=True, exist_ok=True)
     with tempfile.TemporaryDirectory(prefix="choir-personal-recording-") as profile:
         process = subprocess.Popen([
             str(CHROME), "--headless=new", "--disable-gpu",
@@ -59,8 +64,11 @@ def main() -> int:
               assert(state.runtime, 'practice did not load');
 
               let savedMetadata = null;
+              let automaticBestEnabled = false;
               window.PersonalRecordings = {
                 mine: async () => ({recordings: []}),
+                automaticBest: async () => ({enabled:automaticBestEnabled}),
+                setAutomaticBest: async enabled => ({enabled:automaticBestEnabled=enabled}),
                 save: async (metadata) => {
                   savedMetadata = metadata;
                   return {updated:false, recording:{id:'recording-one', pieceId:metadata.pieceId,
@@ -77,6 +85,32 @@ def main() -> int:
               els.settingsMenuRecording.click();
               await new Promise(resolve => setTimeout(resolve, 0));
               assert(els.personalRecordingDialog.open, 'recording dialog did not open');
+              const manualDetails = document.querySelector('.personal-recording-manual');
+              assert(!manualDetails.open, 'manual controls should be collapsed by default');
+              assert(!els.personalRecordingDialog.textContent.includes('Puoi conservare una registrazione'),
+                'long help copy is still visible instead of living behind an info button');
+              assert(els.personalRecordingDialog.getBoundingClientRect().height < innerHeight * .8,
+                'default dialog is too tall for the viewport');
+              const infoButton = els.personalRecordingDialog.querySelector('.setting-info');
+              infoButton.click();
+              assert(infoButton.classList.contains('is-open'), 'info tooltip did not open on click');
+              const dialogRect = els.personalRecordingDialog.getBoundingClientRect();
+              els.personalRecordingDialog.dispatchEvent(new MouseEvent('click', {
+                bubbles:true, clientX:dialogRect.left - 8, clientY:dialogRect.top - 8,
+              }));
+              assert(!els.personalRecordingDialog.open, 'backdrop click did not return to the song');
+              assert(!infoButton.classList.contains('is-open'), 'info tooltip remained open after closing');
+              await openPersonalRecordingDialog();
+              assert(els.personalRecordingDialog.open, 'recording dialog did not reopen');
+              manualDetails.open = true;
+              for(let attempt=0;attempt<20&&state.automaticBestRecording.enabled===null;attempt+=1)
+                await new Promise(resolve=>setTimeout(resolve,10));
+              els.personalRecordingAutoBest.checked = true;
+              els.personalRecordingAutoBest.dispatchEvent(new Event('change',{bubbles:true}));
+              for(let attempt=0;attempt<20&&state.automaticBestRecording.enabled!==true;attempt+=1)
+                await new Promise(resolve=>setTimeout(resolve,10));
+              assert(automaticBestEnabled && state.automaticBestRecording.enabled,
+                'one-time automatic best authorization was not persisted');
               assert(els.personalRecordingStart.disabled, 'recording unlocked without consent');
               els.personalRecordingHeadphones.checked = true;
               els.personalRecordingHeadphones.dispatchEvent(new Event('change', {bubbles:true}));
@@ -113,8 +147,41 @@ def main() -> int:
                 'saved recording did not replace pending state');
               assert(!els.personalRecordingReplay.hidden && !els.personalRecordingDelete.hidden,
                 'saved recording controls are not available');
-              return {menu:true, gate:'headphones+consent', decision:'required', saved:'owner-profile'};
+              manualDetails.open = false;
+              return {menu:true, compact:true, help:'info-buttons', backdrop:'closes',
+                gate:'headphones+consent', decision:'required', saved:'owner-profile', automaticBest:true};
             })()""")
+            command(socket, 200, "Page.enable")
+            evaluate(socket, 230, """(() => {
+              document.activeElement?.blur();
+              els.personalRecordingDialog.querySelectorAll('.setting-info.is-open')
+                .forEach(button => button.classList.remove('is-open'));
+              return true;
+            })()""")
+            result["viewports"] = []
+            for call_id, (width, height) in enumerate(((1366, 768), (390, 844)), start=201):
+                command(socket, call_id, "Emulation.setDeviceMetricsOverride", {
+                    "width": width, "height": height, "deviceScaleFactor": 1, "mobile": width < 600,
+                })
+                command(socket, call_id + 30, "Input.dispatchMouseEvent", {
+                    "type": "mouseMoved", "x": 0, "y": 0,
+                })
+                time.sleep(.2)
+                metrics = evaluate(socket, call_id + 10, """(() => {
+                  const dialog = els.personalRecordingDialog;
+                  const rect = dialog.getBoundingClientRect();
+                  return {width:innerWidth,height:innerHeight,top:rect.top,bottom:rect.bottom,
+                    dialogHeight:rect.height,scrollHeight:dialog.scrollHeight,clientHeight:dialog.clientHeight,
+                    manualOpen:document.querySelector('.personal-recording-manual').open};
+                })()""")
+                assert metrics["top"] >= 0 and metrics["bottom"] <= metrics["height"], metrics
+                assert metrics["scrollHeight"] <= metrics["clientHeight"] + 1, metrics
+                shot = command(socket, call_id + 20, "Page.captureScreenshot", {
+                    "format": "png", "fromSurface": True,
+                })
+                artifact = ARTIFACTS / f"compact-{width}x{height}.png"
+                artifact.write_bytes(base64.b64decode(shot["data"]))
+                result["viewports"].append(metrics)
             print(json.dumps(result, ensure_ascii=False))
             return 0
         finally:

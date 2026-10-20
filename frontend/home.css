@@ -1,0 +1,77 @@
+﻿/* The Home keeps its harmonic signature separate from navigation. */
+#piece-picker-dialog {
+  --home-background:#000;
+  --home-voice:var(--cyan);
+  --home-target:var(--amber);
+  --home-gutter:clamp(24px,4vw,64px);
+  --home-gap:clamp(24px,4dvh,40px);
+  --home-motion:180ms;
+  inset:0;width:100%;height:100vh;height:100dvh;max-width:none;max-height:none;
+  min-width:0;margin:0;padding:0;border:0;border-radius:0;
+  background:var(--home-background);box-shadow:none;box-sizing:border-box;
+  overflow:auto;isolation:isolate;
+}
+body[data-view="home"]{background:#000}
+#piece-picker-dialog[open]{display:flex;flex-direction:column}
+#piece-picker-dialog::backdrop{background:#000;backdrop-filter:none}
+.home-utilities {
+  position:relative;z-index:3;display:flex;align-items:center;justify-content:space-between;flex:none;
+  padding:calc(20px + env(safe-area-inset-top)) max(var(--home-gutter),env(safe-area-inset-right)) 12px max(var(--home-gutter),env(safe-area-inset-left));
+}
+.home-brand{color:var(--text);font:400 26px/1.2 Georgia,serif;letter-spacing:-.045em}
+.home-settings{position:relative}
+.home-settings>summary{display:flex;align-items:center;gap:10px;min-width:44px;min-height:44px;padding:0 8px;list-style:none;border-radius:var(--radius);color:var(--muted);font-size:13px;cursor:pointer}
+.home-settings>summary::-webkit-details-marker{display:none}
+.home-settings>summary:hover,.home-settings[open]>summary{background:#ffffff08;color:var(--text)}
+.home-avatar{display:grid;place-items:center;width:32px;height:32px;border:1px solid var(--line);border-radius:50%;color:var(--text)}
+.home-avatar svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.5;stroke-linecap:round}
+.home-profile-indicator{width:12px;text-align:center;font-size:18px;font-weight:400}
+.home-settings[open] .home-profile-indicator{font-size:0}
+.home-settings[open] .home-profile-indicator::after{content:'−';font-size:18px}
+.home-settings-menu{position:absolute;right:0;top:calc(100% + 8px);width:232px;max-width:calc(100vw - 32px);max-height:calc(100dvh - 100px - env(safe-area-inset-top) - env(safe-area-inset-bottom));overflow:auto;padding:8px;border:1px solid var(--line);border-radius:var(--radius);background:var(--ink);box-shadow:0 16px 48px #0008}
+.home-settings-menu button,.home-settings-menu a{display:flex;align-items:center;width:100%;min-height:44px;padding:10px 12px;border:0;border-radius:6px;background:transparent;color:var(--text);font:inherit;font-size:13px;text-decoration:none;text-align:left;box-sizing:border-box;cursor:pointer}
+.home-settings-menu :is(button,a):hover{background:#ffffff0c}
+.home-settings-menu :is(button,a):focus-visible{outline-offset:-3px}
+.home-settings-section{margin:4px 0;padding:8px 0;border-block:1px solid var(--line)}
+.home-settings-section p{margin:4px 12px 6px;color:var(--muted);font-size:11px}
+.home-main{display:grid;grid-template-columns:minmax(0,55fr) minmax(280px,45fr);align-items:center;gap:32px;flex:1;width:min(1120px,calc(100% - var(--home-gutter)*2));margin-inline:auto;padding:12px 0 calc(40px + env(safe-area-inset-bottom))}
+.home-scene{position:relative;width:100%;aspect-ratio:1;max-height:calc(100dvh - 156px);pointer-events:none}
+.home-scene canvas{display:block;width:100%;height:100%;position:absolute;inset:0}
+.home-scene #home-glow{filter:blur(15px);opacity:.5}
+#piece-picker-dialog .studio-library-form{width:min(100%,320px);min-width:0;margin:0 auto;padding:8px 0;box-sizing:border-box}
+.home-step-heading{margin-bottom:28px}
+.home-step-heading h2{margin:0;font:400 32px/1.2 Georgia,serif;letter-spacing:-.035em}
+.home-step-heading p{margin:10px 0 0;color:var(--muted);font-size:13px}
+#piece-picker-dialog[data-step="mode"] .home-step-heading{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+#piece-picker-dialog #library-mode-step{display:flex;flex-direction:column;gap:16px}
+#piece-picker-dialog #library-mode-step .studio-route-entry{display:flex;align-items:center;justify-content:center;width:100%;min-height:56px;margin:0;padding:15px 24px;border:1px solid var(--line);border-radius:var(--radius);background:#ffffff04;color:var(--text);font-size:15px;font-weight:500;letter-spacing:.01em;text-align:center;transition:background-color var(--home-motion),border-color var(--home-motion),color var(--home-motion)}
+#piece-picker-dialog #library-mode-step #library-sing{border-color:color-mix(in srgb,var(--home-target) 38%,transparent);background:color-mix(in srgb,var(--home-target) 10%,var(--home-background));color:var(--home-target)}
+#piece-picker-dialog #library-mode-step .studio-route-entry:hover{border-color:#ffffff40;background:#ffffff09}
+#piece-picker-dialog #library-mode-step #library-sing:hover{border-color:var(--home-target);background:color-mix(in srgb,var(--home-target) 16%,var(--home-background))}
+#piece-picker-dialog:not([data-step="mode"]) .studio-library-form{width:min(100%,380px)}
+#piece-picker-dialog .studio-return{min-height:44px;margin:24px 0 0;padding:10px 12px;border:0;border-radius:8px;background:transparent;color:var(--muted)}
+#library-status:empty{display:none}
+@media(max-width:899px){
+  .home-utilities{padding-top:calc(16px + env(safe-area-inset-top))}
+  .home-main{display:flex;flex-direction:column;justify-content:center;gap:var(--home-gap);padding-top:12px;padding-bottom:calc(32px + env(safe-area-inset-bottom))}
+  .home-scene{flex:none;width:min(100%,320px,34dvh);max-height:none}
+  #piece-picker-dialog .studio-library-form{flex:none;width:min(100%,320px);padding:0}
+  #piece-picker-dialog:not([data-step="mode"]) .home-scene{width:min(100%,200px,23dvh)}
+}
+@media(max-width:599px){
+  .home-brand{font-size:24px}
+  .home-profile-label,.home-profile-indicator{display:none}
+  .home-settings>summary{padding:0;justify-content:center}
+  .home-scene{width:min(100%,280px,32dvh)}
+}
+@media(max-height:600px){
+  #piece-picker-dialog{--home-gap:20px}
+  .home-utilities{padding-top:calc(12px + env(safe-area-inset-top));padding-bottom:8px}
+  .home-main{padding-top:8px;padding-bottom:calc(20px + env(safe-area-inset-bottom))}
+}
+/* A short landscape has room for columns, but not a stacked signature and menu. */
+@media(min-width:700px) and (max-width:899px) and (max-height:500px){
+  .home-main{display:grid;grid-template-columns:minmax(0,55fr) minmax(280px,45fr);gap:24px}
+  .home-scene,#piece-picker-dialog:not([data-step="mode"]) .home-scene{width:100%;max-height:calc(100dvh - 132px)}
+}
+@media(prefers-reduced-motion:reduce){#piece-picker-dialog *,#piece-picker-dialog *::before{animation:none!important;transition:none!important}}

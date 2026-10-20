@@ -69,6 +69,12 @@ def main() -> int:
                 await new Promise(resolve => setTimeout(resolve, 50));
               assert(state.runtime && !els.settingsDialog.open && !els.piecePickerDialog.open,
                 'choosing an output did not continue into song practice');
+              openDetectorSettings('basic');
+              els.settingsAudioOutputBluetooth.checked = true;
+              els.settingsAudioOutputBluetooth.dispatchEvent(new Event('change', {bubbles:true}));
+              assert(els.settingsDialog.open && !els.settingsDialog.classList.contains('is-audio-output-prompt'),
+                'changing the output from manually opened settings closed the dialog');
+              els.settingsDialog.close();
               let cachedChoiceContinued = false;
               requestAudioOutputForEntry(() => { cachedChoiceContinued = true; });
               assert(cachedChoiceContinued && !els.settingsDialog.open,
@@ -79,6 +85,53 @@ def main() -> int:
               assert(voiceIds.filter(id => id !== state.runtime.selectedPartId)
                 .every(id => state.voiceLevels.get(id) === .5), 'other voices are 50%');
               assert(state.accompanimentLevel === .4, 'accompaniment is 40%');
+              await togglePlayback();
+              assert(state.clock.running && state.microphoneStatus === 'active',
+                'exercise did not start with the microphone');
+              const navigationTracks = state.microphoneStream.getTracks();
+              await navigateToMeasure(Math.min(1, state.occurrenceMeasures.length - 1));
+              assert(state.clock.running && state.microphoneStatus === 'active',
+                'measure navigation did not resume the exercise microphone');
+              assert(navigationTracks.every(track => track.readyState === 'ended'),
+                'measure navigation kept the previous microphone stream open');
+              const pausedTracks = state.microphoneStream.getTracks();
+              await togglePlayback();
+              assert(!state.clock.running && state.microphoneStatus === 'idle',
+                'manual pause did not release the microphone');
+              assert(pausedTracks.every(track => track.readyState === 'ended'),
+                'manual pause left a microphone track open');
+              await togglePlayback();
+              const settingsTracks = state.microphoneStream.getTracks();
+              els.settings.click();
+              await new Promise(resolve => setTimeout(resolve, 100));
+              assert(!state.clock.running && state.microphoneStatus === 'idle',
+                'opening settings did not pause and release the microphone');
+              assert(settingsTracks.every(track => track.readyState === 'ended'),
+                'opening settings left a microphone track open');
+              closeSettingsMenu();
+              await togglePlayback();
+              const resultTracks = state.microphoneStream.getTracks();
+              state.clock.pause();
+              state.attempt = {voicedMs: 2000, insideMs: 1500};
+              finishAttempt();
+              await new Promise(resolve => setTimeout(resolve, 100));
+              assert(els.resultDialog.open && state.microphoneStatus === 'idle',
+                'results left the microphone active');
+              assert(resultTracks.every(track => track.readyState === 'ended'),
+                'results left a microphone track open');
+              els.resultDialog.close();
+              await togglePlayback();
+              const analysisTracks = state.microphoneStream.getTracks();
+              await openPerformanceAnalysis({
+                id: 'privacy-smoke', pieceId: state.bundleManifest.piece_id,
+                partId: state.runtime.selectedPartId, score: 75, coverageRatio: .8,
+                owner: {displayName: 'Privacy smoke'},
+              });
+              assert(!state.clock.running && state.microphoneStatus === 'idle',
+                'performance analysis left the microphone active');
+              assert(analysisTracks.every(track => track.readyState === 'ended'),
+                'performance analysis left a microphone track open');
+              PerformanceReview.close();
               await toggleMicrophone();
               assert(state.microphoneStatus === 'active', 'microphone did not activate');
               const tracks = state.microphoneStream.getTracks();

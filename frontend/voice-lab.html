@@ -6,27 +6,48 @@
   <meta name="theme-color" content="#081419" />
   <title>Allena la tua voce · Choir Assistant</title>
   <link rel="stylesheet" href="styles.css?v=20261014-warmup" />
-  <link rel="stylesheet" href="studio.css?v=20261014-natural-arpeggios" />
+  <link rel="stylesheet" href="studio.css?v=20261020-compact-dark-score" />
+  <link rel="stylesheet" href="ambient.css" />
   <script src="runtime-config.js" defer></script>
   <script src="pitch_detector.js?v=20261003-weak-voice" defer></script>
   <script src="one_euro_filter.js?v=1" defer></script>
   <script src="pitch_shared.js?v=20261013-live-history-visible" defer></script>
   <script src="fluid_pitch_trail.js?v=20261012-single-valued" defer></script>
   <script src="voice_lab_core.js?v=20261014-natural-arpeggios" defer></script>
-  <script src="voice_lab.js?v=20261014-natural-arpeggios" defer></script>
+  <script src="voice_lab.js?v=20261020-instructions-listen-follow" defer></script>
 </head>
-<body class="warmup-body">
+<body class="warmup-body ambient-respiro-page">
+  <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute;pointer-events:none">
+    <defs>
+      <filter id="warmup-light-notation" color-interpolation-filters="sRGB">
+        <feColorMatrix type="matrix" values="0 0 0 0 .929  0 0 0 0 .949  0 0 0 0 .929  -1 0 0 0 1" />
+        <feComposite in2="SourceAlpha" operator="in" />
+      </filter>
+    </defs>
+  </svg>
+  <div class="ambient-respiro" aria-hidden="true">
+    <i class="ambient-respiro__glow ambient-respiro__glow--cool"></i>
+    <i class="ambient-respiro__glow ambient-respiro__glow--warm"></i>
+  </div>
   <header class="warmup-toolbar">
-    <a class="mode-button warmup-back" href="index.html">Brani</a>
+    <a class="mode-button warmup-back" href="index.html">Menù</a>
     <div class="warmup-identity"><small>CHOIR ASSISTANT</small><h1>Allena la tua voce</h1></div>
     <nav class="warmup-journey" aria-label="Avanzamento">
-      <span data-journey="choose" class="active">Scegli</span><i></i>
-      <span data-journey="prepare">Prepara</span><i></i>
+      <button type="button" data-journey="choose" class="active">Scegli</button><i></i>
+      <button type="button" data-journey="prepare">Prepara</button><i></i>
       <span data-journey="session">Canta</span><i></i>
       <span data-journey="review">Risultato</span>
     </nav>
-    <button class="mode-button" id="lab-settings" type="button">Impostazioni</button>
+    <button class="mode-button warmup-settings" id="lab-settings" type="button" aria-label="Impostazioni" title="Impostazioni"><svg viewBox="0 0 24 24" width="22" height="22" fill="none" stroke="currentColor" stroke-width="1.7" aria-hidden="true"><path d="m9.5 3-.6 2.1-1.5.9-2.1-.5-2.5 4.3 1.5 1.6v1.7l-1.5 1.6L5.3 19l2.1-.5 1.5.9.6 2.1h5l.6-2.1 1.5-.9 2.1.5 2.5-4.3-1.5-1.6v-1.7l1.5-1.6-2.5-4.3-2.1.5-1.5-.9L14.5 3Z"/><circle cx="12" cy="12" r="3.3"/></svg></button>
   </header>
+
+  <nav class="warmup-navigation" id="warmup-navigation" aria-label="Navigazione esercizi" hidden>
+    <button type="button" id="warmup-back-choose">Esercizi</button>
+    <span id="warmup-location"></span>
+    <div>
+      <button type="button" id="warmup-back-prepare" hidden>Prepara</button>
+    </div>
+  </nav>
 
   <main class="warmup-shell">
     <section class="warmup-choose" id="warmup-choose" aria-labelledby="warmup-choose-title">
@@ -39,30 +60,43 @@
         <button type="button" class="warmup-path warmup-path-scale" data-path="scale">
           <span class="warmup-path-art" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
           <span class="warmup-path-copy"><small>PER COMINCIARE</small><strong>Scalda la voce</strong><em>Una scala dolce per attivare voce e respiro.</em></span>
-          <span class="warmup-path-meta"><b>1 take, poi decidi tu</b><span>Inizia <span aria-hidden="true">→</span></span></span>
+          <span class="warmup-path-meta"><b>Una scala, poi decidi tu</b><span>Inizia</span></span>
         </button>
         <button type="button" class="warmup-path warmup-path-chords" data-path="chords">
           <span class="warmup-path-art" aria-hidden="true"><i></i><i></i><i></i></span>
           <span class="warmup-path-copy"><small>ARMONIA</small><strong>Accordi e arpeggi</strong><em>Riconosci maggiore e minore mentre canti.</em></span>
-          <span class="warmup-path-meta"><b>4–12 esercizi</b><span>Inizia <span aria-hidden="true">→</span></span></span>
+          <span class="warmup-path-meta"><b>4–12 esercizi</b><span>Inizia</span></span>
         </button>
         <button type="button" class="warmup-path warmup-path-ear" data-path="ear">
           <span class="warmup-path-art" aria-hidden="true"><i></i><i></i><i></i></span>
           <span class="warmup-path-copy"><small>ORECCHIO INTERNO</small><strong>Trova le note</strong><em>Parti dalla fondamentale e immagina il suono.</em></span>
-          <span class="warmup-path-meta"><b>Scala, accordi o gradi</b><span>Inizia <span aria-hidden="true">→</span></span></span>
+          <span class="warmup-path-meta"><b>Scala, accordi o gradi</b><span>Inizia</span></span>
         </button>
       </div>
       <p class="warmup-choose-note">Non serve conoscere la teoria: durante l'esercizio vedrai sempre cosa cantare.</p>
     </section>
 
     <section class="warmup-prepare" id="warmup-prepare" aria-labelledby="warmup-prepare-title" hidden>
-      <button type="button" class="warmup-text-back" id="warmup-back-choose"><span aria-hidden="true">←</span> Cambia allenamento</button>
+      <header class="warmup-lesson-heading">
+        <div>
+        <p class="lab-eyebrow" id="warmup-prepare-kicker">SCALDA LA VOCE</p>
+        <h2 id="warmup-prepare-title" tabindex="-1">La tua prima scala</h2>
+        <p id="warmup-lesson-intro"></p>
+        </div>
+        <button id="warmup-instructions" type="button" aria-haspopup="dialog">Istruzioni</button>
+      </header>
       <div class="warmup-prepare-layout">
+        <section class="warmup-lesson" aria-label="Cosa cantare">
+          <div class="warmup-lesson-score">
+            <div class="warmup-lesson-score-heading"><span>IL TUO SPARTITO</span><small id="warmup-lesson-key"></small></div>
+            <img id="warmup-lesson-score" alt="" />
+            <p id="warmup-lesson-notes"></p>
+          </div>
+        </section>
         <div class="warmup-setup" aria-label="Configurazione dell'allenamento">
       <div class="warmup-setup-heading">
-        <p class="lab-eyebrow" id="warmup-prepare-kicker">SCALDA LA VOCE</p>
-        <h2 id="warmup-prepare-title">Prepariamo la tua scala</h2>
-        <p id="warmup-mode-copy">Ascolta il modello alla velocità scelta, poi canta con fondamentale e metronomo.</p>
+        <h3>Prima di cominciare</h3>
+        <p id="warmup-mode-copy"></p>
       </div>
 
       <fieldset class="warmup-choice-group warmup-ear-exercises" id="warmup-ear-exercises" hidden>
@@ -74,10 +108,12 @@
           <span>Arpeggi</span><small>Maggiore · minore · maggiore · minore</small>
         </button>
         <button type="button" data-family="degree" class="warmup-choice">
-          <span>Grado singolo</span><small>Solo fondamentale · target casuale</small>
+          <span>Una nota</span><small>Ascolta Fa e trova la nota richiesta</small>
         </button>
       </fieldset>
 
+      <details class="warmup-position-options" id="warmup-position-options" hidden>
+        <summary>Cambia posizione dell’accordo</summary>
       <fieldset class="warmup-choice-group warmup-inversions" id="warmup-inversions" hidden>
         <legend>Posizione dell'accordo</legend>
         <button type="button" data-inversion="root" class="active"><strong>Fondamentale</strong><small>1 · 3 · 5</small></button>
@@ -85,12 +121,16 @@
         <button type="button" data-inversion="second"><strong>2° rivolto</strong><small>5 · 1 · 3</small></button>
         <button type="button" data-inversion="all"><strong>Tutti</strong><small>Tre posizioni</small></button>
       </fieldset>
+      </details>
 
+      <details class="warmup-position-options" id="warmup-level-options" hidden>
+        <summary>Scegli il livello</summary>
       <fieldset class="warmup-choice-group warmup-levels" id="warmup-degree-levels" hidden>
         <legend>Livello dei gradi</legend>
         <button type="button" data-degree-level="base" class="active"><strong>Base</strong><small>2 · 3 · 4 · 5</small></button>
         <button type="button" data-degree-level="advanced"><strong>Avanzato</strong><small>Dal ♯1 / ♭2 fino all'8</small></button>
       </fieldset>
+      </details>
 
       <fieldset class="warmup-choice-group warmup-tempos">
         <legend>Velocità</legend>
@@ -102,23 +142,11 @@
       <div class="warmup-plan-card">
         <span id="warmup-plan-kicker">1 ESERCIZIO</span>
         <strong id="warmup-plan-title">Scala in Fa · 60 BPM</strong>
-        <p id="warmup-plan-detail">Modello a 60 BPM, quattro pulsazioni e una scala completa.</p>
+        <p id="warmup-plan-detail" role="status">Ascolta, poi canta.</p>
       </div>
 
       <button id="warmup-start" class="warmup-primary" type="button">Comincia</button>
-      <p class="warmup-device-note">Il microfono si attiverà soltanto quando cominci.</p>
         </div>
-        <aside class="warmup-preview-card" aria-label="Anteprima della routine">
-          <span class="warmup-preview-icon" aria-hidden="true">♪</span>
-          <p class="lab-eyebrow">COME FUNZIONA</p>
-          <h3>Prima ascolta, poi canta</h3>
-          <ol id="warmup-preview-steps">
-            <li><span>1</span><p><strong>Ascolta</strong><small>Metti in orecchio la melodia.</small></p></li>
-            <li><span>2</span><p><strong>Preparati</strong><small>Segui quattro pulsazioni.</small></p></li>
-            <li><span>3</span><p><strong>Canta</strong><small>La tua intonazione apparirà sullo schermo.</small></p></li>
-          </ol>
-          <p class="warmup-preview-reassurance">Puoi usare cuffie o altoparlanti.</p>
-        </aside>
       </div>
     </section>
 
@@ -164,7 +192,7 @@
       <div class="warmup-transport">
         <button id="warmup-cancel" type="button" disabled>Interrompi</button>
         <button id="warmup-main-action" class="warmup-primary" type="button">Comincia</button>
-        <button id="warmup-replay" type="button" disabled>Riascolta la take</button>
+        <button id="warmup-replay" type="button" disabled>Riascolta</button>
       </div>
 
       <section class="warmup-feedback" id="warmup-feedback" hidden>
@@ -187,8 +215,19 @@
     </section>
   </main>
 
+  <dialog id="warmup-instructions-dialog" class="practice-dialog warmup-demo" aria-labelledby="warmup-demo-title" aria-describedby="warmup-demo-copy">
+    <header class="warmup-demo-heading"><span>ISTRUZIONI</span><button id="warmup-demo-close" type="button" aria-label="Chiudi istruzioni" autofocus>×</button></header>
+    <div class="warmup-demo-status" aria-live="polite" aria-atomic="true"><p id="warmup-demo-step">1 / 3</p><h2 id="warmup-demo-title">Ascolta la melodia</h2><p id="warmup-demo-copy">Ascolta la voce guida.</p></div>
+    <div class="warmup-demo-paper">
+      <div class="warmup-beats warmup-demo-beats" id="warmup-demo-beats" role="img" aria-label="Quattro battiti di preparazione"><span>1</span><span>2</span><span>3</span><span>4</span></div>
+      <div id="warmup-demo-score" role="img" aria-label="Spartito della dimostrazione"></div>
+      <p id="warmup-demo-caption"></p>
+    </div>
+    <footer class="warmup-demo-footer"><span id="warmup-demo-tempo"></span><button id="warmup-demo-replay" type="button" disabled>Rivedi</button></footer>
+  </dialog>
+
   <dialog id="lab-settings-dialog" class="practice-dialog lab-range-dialog" aria-labelledby="lab-range-title">
-    <header class="lab-range-dialog-heading"><span>VOCE E AUDIO</span><h2 id="lab-range-title">Impostazioni</h2></header>
+    <header class="lab-range-dialog-heading"><span>VOCE E AUDIO</span><h2 id="lab-range-title">Impostazioni</h2><a class="lab-relax-link" id="lab-relax" href="relax.html?return=%2Fvoice-lab.html">Relax mode</a></header>
     <div class="lab-range-dialog-body">
       <section class="lab-range-fields" aria-label="Selezione dell'estensione vocale">
         <label class="lab-range-field">La tua sezione

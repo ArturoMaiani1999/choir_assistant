@@ -25,19 +25,31 @@ take precedence over anything under `archive/`.
 - [Personal recordings and synchronized pitch replay](architecture/personal-recordings.md) —
   owner-only voice capture, explicit consent, one recording per piece and
   synchronized pitch replay.
+- [Direzione, repertorio personale e avanzamento](architecture/director-cockpit.md) —
+  assignments, named progress, consent, per-part aggregates and retention.
 
 ## Product
 
 - [Practice experience](product/practice-experience.md) — canonical UX and
   temporal behavior.
+- [Home di Epistrophe](product/home.md) — composizione responsive, firma
+  armonica bicolore e accesso unificato a profilo e impostazioni.
 - [Session states](product/session-states.md) — microphone, playback and
   interruption state model.
 - [Voice Lab warm-up redesign](product/voice-lab-warmup-redesign-plan.md) —
   current product and technical contract for scales, arpeggios and inner-ear
   work.
+- [Audit dei flussi di navigazione](product/navigation-ux-audit.md) — passaggi,
+  ritorni e conservazione del contesto verificati su desktop e mobile.
+- [Relax mode](product/relax-mode.md) — curva di Lissajous 3D sul nero,
+  scia di venti secondi e controlli discreti.
+- [Performance monitoring privacy notice](product/performance-monitoring-privacy-notice.md) —
+  draft copy shown before the first derived-metrics upload.
 
 ## Engineering
 
+- [Pitch Detection Ablation Lab](engineering/pitch-tracking/ablation-lab.md) —
+  confronto scientifico browser-side di YIN e pYIN sulle registrazioni opt-in.
 - [Pitch tracking](engineering/pitch-tracking/README.md) — current contract,
   tracker, validation and expert material.
 

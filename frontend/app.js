@@ -8,6 +8,14 @@ const UiPreferences = window.ChoirUiPreferences;
 const VocalFeedback = window.VocalFeedback;
 const { MediaElementMixer, buildMediaPlaybackPlan } = window.ChoirMedia;
 const RUNTIME_CONFIG = window.ChoirRuntimeConfig ?? Object.freeze({});
+let microphoneCalibrationUI = null;
+let echoCancellationUI = null;
+let echoDiagnosticsUI = null;
+const calibrationMediaLoops = new Map();
+function restoreCalibrationMediaLoops() {
+  for (const [media, loop] of calibrationMediaLoops) media.loop = loop;
+  calibrationMediaLoops.clear();
+}
 
 function releaseAssetUrl(path) {
   if (!path || !RUNTIME_CONFIG.buildVersion) return path;
@@ -110,6 +118,7 @@ const STANDARD_PLUME_ADVANCE_MS = 270;
 const BLUETOOTH_PLUME_ADVANCE_MS = 320;
 const METRONOME_OFFSET_MS = 50;
 const MIXER_DEFAULTS_VERSION = 2;
+let practiceOrigin = new URLSearchParams(location.search).get('from') === 'repertorio' ? 'repertorio' : null;
 const DEFAULT_OWN_VOICE_LEVEL = 1;
 const DEFAULT_OTHER_VOICE_LEVEL = .5;
 const DEFAULT_ACCOMPANIMENT_LEVEL = .4;
@@ -118,10 +127,12 @@ let audioOutputExpiryTimer = null;
 const els = Object.fromEntries([
   'transpose', 'transpose-value', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
   'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-accompaniment', 'voice-mixer-accompaniment-enabled', 'voice-mixer-accompaniment-level', 'voice-mixer-accompaniment-value', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
-  'settings-menu-wrap', 'settings-menu', 'settings-menu-mixer', 'settings-menu-recording', 'settings-menu-basic', 'settings-menu-advanced', 'settings-dialog', 'settings-heading', 'settings-basic-panel', 'settings-advanced-panel', 'settings-audio-output-standard', 'settings-audio-output-bluetooth', 'settings-audio-output-status', 'settings-audio-output-description', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
+  'settings-menu-wrap', 'settings-menu', 'settings-menu-repertoire', 'settings-menu-mixer', 'settings-menu-profile', 'settings-menu-recording', 'settings-menu-basic', 'settings-menu-advanced', 'settings-dialog', 'settings-heading', 'settings-basic-panel', 'settings-advanced-panel', 'settings-audio-output-standard', 'settings-audio-output-bluetooth', 'settings-audio-output-status', 'settings-audio-output-description', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
   'result-dialog', 'result-heading', 'result-text', 'result-progress', 'retry', 'result-resume', 'result-close',
-  'performances', 'performance-dialog', 'performance-heading', 'performance-identity', 'performance-close', 'performance-tabs', 'performance-status', 'performance-list',
-  'personal-recording-dialog', 'personal-recording-current', 'personal-recording-current-summary', 'personal-recording-consent', 'personal-recording-headphones', 'personal-recording-storage-consent', 'personal-recording-status', 'personal-recording-review', 'personal-recording-review-summary', 'personal-recording-preview', 'personal-recording-actions', 'personal-recording-start', 'personal-recording-replay', 'personal-recording-delete', 'personal-recording-save', 'personal-recording-discard', 'personal-recording-close', 'personal-recording-live', 'personal-recording-live-title', 'personal-recording-live-detail', 'personal-recording-stop-live', 'personal-recording-replay-audio',
+  'cockpit-link', 'performance-section', 'performance-heading', 'performance-identity', 'performance-tabs', 'performance-status', 'performance-list',
+  'personal-recording-dialog', 'personal-recording-current', 'personal-recording-current-summary', 'personal-recording-sharing', 'personal-recording-auto-best', 'personal-recording-auto-best-status', 'personal-recording-consent', 'personal-recording-headphones', 'personal-recording-storage-consent', 'personal-recording-analysis-consent', 'personal-recording-status', 'personal-recording-review', 'personal-recording-review-summary', 'personal-recording-preview', 'personal-recording-actions', 'personal-recording-start', 'personal-recording-replay', 'personal-recording-delete', 'personal-recording-save', 'personal-recording-discard', 'personal-recording-close', 'personal-recording-live', 'personal-recording-live-title', 'personal-recording-live-detail', 'personal-recording-stop-live', 'personal-recording-replay-audio',
+  'monitoring-consent-dialog', 'monitoring-consent-check', 'monitoring-consent-status', 'monitoring-consent-accept', 'monitoring-consent-decline',
+  'member-profile-dialog', 'member-profile-form', 'member-profile-first-name', 'member-profile-last-name', 'member-profile-status', 'member-profile-save', 'member-profile-cancel',
   'note-names',
   'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-viewer-link', 'settings',
   'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
@@ -179,6 +190,7 @@ const state = {
   rememberedMetronomeVolume: 34,
   syncDebug: new URLSearchParams(window.location.search).has('syncDebug'),
   microphoneStatus: 'idle',
+  microphoneFailureMessage: null,
   microphoneRequestGeneration: 0,
   ignoreAudioDeviceChangesUntil: 0,
   microphoneStream: null,
@@ -209,14 +221,65 @@ const state = {
     analysisView: { timeZoom: 1, pitchZoom: 1, centerBeat: null, pitchOffset: 0, pointer: null, inspectBeat: null, selectedBeat: null } },
   gridInspect: { active: false, viewBeat: 0, pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null },
   performanceMe: null,
+  monitoringConsent: null,
+  monitoringConsentPromise: null,
+  progressSubmitted: new Set(),
   personalRecording: { capture: null, pending: null, previewUrl: null, current: null,
     loading: false, saving: false, replay: null },
+  automaticBestRecording: { enabled: null, loading: false, error: null, capture: null },
 };
 
 const V1_RMS_THRESHOLD = Object.freeze({ default: .000002, min: .000001, max: .01 });
 const V1_TRACKER_DEFAULTS = Object.freeze({ fastAlpha: .65, slowAlpha: .65, medianWindowFrames: 3 });
 const fluidTrailRenderer = new FluidPitchTrail.Renderer(els.pitchFluidLayer);
 const mobileChrome = { mode: null, topCollapsed: false, bottomCollapsed: false };
+let libraryMode = 'sing';
+let libraryStep = 'mode';
+let pendingVoiceAction = null;
+const VOICE_NAMES = { soprano: 'Soprano', contralto: 'Contralto', tenore: 'Tenore', basso: 'Basso' };
+
+function preferredVoice() {
+  if (VOICE_NAMES[state.performanceMe?.preferredVoicePart]) return state.performanceMe.preferredVoicePart;
+  try {
+    const saved = localStorage.getItem(`choir-preferred-voice:${state.performanceMe?.member?.id || 'local'}`);
+    return VOICE_NAMES[saved] ? saved : null;
+  } catch (_) { return null; }
+}
+
+async function savePreferredVoice(voice) {
+  if (!VOICE_NAMES[voice]) throw new Error('Scegli una parte vocale.');
+  if (RUNTIME_CONFIG.mode === 'production') {
+    const result = await PerformanceSharing.updateProfile({ preferredVoicePart: voice });
+    state.performanceMe = { ...state.performanceMe, ...result };
+  }
+  try { localStorage.setItem(`choir-preferred-voice:${state.performanceMe?.member?.id || 'local'}`, voice); } catch (_) {}
+}
+
+function showLibraryStep(step) {
+  libraryStep = step;
+  const copy = { mode: ['Menù', ''], source: ['Canta brani', 'Quali brani vuoi preparare?'],
+    piece: [libraryMode === 'read' ? 'Vedi partitura' : 'Brani custom', 'Scegli dal catalogo.'], part: ['Qual è la tua parte?', 'Sceglila una volta, la ricorderemo.'] }[step];
+  els.piecePickerDialog.dataset.step = step;
+  for (const name of ['mode', 'source', 'piece', 'part']) document.getElementById(`library-${name}-step`).hidden = name !== step;
+  document.getElementById('piece-picker-heading').textContent = copy[0];
+  document.getElementById('library-step-hint').textContent = copy[1];
+  document.getElementById('library-back').hidden = step === 'mode';
+  els.libraryOpen.hidden = libraryMode !== 'sing'; els.libraryScore.hidden = libraryMode !== 'read';
+  document.getElementById('library-status').textContent = '';
+  document.getElementById('piece-picker-heading').focus({ preventScroll: true });
+}
+
+function requirePreferredVoice(action) {
+  if (preferredVoice()) { void action(); return; }
+  pendingVoiceAction = action;
+  if (!els.piecePickerDialog.open) openLibraryPicker('part');
+  else showLibraryStep('part');
+}
+
+function preferredPartId(piece, fallback = null) {
+  const voice = preferredVoice();
+  return piece?.parts?.find(part => canonicalVoicePart(part.name, part.id) === voice)?.id || fallback;
+}
 
 function mobilePracticeMode() {
   if (!window.matchMedia('(max-width: 960px)').matches) return 'desktop';
@@ -227,7 +290,7 @@ function updateMobileChrome() {
   const mode = mobilePracticeMode();
   if (mode !== mobileChrome.mode) {
     mobileChrome.mode = mode;
-    mobileChrome.topCollapsed = mode !== 'desktop';
+    mobileChrome.topCollapsed = false;
     mobileChrome.bottomCollapsed = mode === 'landscape';
   }
   els.practiceShell.classList.toggle('mobile-top-collapsed', mobileChrome.topCollapsed);
@@ -307,6 +370,10 @@ function invalidateAudioOutputPreference(notifyUser = false) {
 }
 
 function updateDetectorSettingsUi() {
+  const calibration = microphoneCalibrationUI?.activeSettings();
+  const effectiveNote = document.getElementById('settings-calibration-effective');
+  effectiveNote.hidden = !calibration;
+  effectiveNote.textContent = calibration ? `Calibrazione attiva: ${formatRmsThreshold(calibration.rmsThreshold)} RMS. Una modifica manuale la disattiva.` : '';
   els.settingsAudioOutputStandard.checked = state.audioOutputType === 'standard';
   els.settingsAudioOutputBluetooth.checked = state.audioOutputType === 'bluetooth';
   els.settingsAudioOutputStatus.textContent = state.audioOutputType === 'bluetooth'
@@ -342,12 +409,18 @@ function updateDetectorSettingsUi() {
 }
 
 function applyLiveTrackerSettings() {
-  const recognition = PitchShared.recognitionSettings(state.detectorSettings);
+  const recognition = activeRecognitionSettings();
   state.pitchSmoother.configure({ ...state.detectorSettings, ...recognition });
 }
 
 function activeRecognitionSettings() {
-  return PitchShared.recognitionSettings(state.detectorSettings);
+  const recognition = { ...PitchShared.recognitionSettings(state.detectorSettings), ...microphoneCalibrationUI?.activeSettings() };
+  const residualFloor = echoCancellationUI?.detectionFloor() || 0;
+  if (residualFloor > recognition.rmsThreshold) {
+    recognition.levelConfidenceFloor ??= recognition.rmsThreshold < .001 ? .36 : 0;
+    recognition.rmsThreshold = residualFloor;
+  }
+  return recognition;
 }
 
 function closeSettingsMenu() {
@@ -355,20 +428,78 @@ function closeSettingsMenu() {
   els.settings.setAttribute('aria-expanded', 'false');
 }
 
+function updatePracticeReturn() {
+  const label = practiceOrigin === 'repertorio' ? 'Repertorio' : 'Menù';
+  document.getElementById('exit-practice').textContent = label;
+  document.getElementById('practice-return').textContent = label;
+}
+
+function practiceReturnQuery() {
+  const query = new URLSearchParams({ piece: state.bundleManifest.piece_id, part: state.runtime.selectedPartId });
+  const beat = playbackSnapshot().beat;
+  query.set('resume', String(Math.round(beat * 1000) / 1000));
+  query.set('entry', String(state.scoringStartBeat || 0));
+  if (practiceOrigin) query.set('from', practiceOrigin);
+  return query;
+}
+
+function restorePracticePosition(query) {
+  if (!query.has('resume')) return;
+  const value = Number(query.get('resume'));
+  if (!Number.isFinite(value) || value < 0) return;
+  const beat = Math.min(totalBeats(), value);
+  const entryValue = query.has('entry') ? Number(query.get('entry')) : beat;
+  state.scoringStartBeat = Number.isFinite(entryValue) ? Math.max(0, Math.min(totalBeats(), entryValue)) : beat;
+  state.selectedMeasureIndex = measureIndexAt(state.scoringStartBeat);
+  state.attemptStartedFromBeginning = beat === 0;
+  state.attemptActive = false;
+  queueAudioSeek(state.runtime.secondsAtBeat(beat));
+  els.scoringCue.textContent = `In pausa · battuta ${state.occurrenceMeasures[measureIndexAt(beat)]?.number ?? 1}`;
+  updatePlaybackButton(); render();
+}
+
+function canNavigatePractice() {
+  if (state.personalRecording.capture || state.personalRecording.pending
+    || state.benchmark.capture || state.groundTruth.capture
+    || echoDiagnosticsUI?.isBusy() || echoDiagnosticsUI?.hasPending()
+    || microphoneCalibrationUI?.isBusy() || echoCancellationUI?.isBusy()) {
+    showToast('Termina la registrazione o scegli se salvarla o scartarla prima di uscire.');
+    return false;
+  }
+  return true;
+}
+
+async function navigatePractice(href) {
+  if (!canNavigatePractice()) return;
+  if (state.automaticBestRecording.capture) await stopAutomaticBestCapture({ discard: true });
+  await pausePracticeForNonExercise();
+  savePitchHistory();
+  window.location.assign(href);
+}
+
+function returnFromPractice() {
+  if (practiceOrigin === 'repertorio') void navigatePractice('repertorio.html');
+  else openLibraryPicker();
+}
+
 function toggleSettingsMenu() {
   const opening = els.settingsMenu.hidden;
+  if (opening) void pausePracticeForNonExercise({ preserveCalibration: true });
   els.settingsMenu.hidden = !opening;
   els.settings.setAttribute('aria-expanded', String(opening));
-  if (opening) els.settingsMenuBasic.focus();
+  if (opening) els.settingsMenu.querySelector('[role="menuitem"]').focus();
 }
 
 function openDetectorSettings(mode = 'basic') {
+  echoCancellationUI?.checkpoint('settings-open');
+  void pausePracticeForNonExercise({ preserveCalibration: true });
   const advanced = mode === 'advanced';
   pendingAudioOutputAction = null;
   els.settingsDialog.classList.remove('is-audio-output-prompt');
   closeSettingsMenu();
   restoreAudioOutputPreference();
   updateDetectorSettingsUi();
+  microphoneCalibrationUI?.refresh(); echoCancellationUI?.refresh();
   els.settingsBasicPanel.hidden = advanced;
   els.settingsAdvancedPanel.hidden = !advanced;
   els.settingsHeading.textContent = advanced ? 'Impostazioni avanzate' : 'Impostazioni';
@@ -399,6 +530,7 @@ function bindAudioOutputControls() {
   for (const control of [els.settingsAudioOutputStandard, els.settingsAudioOutputBluetooth]) {
     control.addEventListener('change', () => {
       if (!control.checked) return;
+      const shouldCloseAfterSelection = els.settingsDialog.classList.contains('is-audio-output-prompt');
       saveAudioOutputPreference(control.value);
       state.plumeSettings.timeAdvanceMs = control.value === 'bluetooth'
         ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
@@ -411,10 +543,8 @@ function bindAudioOutputControls() {
         : 'Uscita non Bluetooth: anticipo traccia vocale 270 ms.');
       const action = pendingAudioOutputAction;
       pendingAudioOutputAction = null;
-      if (action) {
-        els.settingsDialog.close();
-        void action();
-      }
+      if (shouldCloseAfterSelection && els.settingsDialog.open) els.settingsDialog.close();
+      if (action) void action();
     });
   }
   els.settingsDialog.addEventListener('cancel', () => { pendingAudioOutputAction = null; });
@@ -432,6 +562,8 @@ function bindAudioOutputControls() {
   els.settingsDialog.addEventListener('click', closeSettingsFromBackdrop);
   navigator.mediaDevices?.addEventListener('devicechange', () => {
     if (Date.now() < state.ignoreAudioDeviceChangesUntil) return;
+    microphoneCalibrationUI?.inputChanged();
+    echoCancellationUI?.invalidate('devicechange');
     invalidateAudioOutputPreference(true);
   });
 }
@@ -739,6 +871,8 @@ function openVoiceMixer() {
   if (state.clock.running) {
     state.voiceMixResumeRequested = true;
     state.clock.pause();
+    void stopAutomaticBestCapture({ discard: true });
+    void releaseMicrophoneIfUnused();
     updatePlaybackButton();
     render();
   }
@@ -831,7 +965,9 @@ async function applyVoiceSelection(selectedVoiceIds) {
   state.voiceMixResumeRequested = shouldResume;
   if (state.clock.running) {
     state.clock.pause();
+    void stopAutomaticBestCapture({ discard: true });
     updatePlaybackButton();
+    await releaseMicrophoneIfUnused();
   }
   state.selectedVoiceIds = new Set(selectedVoiceIds);
   configureBacking();
@@ -855,6 +991,7 @@ async function applyVoiceSelection(selectedVoiceIds) {
 
   if (shouldResume) {
     try {
+      if (state.microphoneStatus !== 'active') await toggleMicrophone();
       await state.playbackMixer.resume(media);
       syncBackingLevel();
       syncVoiceStemLevels();
@@ -1047,7 +1184,7 @@ function renderScore(beat) {
 
 function pitchBounds(beat) {
   const measureIndex = measureIndexAt(beat);
-  const key = `${state.runtime.selectedPartId}:${measureIndex}`;
+  const key = `${state.runtime.selectedPartId}:${state.transpose}:${measureIndex}`;
   if (!state.pitchViewport || state.pitchViewport.key !== key) {
     const firstIndex = Math.max(0, measureIndex - 1);
     const lastIndex = Math.min(state.occurrenceMeasures.length - 1, measureIndex + 2);
@@ -1098,6 +1235,10 @@ function applyPitchEstimate(rawEstimate, beat, sampledAt, analysisMs, running) {
     state.displayPitchFilter.reset();
     state.displayPitch = null;
   } else state.displayPitch = state.displayPitchFilter.filter(state.trackedPitch, sampledAt / 1000);
+  echoDiagnosticsUI?.onPitchFrame({ beat, sampledAt, running, rawHz: estimate.rawHz,
+    trackedHz: state.trackedPitch == null ? null : estimate.hz, displayHz: state.displayPitch == null ? null : pitchToHz(state.displayPitch),
+    accepted: estimate.accepted, rejectionReason: estimate.rejectionReason, confidence: estimate.confidence,
+    rms: estimate.rms, clarity: estimate.clarity, settings: activeRecognitionSettings(), echo: echoCancellationUI?.diagnostics() });
   document.getElementById('microphone-level').value = state.microphoneRms;
   const microphoneHelp = state.trackedPitch == null
     ? state.microphoneRms < activeRecognitionSettings().rmsThreshold ? 'Microfono aperto: segnale troppo debole. Controlla ingresso e volume in Windows.' : 'Il segnale arriva. Tieni una nota per riconoscerla.'
@@ -1303,6 +1444,10 @@ async function toggleNeuralLive() {
     neural.generation += 1; neural.enabled = false; neural.loading = false; neural.inFlight = false; neural.latestPitch = null; neural.samples = [];
     updateNeuralLiveUi(); showToast('Confronto CREPE live fermato. V1 resta attivo.'); render(); return;
   }
+  if (!state.clock?.running) {
+    showToast('Avvia la prova prima di attivare il confronto live.');
+    return;
+  }
   if (state.microphoneStatus !== 'active') await toggleMicrophone();
   if (state.microphoneStatus !== 'active') return;
   neural.loading = true; neural.error = null; neural.samples = []; neural.durationsMs = []; neural.v1DurationsMs = []; neural.latestPitch = null;
@@ -1440,7 +1585,7 @@ function drawPitchLane(beat) {
   const inspect = state.gridInspect;
   const inspecting = !state.clock.running && inspect.active;
   const displayBeat = inspecting ? inspect.viewBeat : beat;
-  const baseBounds = pitchBounds(displayBeat);
+  const baseBounds = inspecting ? (inspect.baseBounds ??= { ...pitchBounds(beat) }) : pitchBounds(displayBeat);
   const baseCenter = (baseBounds.min + baseBounds.max) / 2 + (inspecting ? inspect.pitchOffset : 0);
   const baseSpan = baseBounds.max - baseBounds.min;
   const pitchSpan = baseSpan / (inspecting ? inspect.pitchZoom : 1);
@@ -1450,9 +1595,15 @@ function drawPitchLane(beat) {
   const baseFutureBeats = compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats;
   let historyBeats = baseHistoryBeats / (inspecting ? inspect.timeZoom : 1);
   let futureBeats = baseFutureBeats / (inspecting ? inspect.timeZoom : 1);
-  if (compactLayout) ({ historyBeats, futureBeats } = limitTimelineWindowToMeasures(
+  if (compactLayout && !inspecting) ({ historyBeats, futureBeats } = limitTimelineWindowToMeasures(
     state.occurrenceMeasures, displayBeat, historyBeats, futureBeats, 4));
-  const rowHeight = (plot.bottom - plot.top) / (bounds.max - bounds.min);
+  state.gridGeometry = { plot, bounds, historyBeats, futureBeats, timeZoom: inspecting ? inspect.timeZoom : 1,
+    rowHeight: (plot.bottom - plot.top) / (bounds.max - bounds.min),
+    viewStart: displayBeat - historyBeats, viewEnd: displayBeat + futureBeats,
+    xAtBeat: value => timeToX(value, displayBeat, plot.left, plot.right, historyBeats, futureBeats),
+    yAtPitch: value => pitchToY(value, bounds.min, bounds.max, plot.top, plot.bottom) };
+  state.gridNavigation?.refresh();
+  let rowHeight = (plot.bottom - plot.top) / (bounds.max - bounds.min);
   const nowX = timeToX(displayBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
   const noteLabelX = compactLayout ? 6 : nowX - UI_CONFIG.pitchNoteLabelOffsetPx;
   const melodyHeadX = compactLayout ? nowX - UI_CONFIG.pitchHeadGapPx : noteLabelX - UI_CONFIG.pitchHeadGapPx;
@@ -1461,7 +1612,10 @@ function drawPitchLane(beat) {
   const voiceClipRight = compactLayout ? nowX - 2 : noteLabelX - 2;
   els.intonationReadout.style.left = `${nowX + 12}px`;
   els.intonationReadout.style.right = 'auto';
+  const visibleStart = displayBeat - historyBeats - 1;
+  const visibleEnd = displayBeat + futureBeats + 1;
 
+  if (!window.PianoRoll) {
   ctx.textBaseline = 'middle';
   ctx.font = `${rect.width < 700 ? 9 : 10}px Inter, sans-serif`;
   for (let pitch = Math.ceil(bounds.min); pitch <= Math.floor(bounds.max); pitch += 1) {
@@ -1485,8 +1639,6 @@ function drawPitchLane(beat) {
     }
   }
 
-  const visibleStart = displayBeat - historyBeats - 1;
-  const visibleEnd = displayBeat + futureBeats + 1;
   ctx.save();
   ctx.beginPath(); ctx.rect(plot.left, 0, plot.right - plot.left, plot.bottom); ctx.clip();
   rhythmGridLines(state.occurrenceMeasures, visibleStart, visibleEnd).forEach((line) => {
@@ -1533,6 +1685,20 @@ function drawPitchLane(beat) {
       ctx.fillText(lyric, x + 2, y - blockHeight / 2 - 2);
     }
   });
+  } else {
+    const sharedBase = PianoRoll.drawBase(ctx, {
+      width: rect.width, height: rect.height, plot, bounds,
+      viewStart: displayBeat - historyBeats, viewEnd: displayBeat + futureBeats,
+      gridLines: rhythmGridLines(state.occurrenceMeasures, visibleStart, visibleEnd).map(line => ({
+        ...line,
+        label: line.label && Math.abs(timeToX(line.beat, displayBeat, plot.left, plot.right, historyBeats, futureBeats) - nowX) > 34 ? line.label : '',
+      })),
+      measures: state.occurrenceMeasures, targetEvents: state.runtime.targetEvents,
+      pitchOffset: state.transpose, activeBeat: displayBeat, lyricScale: state.lyricTextScale,
+      compact: compactLayout, targetToleranceCents: UI_CONFIG.targetToleranceCents, showPitchLabels: false,
+    });
+    rowHeight = sharedBase.rowHeight;
+  }
   if (state.showIntervals) {
     drawMelodicIntervalArrows(ctx, state.runtime.targetEvents,
       (eventBeat) => timeToX(eventBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats),
@@ -1702,7 +1868,7 @@ function render() {
   drawPitchLane(currentPianoRollBeat(snapshot));
   renderReadout(snapshot.beat, snapshot.running);
   renderSyncDebug(snapshot);
-  if (snapshot.running || state.microphoneStatus === 'active' || state.pitchViewport?.animating) state.rafId = requestAnimationFrame(render); else state.rafId = null;
+  if (snapshot.running || state.microphoneStatus === 'active' || (!state.gridInspect.active && state.pitchViewport?.animating)) state.rafId = requestAnimationFrame(render); else state.rafId = null;
 }
 
 function updateMetronomeControl() {
@@ -1716,8 +1882,9 @@ function playMetronomeClick(accented) {
   if (volume <= 0) return;
   const AudioContextClass = window.AudioContext || window.webkitAudioContext;
   if (!AudioContextClass) return;
-  state.metronomeContext ??= new AudioContextClass({ latencyHint: 'interactive' });
-  const context = state.metronomeContext;
+  if (!echoCancellationUI?.enabled()) state.metronomeContext ??= new AudioContextClass({ latencyHint: 'interactive' });
+  const context = echoCancellationUI?.enabled() ? state.playbackMixer.context : state.metronomeContext;
+  if (!context) return;
   if (context.state === 'suspended') context.resume();
   const now = context.currentTime;
   const oscillator = context.createOscillator();
@@ -1727,7 +1894,7 @@ function playMetronomeClick(accented) {
   oscillator.frequency.exponentialRampToValueAtTime(accented ? 760 : 570, now + 0.045);
   gain.gain.setValueAtTime(Math.max(0.0001, volume * (accented ? 0.5 : 0.34)), now);
   gain.gain.exponentialRampToValueAtTime(0.0001, now + (accented ? 0.075 : 0.055));
-  oscillator.connect(gain).connect(context.destination);
+  oscillator.connect(gain).connect(echoCancellationUI?.enabled() ? state.playbackMixer.referenceOutput : context.destination);
   oscillator.start(now); oscillator.stop(now + 0.08);
 }
 
@@ -1831,7 +1998,10 @@ async function navigateToMeasure(index) {
   const seekToken = ++state.transportSeekToken;
   const shouldResume = state.clock.running || state.transportSeekResumeRequested;
   state.transportSeekResumeRequested = shouldResume;
-  if (state.clock.running) state.clock.pause();
+  if (state.clock.running) {
+    state.clock.pause();
+    await releaseMicrophoneIfUnused();
+  }
   pauseVoiceStems();
   seekToMeasure(index, false, false);
   const selectedMeasure = state.occurrenceMeasures[state.selectedMeasureIndex];
@@ -1873,6 +2043,8 @@ async function navigateToMeasure(index) {
   state.transportSeekResumeRequested = false;
   if (resume) {
     try {
+      if (state.microphoneStatus !== 'active') await toggleMicrophone();
+      if (echoCancellationUI?.enabled() && state.microphoneStatus !== 'active') return;
       await state.playbackMixer.resume(media);
       syncBackingLevel();
       syncVoiceStemLevels();
@@ -1887,6 +2059,8 @@ async function navigateToMeasure(index) {
 }
 
 function seekToMeasure(index, autoPlay = false, preRoll = true) {
+  PianoRoll.stopPreview();
+  if (state.automaticBestRecording.capture) void stopAutomaticBestCapture({ discard: true });
   state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
   state.resumeCheckpointBeat = null;
   state.gridInspect.active = false;
@@ -1928,6 +2102,8 @@ function prepareAttemptResume() {
 }
 
 async function togglePlayback() {
+  PianoRoll.stopPreview();
+  state.gridNavigation?.cancel();
   if (state.personalRecording.capture) {
     showToast('Usa “Interrompi” per terminare la registrazione personale.');
     return;
@@ -1945,13 +2121,19 @@ async function togglePlayback() {
     return;
   }
   if (playbackSnapshot().beat >= totalBeats()) state.clock.seekBeat(0);
+  echoCancellationUI?.checkpoint('playback-toggle');
+  if (!state.clock.running && echoCancellationUI?.enabled() && !echoCancellationUI.ready()) {
+    if (!echoDiagnosticsUI?.isBusy() && !await microphoneCalibrationUI.verifyPlayback()) return;
+  }
   if (state.clock.running) {
     const checkpointBeat = playbackSnapshot().beat;
     state.clock.pause();
+    void stopAutomaticBestCapture({ discard: true });
     rememberAttemptCheckpoint(checkpointBeat);
     savePitchHistory();
+    await releaseMicrophoneIfUnused();
   } else {
-    state.gridInspect.active = false;
+    state.gridNavigation?.reset();
     prepareAttemptResume();
     if (state.pendingAudioTime != null) {
       await waitForMediaReady(els.backingAudio, 3);
@@ -1969,11 +2151,29 @@ async function togglePlayback() {
       }
     }
     if (state.microphoneStatus !== 'active') await toggleMicrophone();
+    if (echoCancellationUI?.enabled() && state.microphoneStatus !== 'active') return;
+    if (echoCancellationUI?.enabled() && !state.playbackMixer.referenceCovers([els.backingAudio, ...state.voiceStemAudio.values()])) {
+      await stopMicrophone(); echoCancellationUI.invalidate('reference-incomplete');
+      showToast('Il browser non rende disponibile tutta la base per la cancellazione. Usa le cuffie.'); return;
+    }
+    await loadAutomaticBestPreference();
     if (!state.attemptActive) {
       state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
+      startAutomaticBestCapture();
     }
-    try { await state.clock.play(); applyPendingAudioSeek(); }
-    catch (error) { console.error('Audio playback failed', error, els.backingAudio.error); showToast(`Audio non avviato: ${error?.message || 'sorgente non disponibile'}`); }
+    try {
+      state.clock.finishWarmup();
+      restoreCalibrationMediaLoops();
+      state.playbackMixer.muteForCalibration(false);
+      await state.clock.play();
+      echoCancellationUI?.checkpoint('playback-started');
+      applyPendingAudioSeek();
+      markAutomaticBestPlaybackStarted();
+    } catch (error) {
+      void stopAutomaticBestCapture({ discard: true });
+      console.error('Audio playback failed', error, els.backingAudio.error);
+      showToast(`Audio non avviato: ${error?.message || 'sorgente non disponibile'}`);
+    }
     state.attemptActive = state.clock.running;
   }
   updatePlaybackButton();
@@ -1982,84 +2182,43 @@ async function togglePlayback() {
 
 function bindGridInspection() {
   const canvas = els.pitchLane;
-  canvas.title = 'In pausa: trascina orizzontalmente per ispezionare. Play riprende dal punto memorizzato, con una battuta di preascolto.';
-  const reset = () => {
-    state.gridInspect = { active: false, viewBeat: currentPianoRollBeat(), pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null };
-    render();
-  };
-  canvas.addEventListener('dblclick', () => { if (!state.clock.running) reset(); });
-  canvas.addEventListener('wheel', (event) => {
-    if (state.clock.running) return;
-    event.preventDefault();
-    const view = state.gridInspect;
-    if (!view.active) { view.active = true; view.viewBeat = currentPianoRollBeat(); }
-    const span = (state.pitchViewport?.bounds.max ?? 67) - (state.pitchViewport?.bounds.min ?? 55);
-    if (event.ctrlKey || event.metaKey) {
-      const zoom = Math.exp(-event.deltaY * .0025);
-      const minimumTimeZoom = matchMedia('(max-width: 960px)').matches ? 1 : .55;
-      view.timeZoom = Math.max(minimumTimeZoom, Math.min(5, view.timeZoom * zoom));
-      view.pitchZoom = Math.max(.55, Math.min(5, view.pitchZoom * zoom));
-    } else if (event.shiftKey || Math.abs(event.deltaX) > Math.abs(event.deltaY)) {
-      view.viewBeat = Math.max(0, Math.min(totalBeats(), view.viewBeat + (event.deltaX || event.deltaY) * .015 / view.timeZoom));
-    } else {
-      view.pitchOffset += event.deltaY * span / Math.max(1, canvas.clientHeight) * .7 / view.pitchZoom;
-    }
-    render();
-  }, { passive: false });
-  const horizontalSpan = () => {
-    const inspect = state.gridInspect;
-    const compactLayout = matchMedia('(max-width: 960px)').matches;
-    const baseHistory = compactLayout ? UI_CONFIG.mobileHistoryBeats : UI_CONFIG.historyBeats;
-    const baseFuture = compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats;
-    return (baseHistory + baseFuture) / (inspect.active ? inspect.timeZoom : 1);
-  };
-  const beatAtPointer = (clientX) => {
-    const rect = canvas.getBoundingClientRect();
-    const plot = { left: rect.width < 700 ? 48 : 58, right: rect.width - 8 };
-    const inspect = state.gridInspect;
-    const displayBeat = inspect.active ? inspect.viewBeat : currentPianoRollBeat();
-    const compactLayout = matchMedia('(max-width: 960px)').matches;
-    const historyBeats = (compactLayout ? UI_CONFIG.mobileHistoryBeats : UI_CONFIG.historyBeats)
-      / (inspect.active ? inspect.timeZoom : 1);
-    const futureBeats = (compactLayout ? UI_CONFIG.mobileFutureBeats : UI_CONFIG.futureBeats)
-      / (inspect.active ? inspect.timeZoom : 1);
-    const nowX = timeToX(displayBeat, displayBeat, plot.left, plot.right, historyBeats, futureBeats);
-    const ratio = (clientX - rect.left - nowX) / Math.max(1, plot.right - plot.left);
-    return Math.max(0, Math.min(totalBeats(), displayBeat + ratio * (historyBeats + futureBeats)));
-  };
-  canvas.addEventListener('pointerdown', (event) => {
-    if (state.clock.running || event.button !== 0) return;
-    const view = state.gridInspect;
-    if (!view.active) { view.active = true; view.viewBeat = currentPianoRollBeat(); }
-    state.gridInspect.pointer = { id: event.pointerId, startX: event.clientX, startViewBeat: view.viewBeat, moved: false };
-    canvas.setPointerCapture(event.pointerId);
-    canvas.classList.add('is-inspecting');
-    event.preventDefault();
+  state.gridNavigation = PianoRoll.bindNavigation(canvas, {
+    enabled: () => Boolean(state.clock && !state.clock.running && !state.personalRecording.capture),
+    geometry: () => state.gridGeometry,
+    activate: () => {
+      if (!state.gridInspect.active) {
+        state.gridInspect.active = true;
+        state.gridInspect.viewBeat = currentPianoRollBeat();
+        state.gridInspect.baseBounds = { ...pitchBounds(currentPianoRollBeat()) };
+        render();
+      }
+    },
+    minZoom: .25,
+    view: () => ({ zoom: state.gridInspect.timeZoom, pitchZoom: state.gridInspect.pitchZoom, pitchOffset: state.gridInspect.pitchOffset }),
+    change: values => {
+      const view = state.gridInspect, g = state.gridGeometry;
+      if (values.zoom != null) view.timeZoom = values.zoom;
+      if (values.pitchZoom != null) view.pitchZoom = values.pitchZoom;
+      if (values.pitchOffset != null) view.pitchOffset = Math.max(-128, Math.min(128, values.pitchOffset));
+      if (values.centerBeat != null) {
+        // The live NOW position is intentionally off-center. Convert the
+        // geometric center back to its history/future reference position.
+        view.viewBeat = Math.max(0, Math.min(totalBeats(), values.centerBeat
+          - (g.futureBeats - g.historyBeats) / 2 * (g.timeZoom / view.timeZoom)));
+      }
+      render();
+    },
+    reset: () => {
+      state.gridInspect = { active: false, viewBeat: currentPianoRollBeat(), pitchOffset: 0, timeZoom: 1, pitchZoom: 1, pointer: null };
+      render();
+    },
+    notes: () => state.runtime?.targetEvents || [],
+    pitchOffset: () => state.transpose,
+    notePlayback: note => ({
+      duration: (state.runtime.secondsAtBeat(note.onsetBeat + note.durationBeats) - state.runtime.secondsAtBeat(note.onsetBeat)) / Number(els.playbackSpeed.value),
+      volume: Number(els.volume.value) / 100,
+    }),
   });
-  canvas.addEventListener('pointermove', (event) => {
-    const pointer = state.gridInspect.pointer;
-    if (pointer?.id !== event.pointerId) return;
-    const rect = canvas.getBoundingClientRect();
-    const plotWidth = Math.max(1, rect.width - (rect.width < 700 ? 48 : 58) - 8);
-    const deltaX = event.clientX - pointer.startX;
-    if (Math.abs(deltaX) >= 3) pointer.moved = true;
-    state.gridInspect.viewBeat = Math.max(0, Math.min(totalBeats(),
-      pointer.startViewBeat - deltaX / plotWidth * horizontalSpan()));
-    render();
-    event.preventDefault();
-  });
-  const finishInspection = (event, cancelled = false) => {
-    const pointer = state.gridInspect.pointer;
-    if (!pointer || pointer.id !== event.pointerId) return;
-    state.gridInspect.pointer = null;
-    canvas.releasePointerCapture?.(event.pointerId);
-    canvas.classList.remove('is-inspecting');
-    if (cancelled || state.clock.running) return;
-    if (!pointer.moved) state.gridInspect.viewBeat = beatAtPointer(event.clientX);
-    render();
-  };
-  canvas.addEventListener('pointerup', finishInspection);
-  canvas.addEventListener('pointercancel', (event) => finishInspection(event, true));
 }
 
 function showToast(message) {
@@ -2073,6 +2232,13 @@ function updateMicrophoneButton() {
 }
 
 async function stopMicrophone() {
+  echoCancellationUI?.checkpoint('microphone-stop-request');
+  await echoDiagnosticsUI?.stop('microphone-stopped');
+  if (state.clock?.warmupTime != null) {
+    state.clock.pause(); pauseVoiceStems();
+  }
+  restoreCalibrationMediaLoops();
+  state.playbackMixer.muteForCalibration(false);
   state.microphoneRequestGeneration += 1;
   document.getElementById('microphone-level').value = 0;
   const stream = state.microphoneStream;
@@ -2080,6 +2246,8 @@ async function stopMicrophone() {
   const source = state.microphoneSource;
   const analyser = state.microphoneAnalyser;
   const silencer = state.microphoneSilencer;
+  echoCancellationUI?.detach();
+  microphoneCalibrationUI?.refresh();
   state.microphoneStream = null; state.microphoneContext = null; state.microphoneSource = null; state.microphoneAnalyser = null; state.microphoneSilencer = null; state.microphoneBuffer = null;
   stream?.getTracks().forEach((track) => track.stop());
   source?.disconnect();
@@ -2095,10 +2263,40 @@ async function stopMicrophone() {
   }
 }
 
+function microphoneCaptureActive() {
+  return Boolean(microphoneCalibrationUI?.isBusy() || echoCancellationUI?.isBusy() || state.groundTruth.capture || state.benchmark.capture || state.personalRecording.capture
+    || state.automaticBestRecording.capture || echoDiagnosticsUI?.isBusy());
+}
+
+async function releaseMicrophoneIfUnused({ force = false } = {}) {
+  if (!force && microphoneCaptureActive()) return false;
+  if (state.microphoneStatus === 'idle' && !state.microphoneStream) return false;
+  await stopMicrophone();
+  return true;
+}
+
+async function pausePracticeForNonExercise({ preserveCalibration = false } = {}) {
+  if (preserveCalibration && state.clock?.warmupTime != null && microphoneCalibrationUI?.activeSettings()) return;
+  if (state.clock?.running && !microphoneCaptureActive()) {
+    const checkpointBeat = playbackSnapshot().beat;
+    state.clock.pause();
+    rememberAttemptCheckpoint(checkpointBeat);
+    savePitchHistory();
+    updatePlaybackButton();
+    render();
+  }
+  if (preserveCalibration && state.microphoneStatus === 'active' && microphoneCalibrationUI?.activeSettings()) return;
+  await releaseMicrophoneIfUnused();
+}
+
 async function suspendPracticeForBackground() {
+  await echoDiagnosticsUI?.stop('background');
+  if (microphoneCalibrationUI?.isBusy()) microphoneCalibrationUI.cancel('Misura annullata perché la pagina non è più visibile.');
+  if (echoCancellationUI?.isBusy()) echoCancellationUI.cancel('Controllo annullato perché la pagina non è più visibile.');
   if (state.clock?.running) {
     const checkpointBeat = playbackSnapshot().beat;
     state.clock.pause();
+    void stopAutomaticBestCapture({ discard: true });
     rememberAttemptCheckpoint(checkpointBeat);
     updatePlaybackButton();
   }
@@ -2116,30 +2314,41 @@ async function suspendPracticeForBackground() {
     stopPersonalRecordingCapture({ discard: true });
     els.personalRecordingStatus.textContent = 'Registrazione annullata perché la pagina non è più visibile.';
   }
+  if (state.automaticBestRecording.capture) await stopAutomaticBestCapture({ discard: true });
   if (state.personalRecording.replay) stopPersonalRecordingReplay();
   if (state.microphoneStatus !== 'idle' || state.microphoneStream) await stopMicrophone();
 }
 
 async function toggleMicrophone() {
   if (state.microphoneStatus === 'active') { await stopMicrophone(); return; }
+  if (echoCancellationUI?.enabled() && !echoCancellationUI.ready() && !microphoneCalibrationUI?.isBusy() && !echoDiagnosticsUI?.isBusy()) {
+    await microphoneCalibrationUI.open(); return;
+  }
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
     state.microphoneStatus = 'error'; updateMicrophoneButton();
     showToast('Il microfono richiede un contesto sicuro (HTTPS) e un browser compatibile.'); render(); return;
   }
   state.microphoneStatus = 'requesting'; updateMicrophoneButton();
+  state.microphoneFailureMessage = null;
   const requestGeneration = ++state.microphoneRequestGeneration;
   // Granting microphone permission can itself change the devices exposed by
   // the browser. Do not mistake that privacy-related update for a real output
   // switch and immediately ask the user the same question again.
   state.ignoreAudioDeviceChangesUntil = Date.now() + 5000;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: true, channelCount: 1 }, video: false });
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: !echoCancellationUI?.enabled(), channelCount: 1 }, video: false });
     if (requestGeneration !== state.microphoneRequestGeneration || document.visibilityState === 'hidden') {
       stream.getTracks().forEach((track) => track.stop());
       if (requestGeneration === state.microphoneRequestGeneration) {
         state.microphoneStatus = 'idle'; updateMicrophoneButton(); render();
       }
       return;
+    }
+    let analysisStream = stream;
+    try { analysisStream = await echoCancellationUI?.attach(stream) || stream; }
+    catch (error) { stream.getTracks().forEach(track => track.stop()); throw error; }
+    if (requestGeneration !== state.microphoneRequestGeneration) {
+      stream.getTracks().forEach(track => track.stop()); echoCancellationUI?.detach(); return;
     }
     const AudioContextClass = window.AudioContext || window.webkitAudioContext;
     const context = new AudioContextClass({ latencyHint: 'interactive' }); await context.resume();
@@ -2148,13 +2357,14 @@ async function toggleMicrophone() {
     // 60 Hz worker cadence this reacts faster than the former 4096-sample
     // main-thread detector and leaves ample CPU headroom for compositing.
     const analyser = context.createAnalyser(); analyser.fftSize = 2048; analyser.smoothingTimeConstant = 0;
-    const source = context.createMediaStreamSource(stream);
+    const source = context.createMediaStreamSource(analysisStream);
     // Audio nodes are pull-driven. Route the analyser to a muted sink so the
     // browser processes the microphone graph without feeding it back to the room.
     const silencer = context.createGain(); silencer.gain.value = 0;
     source.connect(analyser); analyser.connect(silencer); silencer.connect(context.destination);
     if (requestGeneration !== state.microphoneRequestGeneration || document.visibilityState === 'hidden') {
       stream.getTracks().forEach((track) => track.stop()); source.disconnect(); analyser.disconnect(); silencer.disconnect();
+      echoCancellationUI?.detach();
       try { await context.close(); } catch (_) {}
       if (requestGeneration === state.microphoneRequestGeneration) {
         state.microphoneStatus = 'idle'; updateMicrophoneButton(); render();
@@ -2165,12 +2375,16 @@ async function toggleMicrophone() {
     state.pitchWorkerDisabled = false; state.pitchWorkerInFlight = false;
     state.microphoneBuffer = new Float32Array(analyser.fftSize); state.pitchSmoother.reset(); beginPitchTake();
     state.microphoneStatus = 'active'; updateMicrophoneButton();
+    await microphoneCalibrationUI?.microphoneReady();
+    if (requestGeneration !== state.microphoneRequestGeneration || state.microphoneStatus !== 'active') return;
+    applyLiveTrackerSettings();
     startPitchAnalysisLoop();
     showToast('Microfono attivo. Per risultati migliori usa le cuffie.');
     if (!state.rafId) state.rafId = requestAnimationFrame(render);
   } catch (error) {
     if (requestGeneration !== state.microphoneRequestGeneration) return;
     state.microphoneStatus = error?.name === 'NotAllowedError' ? 'denied' : 'error';
+    state.microphoneFailureMessage = error?.message || 'Microfono non disponibile.';
     updateMicrophoneButton(); showToast(state.microphoneStatus === 'denied' ? 'Permesso microfono negato.' : 'Impossibile avviare il microfono.'); render();
   }
 }
@@ -2261,6 +2475,7 @@ async function refreshGroundTruthCount() {
 }
 
 async function openGroundTruthDialog() {
+  await pausePracticeForNonExercise();
   await refreshGroundTruthCount();
   els.groundTruthStatus.textContent = 'Posizionati all’inizio della porzione, poi avvia l’acquisizione e il playback.';
   if (!els.groundTruthDialog.open) els.groundTruthDialog.showModal();
@@ -2303,7 +2518,12 @@ async function approveGroundTruthCapture() {
     els.groundTruthStatus.textContent = `Campione approvato: battute/beat ${capture.startBeat.toFixed(2)}–${endBeat.toFixed(2)}.`;
     await refreshGroundTruthCount(); showToast('Campione ground truth salvato localmente.');
   };
-  capture.recorder.onstop = () => save().catch((error) => { els.groundTruthStatus.textContent = `Salvataggio non riuscito: ${error.message}`; });
+  capture.recorder.onstop = () => save()
+    .catch((error) => { els.groundTruthStatus.textContent = `Salvataggio non riuscito: ${error.message}`; })
+    .finally(() => {
+      state.groundTruth.capture = null;
+      void releaseMicrophoneIfUnused();
+    });
   capture.recorder.stop();
 }
 
@@ -2900,12 +3120,18 @@ function drawBenchmarkAnalysisRoll(take) {
   const viewStartBeat = Math.max(startBeat, Math.min(endBeat - beatSpan, view.centerBeat - beatSpan / 2));
   const viewEndBeat = viewStartBeat + beatSpan;
   const basePitchSpan = Math.max(2, baseMaxPitch - baseMinPitch);
-  const pitchSpan = Math.max(2, basePitchSpan / view.pitchZoom);
+  const pitchSpan = basePitchSpan / view.pitchZoom;
   const baseCenterPitch = (baseMinPitch + baseMaxPitch) / 2 + view.pitchOffset;
   const minPitch = baseCenterPitch - pitchSpan / 2, maxPitch = baseCenterPitch + pitchSpan / 2;
   const span = maxPitch - minPitch;
   const xAt = (beat) => plot.left + (beat - viewStartBeat) / beatSpan * (plot.right - plot.left);
   const yAt = (pitch) => plot.bottom - (pitch - minPitch) / span * (plot.bottom - plot.top);
+  view.centerBeat = (viewStartBeat + viewEndBeat) / 2;
+  state.benchmark.rollGeometry = { plot, bounds: { min: minPitch, max: maxPitch },
+    viewStart: viewStartBeat, viewEnd: viewEndBeat, xAtBeat: xAt, yAtPitch: yAt,
+    rowHeight: (plot.bottom - plot.top) / span };
+  state.benchmark.navigation?.refresh();
+  ctx.save(); ctx.beginPath(); ctx.rect(plot.left, plot.top, plot.right - plot.left, plot.bottom - plot.top); ctx.clip();
   for (let pitch = Math.ceil(minPitch); pitch <= Math.floor(maxPitch); pitch += 1) {
     const y = yAt(pitch);
     const pitchClass = ((pitch % 12) + 12) % 12;
@@ -2994,6 +3220,7 @@ function drawBenchmarkAnalysisRoll(take) {
   }
   const inspectedBeat = view.inspectBeat;
   if (Number.isFinite(inspectedBeat) && inspectedBeat >= viewStartBeat && inspectedBeat <= viewEndBeat && Math.abs(inspectedBeat - selectedBeat) > .001) { const x = xAt(inspectedBeat); ctx.strokeStyle = 'rgba(241,244,241,.52)'; ctx.setLineDash([3, 3]); ctx.beginPath(); ctx.moveTo(Math.round(x) + .5, plot.top); ctx.lineTo(Math.round(x) + .5, plot.bottom); ctx.stroke(); ctx.setLineDash([]); }
+  ctx.restore();
   ctx.fillStyle = '#718788'; ctx.font = '11px Inter, sans-serif'; ctx.textAlign = 'left'; ctx.fillText('inizio', plot.left, height - 9); ctx.textAlign = 'right'; ctx.fillText('fine', plot.right, height - 9);
 }
 
@@ -3088,6 +3315,8 @@ function renderBenchmarkAnalysisMetrics(take) {
 }
 
 function resetBenchmarkAnalysisView(preserveSelection = true) {
+  PianoRoll.stopPreview();
+  state.benchmark.navigation?.cancel();
   const selectedBeat = preserveSelection ? state.benchmark.analysisView.selectedBeat : null;
   state.benchmark.analysisView = { timeZoom: 1, pitchZoom: 1, centerBeat: null, pitchOffset: 0, pointer: null, inspectBeat: null, selectedBeat };
   const take = selectedBenchmarkTake();
@@ -3179,68 +3408,39 @@ function updateBenchmarkInspection(take, event) {
 
 function bindBenchmarkAnalysisCanvas() {
   const canvas = els.benchmarkAnalysisRoll;
-  canvas.addEventListener('wheel', (event) => {
-    const take = selectedBenchmarkTake(); if (!take) return;
-    event.preventDefault();
-    const view = state.benchmark.analysisView;
-    const rect = canvas.getBoundingClientRect();
-    const factor = event.deltaY < 0 ? 1.22 : 1 / 1.22;
-    const xRatio = Math.max(0, Math.min(1, (event.clientX - rect.left - 52) / Math.max(1, rect.width - 66)));
-    const yRatio = Math.max(0, Math.min(1, (event.clientY - rect.top - 16) / Math.max(1, rect.height - 47)));
-    const startBeat = Number(take.startBeat) || 0;
-    const endBeat = Math.max(startBeat + .001, Number(take.endBeat) || startBeat + 1);
-    const totalBeatSpan = endBeat - startBeat;
-    view.centerBeat ??= (startBeat + endBeat) / 2;
-    if (event.shiftKey) {
-      const bounds = benchmarkPitchBounds(take);
-      const basePitchSpan = Math.max(2, bounds.max - bounds.min);
-      const oldSpan = Math.max(2, basePitchSpan / view.pitchZoom);
-      const oldCenter = (bounds.min + bounds.max) / 2 + view.pitchOffset;
-      const anchorPitch = oldCenter + oldSpan / 2 - yRatio * oldSpan;
-      view.pitchZoom = Math.max(.65, Math.min(8, view.pitchZoom * factor));
-      const newSpan = Math.max(2, basePitchSpan / view.pitchZoom);
-      view.pitchOffset = anchorPitch - (bounds.min + bounds.max) / 2 - newSpan / 2 + yRatio * newSpan;
-    } else {
-      const oldSpan = totalBeatSpan / view.timeZoom;
-      const oldStart = Math.max(startBeat, Math.min(endBeat - oldSpan, view.centerBeat - oldSpan / 2));
-      const anchorBeat = oldStart + xRatio * oldSpan;
-      view.timeZoom = Math.max(1, Math.min(20, view.timeZoom * factor));
-      const newSpan = totalBeatSpan / view.timeZoom;
-      const newStart = Math.max(startBeat, Math.min(endBeat - newSpan, anchorBeat - xRatio * newSpan));
-      view.centerBeat = newStart + newSpan / 2;
-    }
-    updateBenchmarkInspection(take, event); drawBenchmarkAnalysisRoll(take);
-  }, { passive: false });
-  canvas.addEventListener('pointerdown', (event) => {
-    const take = selectedBenchmarkTake(); if (!take) return;
-    const view = state.benchmark.analysisView;
-    view.pointer = { id: event.pointerId, x: event.clientX, y: event.clientY, centerBeat: view.centerBeat, pitchOffset: view.pitchOffset, moved: false };
-    canvas.setPointerCapture(event.pointerId); canvas.classList.add('is-panning'); updateBenchmarkInspection(take, event); drawBenchmarkAnalysisRoll(take);
+  const surface = document.createElement('div'); surface.className = 'analysis-roll-surface';
+  canvas.before(surface); surface.append(canvas);
+  state.benchmark.navigation = PianoRoll.bindNavigation(canvas, {
+    enabled: () => Boolean(selectedBenchmarkTake() && !els.benchmarkAnalysis.hidden),
+    geometry: () => state.benchmark.rollGeometry,
+    view: () => ({ zoom: state.benchmark.analysisView.timeZoom, pitchZoom: state.benchmark.analysisView.pitchZoom, pitchOffset: state.benchmark.analysisView.pitchOffset }),
+    change: values => {
+      const view = state.benchmark.analysisView;
+      if (values.zoom != null) view.timeZoom = values.zoom;
+      if (values.pitchZoom != null) view.pitchZoom = values.pitchZoom;
+      if (values.centerBeat != null) view.centerBeat = values.centerBeat;
+      if (values.pitchOffset != null) view.pitchOffset = Math.max(-128, Math.min(128, values.pitchOffset));
+      drawBenchmarkAnalysisRoll(selectedBenchmarkTake());
+    },
+    reset: () => resetBenchmarkAnalysisView(),
+    notes: () => selectedBenchmarkTake()?.targetEvents || [],
+    pitchOffset: () => selectedBenchmarkTake()?.transpose || 0,
+    notePlayback: note => {
+      // Preview is isolated from the original recording and its playhead.
+      els.benchmarkAnalysisAudio.pause();
+      return { volume: Number(els.volume.value) / 100 };
+    },
+    tap: (event, note) => {
+      const take = selectedBenchmarkTake();
+      if (take) selectBenchmarkAnalysisBeat(take, note?.onsetBeat ?? benchmarkBeatAtCanvasX(take, event.clientX));
+    },
+    hover: event => { const take = selectedBenchmarkTake(); if (take) updateBenchmarkInspection(take, event); },
   });
-  canvas.addEventListener('pointermove', (event) => {
-    const take = selectedBenchmarkTake(), view = state.benchmark.analysisView; if (!take) return;
-    if (!view.pointer || view.pointer.id !== event.pointerId) { updateBenchmarkInspection(take, event); drawBenchmarkAnalysisRoll(take); return; }
-    if (Math.hypot(event.clientX - view.pointer.x, event.clientY - view.pointer.y) > 5) view.pointer.moved = true;
-    const rect = canvas.getBoundingClientRect(); const total = (take.endBeat ?? 1) - (take.startBeat ?? 0);
-    view.centerBeat = view.pointer.centerBeat - (event.clientX - view.pointer.x) * (total / view.timeZoom) / Math.max(1, rect.width - 66);
-    const pitchRange = Math.max(2, 12 / view.pitchZoom);
-    view.pitchOffset = view.pointer.pitchOffset + (event.clientY - view.pointer.y) * pitchRange / Math.max(1, rect.height - 47);
-    updateBenchmarkInspection(take, event); drawBenchmarkAnalysisRoll(take);
-  });
-  const finish = (event, cancelled = false) => {
-    const view = state.benchmark.analysisView, pointer = view.pointer;
-    if (pointer?.id !== event.pointerId) return;
-    canvas.releasePointerCapture?.(event.pointerId); view.pointer = null; canvas.classList.remove('is-panning');
-    if (!cancelled && !pointer.moved) { const take = selectedBenchmarkTake(); if (take) selectBenchmarkAnalysisBeat(take, benchmarkBeatAtCanvasX(take, event.clientX)); }
-  };
-  canvas.addEventListener('pointerup', (event) => finish(event));
-  canvas.addEventListener('pointercancel', (event) => finish(event, true));
-  canvas.addEventListener('dblclick', () => { void toggleBenchmarkPlaybackFromSelection(); });
-  canvas.addEventListener('keydown', (event) => {
+  canvas.addEventListener('keydown', event => {
     if (event.code !== 'Space') return;
-    event.preventDefault(); void toggleBenchmarkPlaybackFromSelection();
+    event.preventDefault(); PianoRoll.stopPreview(); void toggleBenchmarkPlaybackFromSelection();
   });
-  canvas.addEventListener('pointerleave', () => { if (!state.benchmark.analysisView.pointer) { state.benchmark.analysisView.inspectBeat = null; els.benchmarkAnalysisInspect.textContent = 'Panoramica completa'; drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); } });
+  els.benchmarkAnalysisAudio.addEventListener('play', () => PianoRoll.stopPreview());
 }
 
 function feedbackSignature(take) { return ['feedback-v3-musical', take.id, take.frames?.length ?? 0, take.targetEvents?.length ?? 0, take.stoppedAt ?? ''].join(':'); }
@@ -3361,6 +3561,8 @@ function openBenchmarkAnalysis() {
 }
 
 function closeBenchmarkAnalysis() {
+  PianoRoll.stopPreview();
+  state.benchmark.navigation?.cancel();
   els.benchmarkAnalysisAudio.pause();
   stopBenchmarkPlaybackAnimation();
   els.benchmarkAnalysis.hidden = true;
@@ -3399,6 +3601,7 @@ async function openBenchmarkDialog() {
   }
   state.benchmark.sessionId ??= crypto.randomUUID();
   if (state.clock.running) state.clock.pause();
+  await releaseMicrophoneIfUnused();
   // A benchmark take must start from an empty pitch lane. This only clears
   // transient Practice history for the selected part; accepted recordings in
   // IndexedDB are not touched.
@@ -3508,6 +3711,7 @@ function finalizeBenchmarkCapture(capture) {
     configuration: benchmarkConfiguration(), frames: capture.frames, audio,
   };
   state.benchmark.capture = null;
+  void releaseMicrophoneIfUnused();
   state.benchmark.previewUrl && URL.revokeObjectURL(state.benchmark.previewUrl);
   state.benchmark.previewUrl = URL.createObjectURL(audio);
   els.benchmarkStatus.textContent = `${capture.frames.length} frame acquisiti. Ascolta, accetta oppure scarta il take.`;
@@ -3566,6 +3770,7 @@ async function acceptBenchmarkTake() {
 function discardBenchmarkTake() {
   const capture = state.benchmark.capture;
   if (capture) { capture.recorder.onstop = () => {}; capture.recorder.stop(); state.benchmark.capture = null; }
+  void releaseMicrophoneIfUnused();
   els.benchmarkRecording.hidden = true;
   state.benchmark.pending = null;
   if (state.benchmark.previewUrl) URL.revokeObjectURL(state.benchmark.previewUrl);
@@ -3600,6 +3805,132 @@ function revokePersonalRecordingPreview() {
   state.personalRecording.previewUrl = null;
 }
 
+function automaticBestStatusText() {
+  if (echoCancellationUI?.enabled()) return 'Sospeso con altoparlanti · si salva solo il grafico';
+  if (state.automaticBestRecording.loading) return 'Aggiornamento…';
+  if (state.automaticBestRecording.error) return state.automaticBestRecording.error;
+  return state.automaticBestRecording.enabled
+    ? 'Attivo · si aggiorna solo con un nuovo best'
+    : 'Disattivo';
+}
+
+function renderAutomaticBestPreference() {
+  els.personalRecordingAutoBest.checked = state.automaticBestRecording.enabled === true;
+  els.personalRecordingAutoBest.disabled = state.automaticBestRecording.loading;
+  els.personalRecordingAutoBestStatus.textContent = automaticBestStatusText();
+}
+
+async function loadAutomaticBestPreference(force = false) {
+  const automatic = state.automaticBestRecording;
+  if (!window.PersonalRecordings) return false;
+  if (!force && automatic.enabled != null) return automatic.enabled;
+  automatic.loading = true;
+  automatic.error = null;
+  renderAutomaticBestPreference();
+  try {
+    const result = await PersonalRecordings.automaticBest();
+    automatic.enabled = Boolean(result.enabled);
+  } catch (_) {
+    automatic.enabled = false;
+    automatic.error = 'Autorizzazione non disponibile. Riprova tra poco.';
+  } finally {
+    automatic.loading = false;
+    renderAutomaticBestPreference();
+  }
+  return automatic.enabled;
+}
+
+async function updateAutomaticBestPreference() {
+  const automatic = state.automaticBestRecording;
+  if (!window.PersonalRecordings || automatic.loading) return;
+  const enabled = els.personalRecordingAutoBest.checked;
+  automatic.loading = true;
+  automatic.error = null;
+  renderAutomaticBestPreference();
+  try {
+    const result = await PersonalRecordings.setAutomaticBest(enabled);
+    automatic.enabled = Boolean(result.enabled);
+    showToast(automatic.enabled ? 'Best audio automatico attivato.' : 'Best audio automatico disattivato.');
+  } catch (error) {
+    automatic.error = `Aggiornamento non riuscito: ${error.message}`;
+  } finally {
+    automatic.loading = false;
+    renderAutomaticBestPreference();
+  }
+}
+
+function automaticBestAttemptEligible() {
+  return state.automaticBestRecording.enabled === true
+    && !echoCancellationUI?.enabled()
+    && state.attemptStartedFromBeginning
+    && state.transpose === 0
+    && Number(els.playbackSpeed.value) === 1
+    && Boolean(window.MediaRecorder && state.microphoneStream && state.runtime && state.bundleManifest);
+}
+
+function startAutomaticBestCapture() {
+  if (state.automaticBestRecording.capture || !automaticBestAttemptEligible()) return;
+  const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
+    ? 'audio/webm;codecs=opus'
+    : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus' : '';
+  const options = { audioBitsPerSecond: 48_000 };
+  if (mimeType) options.mimeType = mimeType;
+  const recorder = new MediaRecorder(state.microphoneStream, options);
+  const capture = {
+    recorder, chunks: [], takeId: state.pitchTakeId, startedAtMs: performance.now(),
+    startAudioTimeSec: state.microphoneContext?.currentTime ?? 0, audioOffsetMs: 0,
+    playbackStarted: false, stopping: false, discarded: false,
+    pieceId: state.bundleManifest.piece_id, scoreVersionId: state.runtime.scoreVersionId,
+    partId: state.runtime.selectedPartId, playbackRate: Number(els.playbackSpeed.value),
+    transpose: state.transpose,
+  };
+  capture.promise = new Promise(resolve => { capture.resolve = resolve; });
+  recorder.ondataavailable = event => { if (event.data.size) capture.chunks.push(event.data); };
+  recorder.onstop = () => finalizeAutomaticBestCapture(capture);
+  recorder.start(250);
+  state.automaticBestRecording.capture = capture;
+}
+
+function markAutomaticBestPlaybackStarted() {
+  const capture = state.automaticBestRecording.capture;
+  if (!capture || capture.playbackStarted) return;
+  capture.playbackStarted = true;
+  capture.audioOffsetMs = Math.max(0, Math.round(
+    ((state.microphoneContext?.currentTime ?? capture.startAudioTimeSec) - capture.startAudioTimeSec) * 1000));
+}
+
+function finalizeAutomaticBestCapture(capture) {
+  if (capture.finalized) return;
+  capture.finalized = true;
+  if (state.automaticBestRecording.capture === capture) state.automaticBestRecording.capture = null;
+  if (capture.discarded) { capture.resolve(null); return; }
+  const samples = state.pitchSamples
+    .filter(sample => sample.takeId === capture.takeId && Number.isFinite(sample.displayPitch))
+    .map(sample => ({ beat: Number(sample.beat.toFixed(5)), displayPitch: Number(sample.displayPitch.toFixed(5)),
+      confidence: Number(Math.max(0, Math.min(1, sample.confidence ?? 0)).toFixed(5)),
+      confirmationState: sample.confirmationState ?? 'confirmed' }));
+  const audio = new Blob(capture.chunks, { type: capture.recorder.mimeType || 'audio/webm' });
+  if (!audio.size || !samples.length) { capture.resolve(null); return; }
+  const durationMs = Math.max(1, Math.round(performance.now() - capture.startedAtMs));
+  capture.resolve({ ...capture, recorder: null, chunks: null, audio, durationMs,
+    pitchDocument: { version: 1, totalBeats: totalBeats(), durationMs,
+      audioOffsetMs: capture.audioOffsetMs, playbackRate: capture.playbackRate,
+      transpose: capture.transpose, samples } });
+}
+
+function stopAutomaticBestCapture({ discard = false } = {}) {
+  const capture = state.automaticBestRecording.capture;
+  if (!capture) return Promise.resolve(null);
+  if (discard) capture.discarded = true;
+  if (capture.stopping) return capture.promise;
+  capture.stopping = true;
+  try {
+    if (capture.recorder.state === 'inactive') finalizeAutomaticBestCapture(capture);
+    else capture.recorder.stop();
+  } catch (_) { capture.discarded = true; finalizeAutomaticBestCapture(capture); }
+  return capture.promise;
+}
+
 function updatePersonalRecordingControls() {
   const personal = state.personalRecording;
   const current = personal.current;
@@ -3609,8 +3940,12 @@ function updatePersonalRecordingControls() {
   els.personalRecordingCurrent.hidden = !current;
   if (current) {
     const part = state.runtime?.parts.find(item => item.id === current.partId)?.name ?? current.partId;
-    els.personalRecordingCurrentSummary.textContent = `${part} · ${personalRecordingDate(current)} · ${Math.round(current.durationMs / 1000)} s.`;
+    const sharing = current.sharedForAnalysis ? 'condivisa con il direttore' : 'privata';
+    els.personalRecordingCurrentSummary.textContent = `${part} · ${personalRecordingDate(current)} · ${Math.round(current.durationMs / 1000)} s · ${sharing}.`;
   }
+  els.personalRecordingSharing.hidden = !current || Boolean(pending);
+  els.personalRecordingSharing.disabled = busy;
+  els.personalRecordingSharing.textContent = current?.sharedForAnalysis ? 'Revoca condivisione' : 'Condividi';
   els.personalRecordingReview.hidden = !pending;
   els.personalRecordingConsent.disabled = Boolean(pending) || busy;
   els.personalRecordingStart.hidden = Boolean(pending);
@@ -3641,6 +3976,7 @@ async function refreshPersonalRecording() {
   try {
     const result = await PersonalRecordings.mine(state.bundleManifest.piece_id);
     personal.current = result.recordings?.[0] ?? null;
+    if (personal.current) els.personalRecordingAnalysisConsent.checked = Boolean(personal.current.sharedForAnalysis);
     els.personalRecordingStatus.textContent = personal.current
       ? 'Puoi riascoltare la registrazione salvata oppure crearne una nuova e decidere se sostituirla.'
       : 'Nessuna registrazione salvata per questo brano.';
@@ -3650,20 +3986,73 @@ async function refreshPersonalRecording() {
   } finally { personal.loading = false; updatePersonalRecordingControls(); }
 }
 
+async function updatePersonalRecordingSharing() {
+  const personal = state.personalRecording; const current = personal.current;
+  if (!current || !window.PersonalRecordings) return;
+  const sharedForAnalysis = !current.sharedForAnalysis;
+  personal.loading = true; updatePersonalRecordingControls();
+  try {
+    const result = await PersonalRecordings.setSharing(current.id, sharedForAnalysis);
+    personal.current = result.recording;
+    els.personalRecordingAnalysisConsent.checked = sharedForAnalysis;
+    if (!sharedForAnalysis && state.automaticBestRecording.enabled) {
+      await PersonalRecordings.setAutomaticBest(false);
+      state.automaticBestRecording.enabled = false;
+      renderAutomaticBestPreference();
+    }
+    els.personalRecordingStatus.textContent = sharedForAnalysis
+      ? 'Registrazione condivisa: il direttore può ora aprirla nel Pitch Detection Lab.'
+      : 'Condivisione revocata: il direttore non può più accedere all’audio.';
+    showToast(sharedForAnalysis ? 'Accesso al Pitch Lab abilitato.' : 'Accesso del direttore revocato.');
+  } catch (error) { els.personalRecordingStatus.textContent = `Aggiornamento non riuscito: ${error.message}`; }
+  finally { personal.loading = false; updatePersonalRecordingControls(); }
+}
+
 async function openPersonalRecordingDialog() {
   closeSettingsMenu();
   if (state.personalRecording.replay) stopPersonalRecordingReplay();
   if (state.clock?.running) state.clock.pause();
+  await releaseMicrophoneIfUnused();
   updatePlaybackButton();
   if (!state.personalRecording.pending) {
     els.personalRecordingStatus.textContent = 'Caricamento della registrazione personale…';
     void refreshPersonalRecording();
   }
+  void loadAutomaticBestPreference(true);
   updatePersonalRecordingControls();
   if (!els.personalRecordingDialog.open) els.personalRecordingDialog.showModal();
 }
 
+function closePersonalRecordingDialog() {
+  if (state.personalRecording.capture || state.personalRecording.pending || state.personalRecording.saving) {
+    els.personalRecordingStatus.textContent = 'Prima salva o scarta la nuova registrazione.';
+    return false;
+  }
+  els.personalRecordingDialog.close();
+  return true;
+}
+
+function handlePersonalRecordingDialogClick(event) {
+  const selectedInfo = event.target.closest?.('.setting-info');
+  const shouldOpenInfo = Boolean(selectedInfo && !selectedInfo.classList.contains('is-open'));
+  els.personalRecordingDialog.querySelectorAll('.setting-info.is-open')
+    .forEach(button => button.classList.remove('is-open'));
+  if (shouldOpenInfo) {
+    selectedInfo.classList.add('is-open');
+    return;
+  }
+  if (event.target !== els.personalRecordingDialog) return;
+  const rect = els.personalRecordingDialog.getBoundingClientRect();
+  const outsideDialog = event.clientX < rect.left || event.clientX > rect.right
+    || event.clientY < rect.top || event.clientY > rect.bottom;
+  if (outsideDialog) closePersonalRecordingDialog();
+}
+
 async function startPersonalRecordingCapture() {
+  if (echoCancellationUI?.enabled()) {
+    els.personalRecordingStatus.textContent = 'Per registrare usa le cuffie e disattiva la modalità altoparlanti.';
+    return;
+  }
   const personal = state.personalRecording;
   if (!els.personalRecordingHeadphones.checked) {
     els.personalRecordingStatus.textContent = 'La registrazione è disponibile soltanto usando cuffie.';
@@ -3692,7 +4081,9 @@ async function startPersonalRecordingCapture() {
   const mimeType = MediaRecorder.isTypeSupported('audio/webm;codecs=opus')
     ? 'audio/webm;codecs=opus'
     : MediaRecorder.isTypeSupported('audio/ogg;codecs=opus') ? 'audio/ogg;codecs=opus' : '';
-  const recorder = new MediaRecorder(state.microphoneStream, mimeType ? { mimeType } : undefined);
+  const recorderOptions = { audioBitsPerSecond: 48_000 };
+  if (mimeType) recorderOptions.mimeType = mimeType;
+  const recorder = new MediaRecorder(state.microphoneStream, recorderOptions);
   const capture = {
     recorder, chunks: [], takeId: state.pitchTakeId, startedAt: new Date().toISOString(),
     startedAtMs: performance.now(), startAudioTimeSec: state.microphoneContext.currentTime,
@@ -3797,7 +4188,9 @@ async function savePersonalRecording() {
       pieceId: pending.pieceId, scoreVersionId: pending.scoreVersionId, partId: pending.partId,
       durationMs: pending.durationMs, audioOffsetMs: pending.audioOffsetMs,
       playbackRate: pending.playbackRate, transpose: pending.transpose,
-      consent: true, headphonesConfirmed: true, replaceExisting: Boolean(personal.current),
+      consent: true, headphonesConfirmed: true,
+      sharedForAnalysis: Boolean(els.personalRecordingAnalysisConsent.checked),
+      replaceExisting: Boolean(personal.current),
     }, pending.audio, pending.pitchDocument);
     personal.current = result.recording;
     personal.pending = null;
@@ -3919,8 +4312,9 @@ async function togglePersonalRecordingReplayPlayback() {
 }
 
 function showAttemptResult({ preliminary = false } = {}) {
+  void releaseMicrophoneIfUnused();
   els.resultDialog.dataset.preliminary = String(preliminary);
-  els.resultHeading.textContent = preliminary ? 'Risultati preliminari' : 'Prova completata';
+  els.resultHeading.textContent = preliminary ? 'Analisi preliminare' : 'Analisi della prova completata';
   els.retry.textContent = preliminary ? 'Ricomincia' : 'Riprova';
   els.resultResume.hidden = !preliminary;
   els.resultProgress.textContent = '';
@@ -3947,6 +4341,7 @@ function showAttemptResult({ preliminary = false } = {}) {
     }
   }
   if (!els.resultDialog.open) els.resultDialog.showModal();
+  if (RUNTIME_CONFIG.features?.performances) void loadPerformanceHub();
 }
 
 function attemptCoveragePercent() {
@@ -3959,7 +4354,114 @@ function attemptCoveragePercent() {
   return targetMs > 0 ? Math.min(100, state.attempt.voicedMs / targetMs * 100) : 0;
 }
 
-async function shareCompletedAttempt() {
+function canonicalVoicePart(name = '', id = '') {
+  const value = `${name} ${id}`.normalize('NFKD').replace(/[\u0300-\u036f]/g, '').toLowerCase();
+  if (value.includes('sopran')) return 'soprano';
+  if (value.includes('contralt') || /\balto\b/.test(value)) return 'contralto';
+  if (value.includes('tenor')) return 'tenore';
+  if (value.includes('bass')) return 'basso';
+  return null;
+}
+
+function monitoringAttemptSnapshot(completed) {
+  if (!state.runtime || !state.bundleManifest || !state.performanceMe?.voicePart) return null;
+  const part = state.runtime.parts.find(item => item.id === state.runtime.selectedPartId);
+  if (canonicalVoicePart(part?.name, part?.id) !== state.performanceMe.voicePart) return null;
+  const takeId = state.pitchTakeId;
+  const samples = state.pitchSamples
+    .filter(sample => sample.takeId === takeId && window.PianoRoll.isAcceptedObservation(sample))
+    .map(sample => {
+      const target = state.runtime.targetAt(sample.beat);
+      if (!target || !Number.isFinite(target.midiPitch)) return null;
+      return {
+        beat: Number(sample.beat.toFixed(4)),
+        displayPitch: Number(sample.displayPitch.toFixed(4)),
+        targetPitch: Number(target.midiPitch.toFixed(4)),
+        errorCents: Number(((sample.trackedPitch - target.midiPitch) * 100).toFixed(2)),
+        confidence: Number(Math.max(0, Math.min(1, sample.confidence ?? 0)).toFixed(4)),
+      };
+    }).filter(Boolean);
+  if (!samples.length) return null;
+  const stride = Math.max(1, Math.ceil(samples.length / 2400));
+  const sharedSamples = samples.filter((_, index) => index % stride === 0).slice(0, 2400);
+  const segments = state.occurrenceMeasures.map((measure, occurrence) => {
+    const segmentSamples = samples.filter(sample => sample.beat >= measure.startBeat && sample.beat < measure.endBeat);
+    return {
+      occurrence, measureNumber: String(measure.number), startBeat: Number(measure.startBeat.toFixed(4)),
+      endBeat: Number(measure.endBeat.toFixed(4)), sampleCount: segmentSamples.length,
+      outOfToleranceCount: segmentSamples.filter(sample => Math.abs(sample.errorCents) > 100).length,
+    };
+  });
+  const coverage = attemptCoveragePercent();
+  const score = Math.round(samples.filter(sample => Math.abs(sample.errorCents) <= 100).length / samples.length * 100);
+  return {
+    key: `${takeId}:${completed}:${Math.round(state.attempt.voicedMs / 1000)}`,
+    payload: {
+      pieceId: state.bundleManifest.piece_id, scoreVersionId: state.runtime.scoreVersionId,
+      partId: state.runtime.selectedPartId, startedFromBeginning: state.attemptStartedFromBeginning,
+      reachedEnd: completed, completed, score, coverage: Number(coverage.toFixed(3)),
+      voicedMs: Math.round(state.attempt.voicedMs), playbackRate: Number(els.playbackSpeed.value),
+      transpose: state.transpose,
+      trace: { version: 1, totalBeats: totalBeats(), samples: sharedSamples, segments },
+    },
+  };
+}
+
+async function ensureMonitoringConsent() {
+  if (!window.ProgressTracking) return false;
+  if (state.monitoringConsent === true) return true;
+  if (state.monitoringConsentPromise) return state.monitoringConsentPromise;
+  const status = await ProgressTracking.consent();
+  if (status.accepted) { state.monitoringConsent = true; return true; }
+  const resultWasOpen = els.resultDialog.open;
+  if (resultWasOpen) els.resultDialog.close();
+  els.monitoringConsentCheck.checked = false;
+  els.monitoringConsentAccept.disabled = true;
+  els.monitoringConsentStatus.textContent = '';
+  state.monitoringConsentPromise = new Promise(resolve => {
+    const finish = accepted => {
+      state.monitoringConsent = accepted;
+      state.monitoringConsentPromise = null;
+      if (els.monitoringConsentDialog.open) els.monitoringConsentDialog.close();
+      if (resultWasOpen && !els.resultDialog.open) els.resultDialog.showModal();
+      resolve(accepted);
+    };
+    els.monitoringConsentAccept.onclick = async () => {
+      els.monitoringConsentAccept.disabled = true;
+      els.monitoringConsentStatus.textContent = 'Salvataggio del consenso…';
+      try { await ProgressTracking.accept(); finish(true); }
+      catch (_) {
+        els.monitoringConsentStatus.textContent = 'Non riesco a salvare il consenso. Riprova.';
+        els.monitoringConsentAccept.disabled = false;
+      }
+    };
+    els.monitoringConsentDecline.onclick = () => finish(false);
+    els.monitoringConsentDialog.oncancel = event => { event.preventDefault(); finish(false); };
+  });
+  els.monitoringConsentDialog.showModal();
+  return state.monitoringConsentPromise;
+}
+
+async function sharePracticeProgress({ completed }) {
+  const snapshot = monitoringAttemptSnapshot(completed);
+  if (!snapshot || state.progressSubmitted.has(snapshot.key)) return;
+  if (!(await ensureMonitoringConsent())) return;
+  state.progressSubmitted.add(snapshot.key);
+  try {
+    const result = await ProgressTracking.submit(snapshot.payload);
+    if (!result.ignored && els.resultDialog.open) {
+      const label = result.status === 'ready' ? 'Pronto' : result.completed ? 'Completato' : 'In esercizio';
+      els.resultProgress.textContent += `${els.resultProgress.textContent ? ' ' : ''}Avanzamento aggiornato: ${label}.`;
+    }
+  } catch (error) {
+    state.progressSubmitted.delete(snapshot.key);
+    if (error.status !== 409 && els.resultDialog.open) {
+      els.resultProgress.textContent += `${els.resultProgress.textContent ? ' ' : ''}Aggiornamento dell’avanzamento non riuscito.`;
+    }
+  }
+}
+
+async function shareCompletedAttempt(automaticCapture = Promise.resolve(null)) {
   if (!window.PerformanceSharing || !RUNTIME_CONFIG.features?.performances || state.attempt.voicedMs < 1000) return;
   const score = Math.round(state.attempt.insideMs / state.attempt.voicedMs * 100);
   const coverage = attemptCoveragePercent();
@@ -3979,8 +4481,9 @@ async function shareCompletedAttempt() {
   const targetEvents = state.runtime.targetEvents.map(event => ({
     onsetBeat: event.onsetBeat, durationBeats: event.durationBeats, midiPitch: event.midiPitch,
   }));
-  const pitchSamples = state.pitchSamples.filter(sample => sample.takeId === takeId && Number.isFinite(sample.displayPitch))
-    .map(sample => ({ beat: sample.beat, displayPitch: sample.displayPitch }));
+  const pitchSamples = state.pitchSamples.filter(sample => sample.takeId === takeId)
+    .map(sample => ({ beat: sample.beat, displayPitch: sample.displayPitch, trackedPitch: sample.trackedPitch,
+      confidence: sample.confidence, confirmationState: sample.confirmationState }));
   const part = state.runtime.parts.find(item => item.id === state.runtime.selectedPartId);
   const piece = state.library?.find(item => item.piece_id === state.bundleManifest?.piece_id);
   const pieceId = state.bundleManifest.piece_id;
@@ -3997,12 +4500,76 @@ async function shareCompletedAttempt() {
     scoringProfile: PerformanceSharing.PROFILE,
     score, coverage: coverage.toFixed(3), completed: true,
   }, image);
-  const message = result.updated ? 'Nuovo best condiviso salvato.' : 'Il best condiviso precedente resta migliore.';
+  let message = result.updated ? 'Nuovo best condiviso salvato.' : 'Il best condiviso precedente resta migliore.';
+  const capture = await automaticCapture;
+  if (result.updated && capture && window.PersonalRecordings) {
+    try {
+      const saved = await PersonalRecordings.save({
+        pieceId: capture.pieceId, scoreVersionId: capture.scoreVersionId, partId: capture.partId,
+        durationMs: capture.durationMs, audioOffsetMs: capture.audioOffsetMs,
+        playbackRate: capture.playbackRate, transpose: capture.transpose,
+        consent: true, headphonesConfirmed: true, sharedForAnalysis: true, replaceExisting: true,
+      }, capture.audio, capture.pitchDocument);
+      state.personalRecording.current = saved.recording;
+      message += ' Audio Pitch Lab aggiornato automaticamente.';
+    } catch (_) {
+      message += ' Il best è salvo, ma l’audio Pitch Lab non è stato aggiornato.';
+    }
+  }
   els.resultProgress.textContent += `${els.resultProgress.textContent ? ' ' : ''}${message}`;
+  if (els.resultDialog.open) void loadPerformanceHub();
 }
 
 function performancePieceTitle(pieceId) {
   return state.library?.find(piece => piece.piece_id === pieceId)?.title ?? pieceId.replaceAll('-', ' ');
+}
+
+async function openPerformanceAnalysis(performance) {
+  if (!window.PerformanceReview) return;
+  const returnFocus = document.activeElement;
+  await pausePracticeForNonExercise();
+  els.resultDialog.close();
+  const analysisPromise = PerformanceSharing.analysis(performance.id).catch(() => null);
+  const musicPromise = (async () => {
+    const bundle = await loadBundleManifest(performance.pieceId);
+    const [payload] = await loadPieceData(performance.pieceId, bundle);
+    const runtime = NormalizedScoreRuntime.fromNormalizedScore(bundle.monodic ? monodicPracticePayload(payload) : payload);
+    runtime.selectPart(performance.partId);
+    const scoreSource = bundle.assets.continuous_scores?.[performance.partId]
+      ?? bundle.assets.score_pages?.[performance.partId]?.[0] ?? null;
+    const scoreUrl = scoreSource ? releaseAssetUrl(scoreSource) : '';
+    let scoreSlots = [];
+    if (scoreUrl) {
+      try {
+        const response = await fetch(scoreUrl, { cache: 'force-cache' });
+        if (response.ok) scoreSlots = scorePageFallbackSlots(await response.text(), 1);
+      } catch (_) { /* Linear synchronization remains available as a fallback. */ }
+    }
+    return {
+      targetEvents: runtime.targetEvents,
+      measures: buildOccurrenceMeasures(runtime),
+      totalBeats: runtime.performanceOccurrences.at(-1)?.endBeat
+        ?? Math.max(1, ...runtime.targetEvents.map(event => event.onsetBeat + event.durationBeats)),
+      scoreUrl, scoreSlots,
+    };
+  })().catch(() => ({ targetEvents: [], measures: [], totalBeats: 1, scoreUrl: '', scoreSlots: [] }));
+  const [analysis, music] = await Promise.all([analysisPromise, musicPromise]);
+  PerformanceReview.open({
+    performance, title: performancePieceTitle(performance.pieceId), analysis, returnFocus,
+    targetEvents: music.targetEvents, measures: music.measures,
+    totalBeats: music.totalBeats, scoreUrl: music.scoreUrl, scoreSlots: music.scoreSlots,
+    backLabel: 'Risultati', onPractice: async ({ beat }) => {
+      if (!canNavigatePractice()) return false;
+      await loadPracticePiece(performance.pieceId, { partId: performance.partId, updateHistory: true });
+      const target = Number.isFinite(beat) ? beat : 0;
+      seekToMeasure(measureIndexAt(target), false, false);
+      window.PerformanceReview.close({ notify: false });
+      els.togglePlayback.focus();
+      return true;
+    }, onClose: () => {
+      if (!els.resultDialog.open) els.resultDialog.showModal();
+    },
+  });
 }
 
 function renderPerformanceCards(performances, own = false) {
@@ -4018,6 +4585,9 @@ function renderPerformanceCards(performances, own = false) {
     const owner = document.createElement('small'); owner.textContent = `${performance.owner.displayName} · parte ${performance.partId} · copertura ${Number(performance.coverage).toFixed(1)}%`;
     const score = document.createElement('span'); score.className = 'performance-score'; score.textContent = `${performance.score}%`;
     body.append(title, score, owner); card.append(image, body);
+    const open = document.createElement('button'); open.type = 'button'; open.className = 'performance-open'; open.textContent = 'Apri analisi';
+    open.addEventListener('click', () => void openPerformanceAnalysis(performance));
+    card.append(open);
     if (own) {
       const remove = document.createElement('button'); remove.type = 'button'; remove.className = 'performance-delete'; remove.textContent = 'Elimina';
       remove.addEventListener('click', async () => {
@@ -4047,15 +4617,51 @@ async function loadGroupPerformances(group, button) {
   catch (_) { els.performanceStatus.textContent = 'Risultati del settore non disponibili.'; }
 }
 
-async function openPerformanceHub() {
+async function loadOwnSectionAggregate(button) {
+  selectPerformanceTab(button);
+  els.performanceStatus.hidden = false;
+  els.performanceStatus.textContent = 'Caricamento aggregato…';
+  els.performanceList.replaceChildren();
+  try {
+    const result = await ProgressTracking.aggregate(state.bundleManifest.piece_id);
+    const part = result.parts?.[0];
+    if (!part) {
+      els.performanceStatus.textContent = 'L’aggregato sarà visibile quando almeno due coristi della tua parte avranno completato il brano.';
+      return;
+    }
+    els.performanceStatus.hidden = true;
+    const card = document.createElement('article'); card.className = 'performance-card aggregate-performance-card';
+    const canvas = document.createElement('canvas'); canvas.setAttribute('aria-label', 'Piano roll aggregato della mia parte');
+    const body = document.createElement('div'); body.className = 'performance-card-body';
+    const heading = document.createElement('strong'); heading.textContent = `Aggregato ${AggregatePitch.LABELS[part.voicePart]}`;
+    const detail = document.createElement('small'); detail.textContent = `${part.memberCount} coristi · linea mediana e intervallo interquartile`;
+    const revoke = document.createElement('button'); revoke.type = 'button'; revoke.className = 'performance-delete';
+    revoke.textContent = 'Revoca i miei dati per questo brano';
+    revoke.addEventListener('click', async () => {
+      if (!confirm('Rimuovere dal cockpit i tuoi progressi, le metriche e il best condiviso per questo brano? La registrazione audio personale non verrà eliminata.')) return;
+      revoke.disabled = true;
+      try { await ProgressTracking.revoke(state.bundleManifest.piece_id); await loadOwnSectionAggregate(button); }
+      catch (_) { revoke.disabled = false; els.performanceStatus.hidden = false; els.performanceStatus.textContent = 'Revoca non riuscita. Riprova.'; }
+    });
+    body.append(heading, detail); card.append(canvas, body, revoke); els.performanceList.append(card);
+    AggregatePitch.draw(canvas, [part]);
+  } catch (_) { els.performanceStatus.textContent = 'Aggregato non disponibile.'; }
+}
+
+async function loadPerformanceHub() {
   if (!window.PerformanceSharing) return;
-  els.performanceDialog.showModal(); els.performanceTabs.replaceChildren(); els.performanceList.replaceChildren();
+  els.performanceTabs.replaceChildren(); els.performanceList.replaceChildren();
   els.performanceStatus.hidden = false; els.performanceStatus.textContent = 'Caricamento…';
   try {
     const [me, groups] = await Promise.all([PerformanceSharing.me(), PerformanceSharing.groups()]);
     state.performanceMe = me; els.performanceIdentity.textContent = me.member.displayName;
     const mine = document.createElement('button'); mine.type = 'button'; mine.dataset.scope = 'mine'; mine.textContent = 'I miei';
     mine.addEventListener('click', () => void loadOwnPerformances(mine)); els.performanceTabs.append(mine);
+    if (window.ProgressTracking && me.voicePart && state.bundleManifest?.piece_id) {
+      const aggregate = document.createElement('button'); aggregate.type = 'button'; aggregate.textContent = 'La mia sezione';
+      aggregate.addEventListener('click', () => void loadOwnSectionAggregate(aggregate));
+      els.performanceTabs.append(aggregate);
+    }
     for (const group of groups.groups) {
       const button = document.createElement('button'); button.type = 'button'; button.textContent = group.name;
       button.addEventListener('click', () => void loadGroupPerformances(group, button)); els.performanceTabs.append(button);
@@ -4064,11 +4670,123 @@ async function openPerformanceHub() {
   } catch (_) { els.performanceStatus.textContent = 'Risultati non disponibili. Riprova più tardi.'; }
 }
 
+async function loadMemberProfile() {
+  if (!window.PerformanceSharing || RUNTIME_CONFIG.mode !== 'production') return true;
+  try {
+    state.performanceMe = await PerformanceSharing.me();
+    els.cockpitLink.hidden = !state.performanceMe.roles?.includes('director');
+    if (!state.performanceMe.profileCompleted) {
+      openMemberProfile(true);
+      return false;
+    }
+    return true;
+  } catch (_) {
+    state.performanceMe = null;
+    els.cockpitLink.hidden = true;
+    return true;
+  }
+}
+
+let memberProfileReturnFocus = null;
+function openMemberProfile(required = false) {
+  memberProfileReturnFocus = document.activeElement?.closest('#settings-menu') ? els.settings : document.activeElement;
+  closeSettingsMenu();
+  let member = state.performanceMe?.member;
+  if (!member && RUNTIME_CONFIG.mode !== 'production') {
+    try { member = JSON.parse(localStorage.getItem('choir-local-profile')); } catch (_) {}
+  }
+  els.memberProfileDialog.dataset.required = required ? 'true' : 'false';
+  els.memberProfileFirstName.value = member?.firstName || '';
+  els.memberProfileLastName.value = member?.lastName || '';
+  document.getElementById('member-profile-voice').value = preferredVoice() || '';
+  els.memberProfileStatus.textContent = required ? 'Completa nome e cognome per proseguire.' : '';
+  els.memberProfileSave.textContent = required ? 'Salva e continua' : 'Salva';
+  els.memberProfileCancel.hidden = required;
+  if (!els.memberProfileDialog.open) els.memberProfileDialog.showModal();
+  requestAnimationFrame(() => (required ? els.memberProfileFirstName : document.getElementById('member-profile-voice')).focus());
+}
+
+async function saveMemberProfile(event) {
+  event.preventDefault();
+  els.memberProfileSave.disabled = true;
+  els.memberProfileStatus.textContent = 'Salvataggio…';
+  try {
+    const wasRequired = els.memberProfileDialog.dataset.required === 'true';
+    const profile = {
+      firstName: els.memberProfileFirstName.value,
+      lastName: els.memberProfileLastName.value,
+      preferredVoicePart: document.getElementById('member-profile-voice').value || null,
+    };
+    const result = RUNTIME_CONFIG.mode === 'production' ? await PerformanceSharing.updateProfile(profile) : {
+      member: { id: 'local', firstName: profile.firstName.trim(), lastName: profile.lastName.trim(),
+        displayName: `${profile.firstName.trim()} ${profile.lastName.trim()}` },
+      preferredVoicePart: profile.preferredVoicePart, profileCompleted: true,
+    };
+    if (RUNTIME_CONFIG.mode !== 'production') {
+      try { localStorage.setItem('choir-local-profile', JSON.stringify(result.member)); } catch (_) {}
+    }
+    state.performanceMe = { ...state.performanceMe, ...result, member: result.member };
+    try { localStorage.setItem(`choir-preferred-voice:${result.member.id}`, result.preferredVoicePart || ''); } catch (_) {}
+    els.performanceIdentity.textContent = result.member.displayName;
+    els.memberProfileDialog.dataset.required = 'false';
+    els.memberProfileDialog.close();
+    showToast('Profilo aggiornato.');
+    if (wasRequired) location.reload();
+  } catch (_) {
+    els.memberProfileStatus.textContent = 'Inserisci un nome e un cognome validi.';
+  } finally { els.memberProfileSave.disabled = false; }
+}
+
+let memberProfileControlsBound = false;
+function bindMemberProfileControls() {
+  if (memberProfileControlsBound) return;
+  memberProfileControlsBound = true;
+  els.memberProfileForm.addEventListener('submit', (event) => void saveMemberProfile(event));
+  els.memberProfileCancel.addEventListener('click', () => els.memberProfileDialog.close());
+  // Account actions are also available from Home before any score is loaded.
+  document.getElementById('settings-menu-account').addEventListener('click', async () => {
+    if (echoDiagnosticsUI?.hasPending()) {
+      showToast('Scarica o scarta il test rientro prima di cambiare account.'); return;
+    }
+    if (state.personalRecording.pending) {
+      showToast('Salva o scarta la registrazione prima di cambiare account.'); return;
+    }
+    if (microphoneCaptureActive()) {
+      showToast('Termina la registrazione o il controllo prima di cambiare account.'); return;
+    }
+    closeSettingsMenu();
+    await pausePracticeForNonExercise();
+    savePitchHistory();
+    const returnPath = state.runtime && document.body.dataset.view === 'practice'
+      ? `${location.pathname}?${practiceReturnQuery()}` : '/index.html';
+    window.location.assign(`/sign-out?return_url=${encodeURIComponent(returnPath)}`);
+  });
+  els.memberProfileDialog.addEventListener('close', () => {
+    if (memberProfileReturnFocus?.isConnected && memberProfileReturnFocus.checkVisibility()) memberProfileReturnFocus.focus({ preventScroll: true });
+  });
+  els.memberProfileDialog.addEventListener('cancel', (event) => {
+    if (els.memberProfileDialog.dataset.required === 'true') {
+      event.preventDefault();
+      els.memberProfileStatus.textContent = 'Completa nome e cognome per proseguire.';
+    }
+  });
+  els.memberProfileDialog.addEventListener('click', event => {
+    if (event.target !== els.memberProfileDialog) return;
+    const bounds = els.memberProfileDialog.getBoundingClientRect();
+    if (event.clientX >= bounds.left && event.clientX <= bounds.right && event.clientY >= bounds.top && event.clientY <= bounds.bottom) return;
+    if (els.memberProfileDialog.dataset.required === 'true') els.memberProfileStatus.textContent = 'Completa nome e cognome per proseguire.';
+    else els.memberProfileDialog.close();
+  });
+}
+
 function finishAttempt() {
   state.attemptActive = false;
   state.resumeCheckpointBeat = null;
+  const automaticCapture = stopAutomaticBestCapture();
+  void automaticCapture.finally(() => releaseMicrophoneIfUnused());
   showAttemptResult();
-  void shareCompletedAttempt().catch(() => {
+  void sharePracticeProgress({ completed: true });
+  void shareCompletedAttempt(automaticCapture).catch(() => {
     els.resultProgress.textContent += `${els.resultProgress.textContent ? ' ' : ''}Salvataggio del best non riuscito; la prova resta disponibile solo localmente.`;
   });
 }
@@ -4278,11 +4996,13 @@ function bindScorePitchDivider() {
 }
 
 function changePart(partId) {
+  void sharePracticeProgress({ completed: false });
   state.transportSeekToken += 1;
   state.transportSeekResumeRequested = false;
   state.attemptActive = false;
   state.resumeCheckpointBeat = null;
   if (state.clock.running) state.clock.pause();
+  void releaseMicrophoneIfUnused();
   savePitchHistory();
   state.runtime.selectPart(partId);
   state.selectedVoiceIds = new Set([partId]);
@@ -4315,9 +5035,10 @@ function bindControls() {
   bindGridInspection();
   bindScorePitchDivider();
   bindBenchmarkAnalysisCanvas();
-  els.performances.hidden = !RUNTIME_CONFIG.features?.performances;
-  els.performances.addEventListener('click', () => void openPerformanceHub());
-  els.performanceClose.addEventListener('click', () => els.performanceDialog.close());
+  els.performanceSection.hidden = !RUNTIME_CONFIG.features?.performances;
+  els.monitoringConsentCheck.addEventListener('change', () => {
+    els.monitoringConsentAccept.disabled = !els.monitoringConsentCheck.checked;
+  });
   els.accompanimentMode.addEventListener('click', openVoiceMixer);
   els.voiceMixerClose.addEventListener('click', () => els.voiceMixerDialog.close());
   els.voiceMixerDialog.addEventListener('click', closeVoiceMixerFromBackdrop);
@@ -4376,6 +5097,8 @@ function bindControls() {
     syncPersonalRecordingReplayAudio();
   });
   els.transpose.addEventListener('change', async () => {
+    PianoRoll.stopPreview();
+    state.gridInspect.baseBounds = null;
     state.transpose = Number(els.transpose.value);
     updateTransposeControl();
     state.attemptActive = false; state.resumeCheckpointBeat = null;
@@ -4396,7 +5119,10 @@ function bindControls() {
     });
   });
   els.togglePlayback.addEventListener('click', togglePlayback);
-  els.showFeedback.addEventListener('click', () => showAttemptResult({ preliminary: true }));
+  els.showFeedback.addEventListener('click', () => {
+    showAttemptResult({ preliminary: true });
+    void sharePracticeProgress({ completed: false });
+  });
   els.restartPractice?.addEventListener('click', restartPractice);
   els.restartTransport.addEventListener('click', restartPractice);
   els.groundTruth.addEventListener('click', openGroundTruthDialog);
@@ -4481,6 +5207,7 @@ function bindControls() {
   els.nextMeasure.addEventListener('click', () => void navigateToMeasure(Math.min(state.occurrenceMeasures.length - 1, measureIndexAt(playbackSnapshot().beat) + 1)));
   els.partSelector.addEventListener('change', () => changePart(els.partSelector.value));
   els.playbackSpeed.addEventListener('change', async () => {
+    void sharePracticeProgress({ completed: false });
     state.attemptActive = false; state.resumeCheckpointBeat = null; state.attempt = { voicedMs: 0, insideMs: 0 }; state.lastSampleMs = null;
     await applyVoiceSelection(state.selectedVoiceIds);
     state.lastMetronomeBeat = null;
@@ -4490,7 +5217,11 @@ function bindControls() {
     render();
   });
   els.accompanimentMode.addEventListener('change', () => {
-    if (state.clock.running) { state.clock.pause(); updatePlaybackButton(); }
+    if (state.clock.running) {
+      state.clock.pause();
+      void releaseMicrophoneIfUnused();
+      updatePlaybackButton();
+    }
     showToast('Guida melodica derivata dallo score selezionato.');
     render();
   });
@@ -4509,18 +5240,34 @@ function bindControls() {
   els.backingAudio.addEventListener('ended', () => {
     if (state.personalRecording.capture) stopPersonalRecordingCapture();
     else if (state.personalRecording.replay) stopPersonalRecordingReplay();
+    else void releaseMicrophoneIfUnused();
     updatePlaybackButton(); render();
   });
   els.backingAudio.addEventListener('pause', () => { updatePlaybackButton(); if (!state.clock.running) render(); });
-  els.backingAudio.addEventListener('error', () => showToast(`Errore audio (${els.backingAudio.error?.code ?? 'sconosciuto'}).`));
+  els.backingAudio.addEventListener('error', () => {
+    void releaseMicrophoneIfUnused();
+    showToast(`Errore audio (${els.backingAudio.error?.code ?? 'sconosciuto'}).`);
+  });
   els.settings.addEventListener('click', (event) => { event.stopPropagation(); toggleSettingsMenu(); });
+  els.settingsMenuRepertoire.addEventListener('click', () => void navigatePractice('repertorio.html'));
   els.settingsMenuMixer.addEventListener('click', openVoiceMixer);
+  els.settingsMenuProfile.addEventListener('click', () => openMemberProfile(false));
+  document.getElementById('settings-menu-relax').addEventListener('click', () => {
+    if (!canNavigatePractice()) return;
+    const returnPath = state.runtime && document.body.dataset.view === 'practice'
+      ? `${location.pathname}?${practiceReturnQuery()}` : '/index.html';
+    // Back must also restore this point when the browser evicts the rehearsal.
+    if (state.runtime && document.body.dataset.view === 'practice') history.replaceState(history.state, '', returnPath);
+    closeSettingsMenu();
+    void navigatePractice(`relax.html?return=${encodeURIComponent(returnPath)}`);
+  });
   els.settingsMenuRecording.addEventListener('click', () => void openPersonalRecordingDialog());
   els.settingsMenuBasic.addEventListener('click', () => openDetectorSettings('basic'));
   els.settingsMenuAdvanced.addEventListener('click', () => openDetectorSettings('advanced'));
   for (const control of [els.personalRecordingHeadphones, els.personalRecordingStorageConsent]) {
     control.addEventListener('change', updatePersonalRecordingControls);
   }
+  els.personalRecordingAutoBest.addEventListener('change', () => void updateAutomaticBestPreference());
   els.personalRecordingStart.addEventListener('click', () => void startPersonalRecordingCapture());
   els.personalRecordingStopLive.addEventListener('click', () => {
     if (state.personalRecording.capture) stopPersonalRecordingCapture();
@@ -4529,18 +5276,18 @@ function bindControls() {
   els.personalRecordingSave.addEventListener('click', () => void savePersonalRecording());
   els.personalRecordingDiscard.addEventListener('click', discardPersonalRecordingPending);
   els.personalRecordingReplay.addEventListener('click', () => void startPersonalRecordingReplay());
+  els.personalRecordingSharing.addEventListener('click', () => void updatePersonalRecordingSharing());
   els.personalRecordingDelete.addEventListener('click', () => void deletePersonalRecording());
-  els.personalRecordingClose.addEventListener('click', () => {
-    if (state.personalRecording.pending) {
-      els.personalRecordingStatus.textContent = 'Prima di chiudere scegli se salvare o scartare la nuova registrazione.';
-      return;
-    }
-    els.personalRecordingDialog.close();
+  els.personalRecordingClose.addEventListener('click', closePersonalRecordingDialog);
+  els.personalRecordingDialog.addEventListener('click', handlePersonalRecordingDialogClick);
+  els.personalRecordingDialog.addEventListener('close', () => {
+    els.personalRecordingDialog.querySelectorAll('.setting-info.is-open')
+      .forEach(button => button.classList.remove('is-open'));
   });
   els.personalRecordingDialog.addEventListener('cancel', event => {
     if (state.personalRecording.capture || state.personalRecording.pending || state.personalRecording.saving) {
       event.preventDefault();
-      els.personalRecordingStatus.textContent = 'Scegli se salvare o scartare prima di chiudere.';
+      els.personalRecordingStatus.textContent = 'Prima salva o scarta la nuova registrazione.';
     }
   });
   document.addEventListener('click', (event) => {
@@ -4561,6 +5308,7 @@ function bindControls() {
     showToast(state.showIntervals ? 'Frecce degli intervalli attive.' : 'Frecce degli intervalli nascoste.');
   });
   els.settingsV1Rms.addEventListener('input', () => {
+    microphoneCalibrationUI?.disable();
     state.detectorSettings.rmsThreshold = rmsThresholdFromSlider(els.settingsV1Rms.value);
     updateDetectorSettingsUi();
   });
@@ -4569,6 +5317,7 @@ function bindControls() {
     showToast(`Soglia v1 aggiornata: ${formatRmsThreshold(state.detectorSettings.rmsThreshold)} RMS.`);
   });
   els.settingsWeakVoiceMode.addEventListener('change', () => {
+    microphoneCalibrationUI?.disable();
     state.detectorSettings.weakVoiceMode = els.settingsWeakVoiceMode.checked;
     applyLiveTrackerSettings(); updateDetectorSettingsUi(); savePreferences();
     showToast(state.detectorSettings.weakVoiceMode
@@ -4576,6 +5325,7 @@ function bindControls() {
       : 'Modalità voce debole disattivata: confidence minima 30%.');
   });
   const updateTrackerSettings = () => {
+    microphoneCalibrationUI?.disable();
     state.detectorSettings.fastAlpha = Number(els.settingsV1FastAlpha.value) / 100;
     state.detectorSettings.slowAlpha = Number(els.settingsV1SlowAlpha.value) / 100;
     state.detectorSettings.medianWindowFrames = Number(els.settingsV1MedianFrames.value);
@@ -4608,6 +5358,7 @@ function bindControls() {
   });
   els.settingsPianoRollDelay.addEventListener('change', savePreferences);
   els.settingsReset.addEventListener('click', () => {
+    microphoneCalibrationUI?.disable();
     state.lyricTextScale = UiPreferences.write(UiPreferences.DEFAULT_LYRIC_SCALE);
     state.showIntervals = false;
     state.metronomeOffsetMs = METRONOME_OFFSET_MS;
@@ -4622,7 +5373,10 @@ function bindControls() {
     render(); showToast('Impostazioni v1 ripristinate ai valori predefiniti.');
   });
   document.getElementById('admin-review').addEventListener('click', () => window.open('admin-review.html', 'choir-admin-review'));
-  document.getElementById('exit-practice').addEventListener('click', openLibraryPicker);
+  document.getElementById('exit-practice').addEventListener('click', () => {
+    returnFromPractice();
+  });
+  document.getElementById('practice-return').addEventListener('click', returnFromPractice);
   window.addEventListener('resize', () => { updateMobileChrome(); state.activeScoreSegment = null; render(); });
   window.addEventListener('resize', () => { if (!els.benchmarkAnalysis.hidden) drawBenchmarkAnalysisRoll(selectedBenchmarkTake()); });
   document.addEventListener('visibilitychange', () => {
@@ -4630,15 +5384,17 @@ function bindControls() {
   });
   window.addEventListener('beforeunload', (event) => {
     savePitchHistory();
-    if (state.personalRecording.capture || state.personalRecording.pending) {
+    if (state.personalRecording.capture || state.personalRecording.pending || echoDiagnosticsUI?.isBusy() || echoDiagnosticsUI?.hasPending()) {
       event.preventDefault();
       event.returnValue = '';
     }
   });
   document.addEventListener('keydown', (event) => {
+    if (document.getElementById('calibration-dialog')?.open || document.getElementById('echo-dialog')?.open || document.getElementById('echo-test-dialog')?.open) return;
     if (event.key === 'Escape' && !els.settingsMenu.hidden) {
       closeSettingsMenu(); els.settings.focus(); event.preventDefault(); return;
     }
+    if (document.querySelector('dialog[open]') || document.body.classList.contains('performance-review-open')) return;
     const targetTag = event.target?.tagName;
     const editingText = event.target?.isContentEditable || ['INPUT', 'SELECT', 'TEXTAREA'].includes(targetTag);
     if (event.code === 'Space' && !editingText) {
@@ -4672,29 +5428,168 @@ async function initialize() {
   if (!libraryResponse.ok) throw new Error('Libreria dei brani non disponibile');
   state.library = (await libraryResponse.json()).pieces ?? [];
   if (!state.library.length) throw new Error('Non ci sono brani MuseScore nella cartella sheets');
+  bindMemberProfileControls();
+  const profileReady = await loadMemberProfile();
   bindAudioOutputControls();
+  document.getElementById('settings-close').addEventListener('click', () => els.settingsDialog.close());
+  microphoneCalibrationUI = window.ChoirMicrophoneCalibrationUI.create({
+    echo: () => echoCancellationUI,
+    warmPlayback: async () => {
+      const request = state.microphoneRequestGeneration;
+      // Home exposes calibration before there is a score/player. The probes
+      // still use the live mixer bus; only a loaded song needs decoder warmup.
+      const clock = state.clock;
+      const media = clock ? [els.backingAudio, ...state.voiceStemAudio.values()].filter(audio => audio.getAttribute('src')) : [];
+      state.playbackMixer.muteForCalibration(true);
+      try {
+        clock?.beginWarmup();
+        await state.playbackMixer.resume(media);
+        if (clock) { syncBackingLevel(); syncVoiceStemLevels(); }
+        if (request !== state.microphoneRequestGeneration || state.microphoneStatus !== 'active') throw new Error('Calibrazione annullata.');
+        for (const audio of media) {
+          if (!calibrationMediaLoops.has(audio)) calibrationMediaLoops.set(audio, audio.loop);
+          audio.loop = true;
+        }
+        if (echoCancellationUI?.enabled() && !state.playbackMixer.referenceCovers(media)) throw new Error('La base non è disponibile per la riduzione del rientro. Usa le cuffie.');
+        await Promise.all(media.filter(audio => audio.src).map(audio => audio.play()));
+      } catch (error) {
+        clock?.pause(); pauseVoiceStems(); restoreCalibrationMediaLoops(); state.playbackMixer.muteForCalibration(false); throw error;
+      }
+    },
+    resumeAnalysis: () => { applyLiveTrackerSettings(); startPitchAnalysisLoop(); },
+    userId: () => state.performanceMe?.member?.id ?? null,
+    running: () => Boolean(state.clock?.running),
+    baseline: () => PitchShared.recognitionSettings(state.detectorSettings),
+    currentRecognition: activeRecognitionSettings,
+    trackerSettings: () => ({ fastAlpha: state.detectorSettings.fastAlpha,
+      slowAlpha: state.detectorSettings.slowAlpha, medianWindowFrames: state.detectorSettings.medianWindowFrames }),
+    input: () => ({ track: state.microphoneStream?.getAudioTracks()[0], context: state.microphoneContext,
+      analyser: state.microphoneAnalyser, sampleRate: state.microphoneContext?.sampleRate }),
+    canOpen: () => {
+      if (microphoneCaptureActive() || state.personalRecording.replay) {
+        showToast('Termina prima la registrazione o il riascolto.'); return false;
+      }
+      return true;
+    },
+    pause: async () => { closeSettingsMenu(); els.settingsDialog.close(); await pausePracticeForNonExercise({ preserveCalibration: true }); },
+    startMicrophone: async () => {
+      if (state.microphoneStatus !== 'active') await toggleMicrophone();
+      if (state.microphoneStatus !== 'active') throw new Error(state.microphoneFailureMessage || 'Consenti il microfono e riprova.');
+      stopPitchAnalysisLoop(); stopPitchWorker();
+      // Calibration frames never enter pitch history, attempts, or scoring.
+      state.trackedPitch = null; state.displayPitch = null;
+    },
+    stopMicrophone, notify: showToast, returnFocus: () => {
+      if (mobileChrome.topCollapsed) { mobileChrome.topCollapsed = false; updateMobileChrome(); redrawAfterChromeChange(); }
+      els.settings.focus();
+    },
+    changed: () => {
+      stopPitchWorker();
+      if (state.microphoneAnalyser) state.microphoneBuffer = new Float32Array(state.microphoneAnalyser.fftSize);
+      state.pitchSmoother.reset(); state.displayPitchFilter.reset(); applyLiveTrackerSettings();
+      updateDetectorSettingsUi();
+    },
+  });
+  document.getElementById('settings-calibrate').addEventListener('click', () => void microphoneCalibrationUI.open());
+  echoCancellationUI = window.ChoirEchoCancellationUI.create({
+    openCalibration: () => microphoneCalibrationUI.open(),
+    mixer: () => state.playbackMixer, stream: () => state.microphoneStream,
+    volume: () => Number(els.volume.value) / 100,
+    level: () => {
+      if (!state.microphoneAnalyser) return 0;
+      const buffer = new Float32Array(2048); state.microphoneAnalyser.getFloatTimeDomainData(buffer);
+      return Math.sqrt(buffer.reduce((sum, v) => sum + v * v, 0) / buffer.length);
+    },
+    userId: () => state.performanceMe?.member?.id || 'local-only', running: () => Boolean(state.clock?.running),
+    canOpen: () => !microphoneCaptureActive() && !state.personalRecording.replay,
+    pause: async () => { closeSettingsMenu(); els.settingsDialog.close(); await pausePracticeForNonExercise(); },
+    pauseForToggle: async () => { closeSettingsMenu(); await pausePracticeForNonExercise(); },
+    startMicrophone: async () => {
+      if (state.microphoneStatus !== 'active') await toggleMicrophone();
+      if (state.microphoneStatus !== 'active') throw new Error(state.microphoneFailureMessage || 'Consenti il microfono e riprova.');
+    },
+    stopMicrophone, stopAnalysis: () => { stopPitchAnalysisLoop(); stopPitchWorker(); },
+    changed: () => { microphoneCalibrationUI.inputChanged(); renderAutomaticBestPreference(); }, notify: showToast,
+    returnFocus: () => {
+      if (mobileChrome.topCollapsed) { mobileChrome.topCollapsed = false; updateMobileChrome(); redrawAfterChromeChange(); }
+      els.settings.focus();
+    },
+  });
+  echoDiagnosticsUI = window.ChoirEchoDiagnostics.create({
+    save: (id, metadata, blob) => PersonalRecordings.saveEchoDiagnostic(id, metadata, blob),
+    latest: () => PersonalRecordings.echoDiagnostics(state.bundleManifest?.piece_id),
+    remove: id => PersonalRecordings.deleteEchoDiagnostic(id),
+    ready: () => Boolean(echoCancellationUI?.enabled() && state.runtime),
+    calibrated: () => Boolean(echoCancellationUI?.ready()),
+    graph: () => echoCancellationUI?.captureGraph(),
+    lifecycle: () => echoCancellationUI?.lifecycle(),
+    canOpen: () => !microphoneCaptureActive() && !state.personalRecording.pending && !state.personalRecording.replay,
+    pause: async ({ keepMicrophone = false } = {}) => {
+      closeSettingsMenu(); els.settingsDialog.close();
+      if (keepMicrophone && echoCancellationUI.ready()) {
+        if (state.clock.running) {
+          const beat = playbackSnapshot().beat; state.clock.pause();
+          rememberAttemptCheckpoint(beat); savePitchHistory(); updatePlaybackButton(); render();
+        }
+      } else await pausePracticeForNonExercise();
+    },
+    startMicrophone: async () => {
+      echoCancellationUI.checkpoint('diagnostic-microphone-start');
+      if (!echoCancellationUI.ready()) echoCancellationUI.prepare('diagnostic-unverified');
+      if (state.microphoneStatus !== 'active') await toggleMicrophone();
+      if (state.microphoneStatus !== 'active') throw new Error(state.microphoneFailureMessage || 'Consenti il microfono e riprova.');
+    },
+    play: togglePlayback, running: () => Boolean(state.clock?.running), focus: () => {
+      if (mobileChrome.topCollapsed) { mobileChrome.topCollapsed = false; updateMobileChrome(); redrawAfterChromeChange(); }
+      els.settings.focus();
+    },
+    metadata: () => {
+      const settings = state.microphoneStream?.getAudioTracks()[0]?.getSettings() || {};
+      return { pieceId: state.bundleManifest?.piece_id, scoreVersion: state.runtime?.scoreVersionId,
+        partId: state.runtime?.selectedPartId, buildVersion: RUNTIME_CONFIG.buildVersion,
+        memberId: state.performanceMe?.member?.id || null, userAgent: navigator.userAgent,
+        beat: state.clock ? playbackSnapshot().beat : null, playbackRate: Number(els.playbackSpeed.value), transpose: state.transpose,
+        mixer: { master: Number(els.volume.value)/100, organ: state.accompanimentLevel,
+          organEnabled: state.accompanimentEnabled, voices: Object.fromEntries(state.voiceLevels),
+          enabledVoices: Array.from(state.selectedVoiceIds), normalization: mixNormalization(), metronome: Number(els.metronomeVolume.value)/100 },
+        input: { sampleRate: settings.sampleRate, channelCount: settings.channelCount,
+          echoCancellation: settings.echoCancellation, noiseSuppression: settings.noiseSuppression, autoGainControl: settings.autoGainControl } };
+    },
+  });
   bindLibraryPicker();
+  updatePracticeReturn();
+  if (!profileReady) return;
   window.addEventListener('message', (event) => {
     if (event.origin === location.origin && event.data?.type === 'choir-bundle-approval') location.reload();
   });
   window.addEventListener('popstate', () => {
     const query = new URLSearchParams(location.search);
+    practiceOrigin = query.get('from') === 'repertorio' ? 'repertorio' : null;
+    updatePracticeReturn();
     const pieceId = query.get('piece');
     if (!pieceId || !state.library.some((piece) => piece.piece_id === pieceId)) return;
-    void loadPracticePiece(pieceId, { partId: query.get('part'), updateHistory: false })
+    void loadPracticePiece(pieceId, { partId: query.get('part'), updateHistory: false }).then(() => restorePracticePosition(query))
       .catch((error) => showToast(error.message));
   });
   const requestedPiece = new URLSearchParams(window.location.search).get('piece');
   const requestedPieceExists = requestedPiece
     && state.library.some((piece) => piece.piece_id === requestedPiece);
   if (requestedPieceExists) {
-    await loadPracticePiece(requestedPiece, { updateHistory: false });
+    const query = new URLSearchParams(location.search);
+    const hadPreferredVoice = Boolean(preferredVoice());
+    const openRequested = async () => {
+      const piece = state.library.find(item => item.piece_id === requestedPiece);
+      await loadPracticePiece(requestedPiece, { partId: hadPreferredVoice ? query.get('part') || preferredPartId(piece) : preferredPartId(piece, query.get('part')), updateHistory: false });
+      restorePracticePosition(query);
+      if (els.piecePickerDialog.open) els.piecePickerDialog.close();
+    };
+    requirePreferredVoice(openRequested);
     return;
   }
-  openLibraryPicker();
+  openLibraryPicker(new URLSearchParams(location.search).get('menu') === 'sing' ? 'source' : 'mode');
 }
 
-function openLibraryPicker() {
+function openLibraryPicker(step = 'mode') {
   if (state.personalRecording.capture || state.personalRecording.pending) {
     els.personalRecordingStatus.textContent = 'Prima di cambiare brano interrompi la registrazione e scegli se salvarla o scartarla.';
     if (!els.personalRecordingDialog.open && !state.personalRecording.capture) els.personalRecordingDialog.showModal();
@@ -4702,7 +5597,9 @@ function openLibraryPicker() {
     return;
   }
   if (state.personalRecording.replay) stopPersonalRecordingReplay();
+  document.body.dataset.view = 'home';
   if (state.clock?.running) state.clock.pause();
+  void pausePracticeForNonExercise({ preserveCalibration: true });
   if (state.clock) updatePlaybackButton();
   const requested = new URLSearchParams(window.location.search).get('piece');
   let remembered = null;
@@ -4713,6 +5610,7 @@ function openLibraryPicker() {
   const returnButton = els.piecePickerDialog.querySelector('.studio-return');
   if (returnButton) returnButton.hidden = !state.runtime;
   updateLibraryParts();
+  showLibraryStep(['mode', 'source', 'piece', 'part'].includes(step) ? step : 'mode');
   if (!els.piecePickerDialog.open) els.piecePickerDialog.showModal();
 }
 
@@ -4739,9 +5637,10 @@ async function updateLibraryParts() {
   els.libraryPart.replaceChildren(...parts.map((part) => new Option(part.name, part.id)));
   let rememberedPart;
   try { rememberedPart = localStorage.getItem(`choir-part:${piece?.piece_id}`); } catch (_) {}
-  const preferredPart = parts.find(part => part.id === rememberedPart)
+  const preferredPart = parts.find(part => part.id === preferredPartId(piece)) ?? parts.find(part => part.id === rememberedPart)
     ?? parts.find(part => part.id === state.runtime?.selectedPartId);
   if (preferredPart) els.libraryPart.value = preferredPart.id;
+  document.getElementById('library-voice-summary').textContent = preferredVoice() ? `La tua parte: ${VOICE_NAMES[preferredVoice()]}` : '';
   const message = piece?.monodic ? 'Brano monodico: Soprano e Contralto usano la melodia scritta; Tenore e Basso la cantano un’ottava sotto.' : (!parts.length ? 'Nessuna parte vocale disponibile nel file MuseScore.' : '');
   els.libraryNote.hidden = !message;
   els.libraryNote.textContent = message;
@@ -4749,11 +5648,50 @@ async function updateLibraryParts() {
 }
 
 function bindLibraryPicker() {
+  els.settingsDialog.addEventListener('close', () => {
+    if (els.piecePickerDialog.open && !document.querySelector('dialog[open]:not(#piece-picker-dialog)')) {
+      document.querySelector('#home-settings summary').focus();
+    }
+  });
+  document.getElementById('home-basic').addEventListener('click', () => {
+    document.getElementById('home-settings').open = false; openDetectorSettings('basic');
+  });
+  document.getElementById('home-advanced').addEventListener('click', () => {
+    document.getElementById('home-settings').open = false; openDetectorSettings('advanced');
+  });
   els.piecePicker.addEventListener('click', openLibraryPicker);
   els.library?.addEventListener('click', openLibraryPicker);
   els.piecePickerDialog.addEventListener('cancel', (event) => {
     if (!state.runtime) event.preventDefault();
   });
+  els.piecePickerDialog.addEventListener('close', () => {
+    if (state.runtime) document.body.dataset.view = 'practice';
+  });
+  els.piecePickerDialog.addEventListener('click', event => {
+    if (event.target !== els.piecePickerDialog || !state.runtime) return;
+    const bounds = els.piecePickerDialog.getBoundingClientRect();
+    if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) els.piecePickerDialog.close();
+  });
+  document.getElementById('library-close').addEventListener('click', () => els.piecePickerDialog.close());
+  document.getElementById('library-profile').addEventListener('click', () => openMemberProfile(false));
+  document.getElementById('library-sing').addEventListener('click', () => { libraryMode = 'sing'; showLibraryStep('source'); });
+  document.getElementById('library-read').addEventListener('click', () => { libraryMode = 'read'; showLibraryStep('piece'); });
+  document.getElementById('library-custom').addEventListener('click', () => { libraryMode = 'sing'; showLibraryStep('piece'); });
+  document.getElementById('library-back').addEventListener('click', () => {
+    if (libraryStep === 'part' && practiceOrigin === 'repertorio' && !state.runtime) { void navigatePractice('repertorio.html'); return; }
+    pendingVoiceAction = null;
+    showLibraryStep(libraryStep === 'source' || libraryMode === 'read' ? 'mode' : libraryStep === 'part' ? 'piece' : 'source');
+  });
+  document.querySelectorAll('[data-preferred-voice]').forEach(button => button.addEventListener('click', async () => {
+    document.querySelectorAll('[data-preferred-voice]').forEach(item => { item.disabled = true; });
+    try {
+      await savePreferredVoice(button.dataset.preferredVoice);
+      await updateLibraryParts();
+      const action = pendingVoiceAction; pendingVoiceAction = null;
+      if (action) await action();
+    } catch (_) { document.getElementById('library-status').textContent = 'Salvataggio non riuscito. Riprova.'; }
+    finally { document.querySelectorAll('[data-preferred-voice]').forEach(item => { item.disabled = false; }); }
+  }));
   els.libraryPiece.addEventListener('change', updateLibraryParts);
   els.libraryPart.addEventListener('change', () => {
     const piece = state.library.find((item) => item.piece_id === els.libraryPiece.value);
@@ -4762,6 +5700,8 @@ function bindLibraryPicker() {
   const openSelectedPracticePiece = async () => {
     const pieceId = els.libraryPiece.value;
     const partId = els.libraryPart.value;
+    const previousOrigin = practiceOrigin;
+    practiceOrigin = null;
     els.libraryOpen.disabled = true;
     els.libraryNote.hidden = false;
     els.libraryNote.textContent = 'Apro il brano…';
@@ -4769,28 +5709,41 @@ function bindLibraryPicker() {
       await loadPracticePiece(pieceId, { partId, updateHistory: true });
       if (els.piecePickerDialog.open) els.piecePickerDialog.close();
     } catch (error) {
+      practiceOrigin = previousOrigin;
       els.libraryNote.textContent = error.message;
     } finally {
       els.libraryOpen.disabled = false;
     }
   };
-  els.libraryOpen.addEventListener('click', () => requestAudioOutputForEntry(openSelectedPracticePiece));
+  els.libraryOpen.addEventListener('click', () => requirePreferredVoice(() => {
+    els.libraryPart.value = preferredPartId(state.library.find(piece => piece.piece_id === els.libraryPiece.value), els.libraryPart.value);
+    return openSelectedPracticePiece();
+  }));
   document.querySelectorAll('a[href="voice-lab.html"]').forEach((link) => {
     link.addEventListener('click', (event) => {
       if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
       event.preventDefault();
-      requestAudioOutputForEntry(() => { window.location.href = link.href; });
+      void navigatePractice(link.href);
     });
   });
   els.libraryScore.addEventListener('click', () => {
-    window.location.href = `score-viewer.html?piece=${encodeURIComponent(els.libraryPiece.value)}`;
+    void navigatePractice(`score-viewer.html?piece=${encodeURIComponent(els.libraryPiece.value)}&from=menu`);
+  });
+  els.scoreViewerLink.addEventListener('click', event => {
+    if (!state.runtime) return;
+    els.scoreViewerLink.href = `score-viewer.html?${practiceReturnQuery()}`;
+    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
+    event.preventDefault();
+    void navigatePractice(els.scoreViewerLink.href);
   });
 }
 
 function restartPractice() {
+  void sharePracticeProgress({ completed: false });
   state.transportSeekToken += 1;
   state.transportSeekResumeRequested = false;
   state.clock.pause();
+  void releaseMicrophoneIfUnused();
   clearPitchHistory();
   state.attemptActive = false;
   state.resumeCheckpointBeat = null;
@@ -4804,10 +5757,14 @@ function restartPractice() {
 }
 
 async function loadPracticePiece(pieceId, { partId = null, updateHistory = false } = {}) {
+  PianoRoll.stopPreview();
+  state.gridNavigation?.cancel();
+  state.gridInspect.active = false;
   if (state.personalRecording.capture || state.personalRecording.pending) {
     throw new Error('Salva o scarta la registrazione personale prima di cambiare brano.');
   }
   if (state.personalRecording.replay) stopPersonalRecordingReplay();
+  if (state.runtime) void sharePracticeProgress({ completed: false });
   const generation = ++practiceLoadGeneration;
   state.transportSeekToken += 1;
   state.transportSeekResumeRequested = false;
@@ -4817,7 +5774,8 @@ async function loadPracticePiece(pieceId, { partId = null, updateHistory = false
   els.backingAudio.pause();
   els.scoreLoading.hidden = false;
   els.scoreLoading.textContent = 'Preparazione spartito…';
-  const stopMicrophonePromise = state.microphoneStatus === 'idle' ? Promise.resolve() : stopMicrophone();
+  const preserveCalibratedInput = state.microphoneStatus === 'active' && Boolean(microphoneCalibrationUI?.activeSettings());
+  const stopMicrophonePromise = state.microphoneStatus === 'idle' || preserveCalibratedInput ? Promise.resolve() : stopMicrophone();
   const bundleManifest = await loadBundleManifest(pieceId);
   const [payload, glyphMap, backingManifest] = await loadPieceData(pieceId, bundleManifest);
   await stopMicrophonePromise;
@@ -4881,6 +5839,10 @@ async function loadPracticePiece(pieceId, { partId = null, updateHistory = false
   state.occurrenceMeasures = buildOccurrenceMeasures(state.runtime);
   configureBacking();
   state.clock = new MediaPlaybackClock({ mediaElement: els.backingAudio, scoreRuntime: state.runtime });
+  // Media decoders can change the output route; retain the voice profile and
+  // input, but verify the new route in silence before applying cancellation.
+  if (preserveCalibratedInput && echoCancellationUI?.enabled()) echoCancellationUI.invalidate('piece-output-route');
+  microphoneCalibrationUI?.refresh();
   if (state.usesPreRenderedSpeed) state.clock.setPreRenderedSpeed(Number(els.playbackSpeed.value));
   else state.clock.setSpeed(Number(els.playbackSpeed.value));
   buildScoreGeometry(state.runtime.selectedPartId);
@@ -4897,8 +5859,11 @@ async function loadPracticePiece(pieceId, { partId = null, updateHistory = false
   els.scoreViewerLink.href = `score-viewer.html?piece=${encodeURIComponent(bundleManifest.piece_id)}`;
   els.scorePartLabel.textContent = parts.find((part) => part.id === state.runtime.selectedPartId)?.name ?? 'Parte';
   bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(0); updatePlaybackButton();
+  mobileChrome.topCollapsed = false; updateMobileChrome(); updatePracticeReturn();
+  if (!els.piecePickerDialog.open) document.body.dataset.view = 'practice';
   if (updateHistory) {
     const query = new URLSearchParams({ piece: bundleManifest.piece_id, part: state.runtime.selectedPartId });
+    if (practiceOrigin) query.set('from', practiceOrigin);
     history.pushState(null, '', `?${query}`);
   }
 }

@@ -1,4 +1,5 @@
 import { canViewOwner } from "./authorization";
+import { parseSharedTrace } from "./progress";
 import type { Env, MemberContext } from "./types";
 
 export const SCORING_PROFILE = "pitch-v1-original-100-complete-c60";
@@ -30,6 +31,43 @@ function json(value: unknown, status = 200): Response {
   return Response.json(value, { status, headers: { "Cache-Control": "no-store" } });
 }
 
+export function normalizePersonName(value: unknown): string | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.normalize("NFKC").trim().replace(/\s+/g, " ");
+  if (normalized.length < 1 || normalized.length > 60 ||
+      !/^[\p{L}\p{M}][\p{L}\p{M}'’ -]*$/u.test(normalized)) return null;
+  return normalized;
+}
+
+async function updateOwnProfile(request: Request, env: Env, member: MemberContext): Promise<Response> {
+  let body: { firstName?: unknown; lastName?: unknown; preferredVoicePart?: unknown };
+  try { body = await request.json(); } catch { return json({ error: "invalid_profile" }, 400); }
+  const firstName = normalizePersonName(body.firstName ?? member.firstName);
+  const lastName = normalizePersonName(body.lastName ?? member.lastName);
+  if (!firstName || !lastName) return json({ error: "invalid_profile" }, 400);
+  const preference = body.preferredVoicePart === undefined ? member.preferredVoicePart ?? null : body.preferredVoicePart;
+  if (preference !== null && (typeof preference !== 'string' || !['soprano','contralto','tenore','basso'].includes(preference))) return json({ error: "invalid_voice_part" }, 400);
+  const displayName = `${firstName} ${lastName}`;
+  const now = new Date().toISOString();
+  await env.AUTH_DB.batch([
+    env.AUTH_DB.prepare(
+      `UPDATE authorized_members
+       SET first_name=?1,last_name=?2,display_name=?3,profile_completed_at=?4,updated_at=?4,preferred_voice_part=?7
+       WHERE member_id=?5 AND choir_id=?6 AND active=1`,
+    ).bind(firstName, lastName, displayName, now, member.memberId, member.choirId, preference),
+    env.AUTH_DB.prepare(
+      `INSERT INTO authorization_audit(id,choir_id,target_member_id,event,details_json,recorded_at)
+       VALUES(?1,?2,?3,'member_profile_updated',?4,?5)`,
+    ).bind(crypto.randomUUID(), member.choirId, member.memberId,
+      JSON.stringify({ displayName, preferredVoicePart: preference }), now),
+  ]);
+  return json({
+    member: { id: member.memberId, displayName, firstName, lastName },
+    profileCompleted: true,
+    preferredVoicePart: preference,
+  });
+}
+
 function summary(row: PerformanceRow): Record<string, unknown> {
   return {
     id: row.id,
@@ -41,6 +79,7 @@ function summary(row: PerformanceRow): Record<string, unknown> {
     score: row.score,
     coverage: row.coverage,
     imageUrl: `/api/performances/${encodeURIComponent(row.id)}/image`,
+    analysisUrl: `/api/performances/${encodeURIComponent(row.id)}/analysis`,
     createdAt: row.created_at,
     improvedAt: row.improved_at,
   };
@@ -176,6 +215,42 @@ async function readImage(env: Env, member: MemberContext, id: string): Promise<R
   });
 }
 
+async function readAnalysis(env: Env, member: MemberContext, id: string): Promise<Response> {
+  if (!env.PERFORMANCE_BUCKET) throw new Error("performance bucket unavailable");
+  const performance = await performanceById(env, id);
+  if (!performance || !(await canReadRow(env, member, performance))) {
+    return json({ error: "performance_not_found" }, 404);
+  }
+  const attempt = await env.AUTH_DB.prepare(
+    `SELECT id,score,coverage,trace_key,created_at
+     FROM practice_attempts
+     WHERE choir_id=?1 AND member_id=?2 AND piece_id=?3 AND score_version_id=?4
+       AND part_id=?5 AND completed=1 AND playback_rate=1 AND transpose=0
+       AND trace_key IS NOT NULL AND expires_at>?6
+     ORDER BY ABS(score-?7), ABS(julianday(created_at)-julianday(?8)), created_at DESC
+     LIMIT 1`,
+  ).bind(
+    performance.choir_id, performance.member_id, performance.piece_id,
+    performance.score_version_id, performance.part_id, new Date().toISOString(),
+    performance.score, performance.improved_at,
+  ).first<{ id: string; score: number; coverage: number; trace_key: string; created_at: string }>();
+  if (!attempt) return json({ error: "analysis_not_available" }, 404);
+  const object = await env.PERFORMANCE_BUCKET.get(attempt.trace_key);
+  if (!object) return json({ error: "analysis_not_available" }, 404);
+  let trace;
+  try { trace = parseSharedTrace(JSON.parse(await object.text())); }
+  catch { trace = null; }
+  if (!trace) return json({ error: "analysis_not_available" }, 404);
+  return json({
+    performanceId: performance.id,
+    attemptId: attempt.id,
+    score: attempt.score,
+    coverage: attempt.coverage,
+    createdAt: attempt.created_at,
+    trace,
+  });
+}
+
 async function submitBest(request: Request, env: Env, member: MemberContext): Promise<Response> {
   if (!env.PERFORMANCE_BUCKET) throw new Error("performance bucket unavailable");
   const declaredLength = Number(request.headers.get("Content-Length"));
@@ -289,12 +364,23 @@ export async function handlePerformanceApi(
   const url = new URL(request.url);
   if (request.method === "GET" && url.pathname === "/api/me") {
     return json({
-      member: { id: member.memberId, displayName: member.displayName },
+      member: {
+        id: member.memberId,
+        displayName: member.displayName,
+        firstName: member.firstName ?? null,
+        lastName: member.lastName ?? null,
+      },
+      profileCompleted: member.profileCompleted === true,
+      voicePart: member.voicePart,
+      preferredVoicePart: member.preferredVoicePart ?? null,
       roles: member.roles,
       groupIds: member.groupIds,
       viewableGroupIds: member.viewableGroupIds,
       canViewAllGroups: member.roles.includes("director"),
     });
+  }
+  if (request.method === "PATCH" && url.pathname === "/api/me") {
+    return updateOwnProfile(request, env, member);
   }
   if (request.method === "GET" && url.pathname === "/api/performances/mine") return listMine(env, member);
   if (request.method === "GET" && url.pathname === "/api/groups") return listGroups(env, member);
@@ -302,6 +388,8 @@ export async function handlePerformanceApi(
   if (request.method === "GET" && groupMatch) return listGroup(env, member, decodeURIComponent(groupMatch[1]));
   const imageMatch = /^\/api\/performances\/([^/]+)\/image$/.exec(url.pathname);
   if (request.method === "GET" && imageMatch) return readImage(env, member, decodeURIComponent(imageMatch[1]));
+  const analysisMatch = /^\/api\/performances\/([^/]+)\/analysis$/.exec(url.pathname);
+  if (request.method === "GET" && analysisMatch) return readAnalysis(env, member, decodeURIComponent(analysisMatch[1]));
   if (request.method === "POST" && url.pathname === "/api/performances/best") return submitBest(request, env, member);
   const deleteMatch = /^\/api\/performances\/([^/]+)$/.exec(url.pathname);
   if (request.method === "DELETE" && deleteMatch) return deleteOwn(env, member, decodeURIComponent(deleteMatch[1]));

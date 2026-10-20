@@ -5,14 +5,17 @@ import {
   MAX_PNG_HEIGHT,
   MAX_PNG_WIDTH,
   inspectPng,
+  normalizePersonName,
+  handlePerformanceApi,
 } from "../src/performances";
-import type { MemberContext } from "../src/types";
+import type { Env, MemberContext } from "../src/types";
 
 function member(overrides: Partial<MemberContext> = {}): MemberContext {
   return {
     memberId: "member-viewer",
     choirId: "choir-a",
     displayName: "Viewer",
+    voicePart: "tenore",
     roles: ["singer"],
     groupIds: ["tenors"],
     viewableGroupIds: [],
@@ -73,6 +76,69 @@ describe("performance PNG validation", () => {
     expect(inspectPng(new ArrayBuffer(24))).toBeNull();
     expect(inspectPng(pngHeader(MAX_PNG_WIDTH + 1, 760))).toBeNull();
     expect(inspectPng(pngHeader(1600, MAX_PNG_HEIGHT + 1))).toBeNull();
+  });
+});
+
+describe("self-service member profile", () => {
+  function profileApi() {
+    const writes: { query: string; values: unknown[] }[] = [];
+    const env = { AUTH_DB: {
+      prepare(query: string) {
+        return { bind(...values: unknown[]) { return { query, values }; } };
+      },
+      async batch(statements: typeof writes) { writes.push(...statements); return []; },
+    } } as unknown as Env;
+    const viewer = member({ firstName: "Anna", lastName: "Rossi", preferredVoicePart: "contralto" });
+    const patch = (body: unknown) => handlePerformanceApi(new Request("https://choir.example.org/api/me", {
+      method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body),
+    }), env, viewer);
+    return { patch, writes, viewer };
+  }
+
+  it("persists a SATB preference without changing the authorized section or grants", async () => {
+    const { patch, writes, viewer } = profileApi();
+    const response = await patch({ preferredVoicePart: "soprano" });
+    expect(response?.status).toBe(200);
+    expect(await response!.json()).toMatchObject({
+      preferredVoicePart: "soprano", member: { firstName: "Anna", lastName: "Rossi" },
+    });
+    expect(writes).toHaveLength(2);
+    expect(writes[0].query).toContain("preferred_voice_part=?7");
+    expect(writes[0].query).not.toMatch(/(?<!preferred_)voice_part\s*=/);
+    expect(writes[0].query).toContain("member_id=?5 AND choir_id=?6 AND active=1");
+    expect(writes[0].values.slice(4)).toEqual([viewer.memberId, viewer.choirId, "soprano"]);
+    expect(viewer.voicePart).toBe("tenore");
+    expect(viewer.groupIds).toEqual(["tenors"]);
+  });
+
+  it("keeps the preference on a name-only edit and permits clearing it explicitly", async () => {
+    const { patch, writes } = profileApi();
+    expect((await patch({ firstName: "Maria" }))?.status).toBe(200);
+    expect(writes[0].values[6]).toBe("contralto");
+    const cleared = await patch({ preferredVoicePart: null });
+    expect(await cleared!.json()).toMatchObject({ preferredVoicePart: null });
+    expect(writes[2].values[6]).toBeNull();
+  });
+
+  it.each(["alto", "director", [], ["soprano"], {}, 1])("rejects invalid vocal preferences before writing: %j", async (value) => {
+    const { patch, writes } = profileApi();
+    const response = await patch({ preferredVoicePart: value });
+    expect(response?.status).toBe(400);
+    expect(await response!.json()).toEqual({ error: "invalid_voice_part" });
+    expect(writes).toHaveLength(0);
+  });
+
+  it("normalizes real names without flattening accents or apostrophes", () => {
+    expect(normalizePersonName("  Federico   ")).toBe("Federico");
+    expect(normalizePersonName("D’Angiò")).toBe("D’Angiò");
+    expect(normalizePersonName("Anna-Maria")).toBe("Anna-Maria");
+  });
+
+  it("rejects empty, control-like, numeric and excessively long names", () => {
+    expect(normalizePersonName(" ")).toBeNull();
+    expect(normalizePersonName("Mario42")).toBeNull();
+    expect(normalizePersonName("<script>")).toBeNull();
+    expect(normalizePersonName("a".repeat(61))).toBeNull();
   });
 });
 

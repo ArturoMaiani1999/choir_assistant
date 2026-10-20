@@ -2,6 +2,7 @@
   'use strict';
 
   const config = window.ChoirRuntimeConfig ?? {};
+  const entryQuery = new URLSearchParams(location.search);
   const elementIds = {
     back: 'viewer-back', title: 'viewer-title', piece: 'viewer-piece', pages: 'viewer-pages', status: 'viewer-status',
     position: 'viewer-page-position', zoomOut: 'viewer-zoom-out', zoomFit: 'viewer-zoom-fit', zoomIn: 'viewer-zoom-in',
@@ -119,7 +120,9 @@
     const voiceLevel = plan.masterPartId ? 0.8 : 1;
     mixer.setLevel(els.audio, plan.silentMaster ? 0 : voiceLevel);
     for (const [partId,audio] of stems) mixer.setLevel(audio, .8);
-    try { await mixer.resume(activeElements); } catch (error) { console.warn('Mixer audio non disponibile', error); }
+    if (wasPlaying) {
+      try { await mixer.resume(activeElements); } catch (error) { console.warn('Mixer audio non disponibile', error); }
+    }
     for (const audio of activeElements.slice(1)) { audio.currentTime = els.audio.currentTime; }
     if (wasPlaying) await startPlayback(); else updateCursor();
   }
@@ -339,8 +342,21 @@
     const piece = library.find((item) => item.piece_id === pieceId) ?? library[0];
     if (!piece) throw new Error('Non ci sono partiture disponibili');
     setStatus('Preparazione della partitura…'); els.piece.value = piece.piece_id; els.title.textContent = displayTitle(piece);
-    document.title = `${displayTitle(piece)} · Mostra partitura`; els.back.href = `index.html?piece=${encodeURIComponent(piece.piece_id)}`;
-    if (updateHistory) history.replaceState(null, '', `?piece=${encodeURIComponent(piece.piece_id)}`);
+    document.title = `${displayTitle(piece)} · Mostra partitura`;
+    const backQuery = new URLSearchParams({ piece: piece.piece_id });
+    if (entryQuery.get('from') === 'repertorio') backQuery.set('from', 'repertorio');
+    const returning = piece.piece_id === entryQuery.get('piece') && entryQuery.has('resume');
+    if (returning) for (const key of ['part', 'resume', 'entry']) {
+      if (entryQuery.has(key)) backQuery.set(key, entryQuery.get(key));
+    }
+    const fromMenu = entryQuery.get('from') === 'menu';
+    els.back.href = fromMenu ? 'index.html' : `index.html?${backQuery}`;
+    els.back.textContent = fromMenu ? 'Menù' : returning ? 'Torna alla prova' : 'Canta questo brano';
+    if (updateHistory) {
+      const query = new URLSearchParams({ piece: piece.piece_id });
+      if (fromMenu) query.set('from', 'menu');
+      history.replaceState(null, '', `?${query}`);
+    }
     try { localStorage.setItem('choir-last-practice-piece', piece.piece_id); } catch (_) {}
     const response = await fetch(bundleUrl(piece.piece_id), { cache:'force-cache' });
     if (!response.ok) throw new Error('Partitura non disponibile');
@@ -390,17 +406,22 @@
     const requested=new URLSearchParams(location.search).get('piece'); let remembered=null;
     try{remembered=localStorage.getItem('choir-last-practice-piece');}catch(_){}
     const selected=[requested,remembered,library[0].piece_id].find((id)=>id&&library.some((piece)=>piece.piece_id===id));
-    await openPiece(selected,{updateHistory:requested!==selected});
     els.piece.addEventListener('change',()=>openPiece(els.piece.value).catch((error)=>setStatus(error.message,true)));
     els.zoomOut.addEventListener('click',()=>setZoom(zoom-120)); els.zoomIn.addEventListener('click',()=>setZoom(zoom+120)); els.zoomFit.addEventListener('click',()=>{document.body.dataset.zoom='fit';});
     els.restart.addEventListener('click',()=>startFromBeat(0).catch(handlePlaybackError));
     els.play.addEventListener('click',()=>els.audio.paused?startPlayback().catch(handlePlaybackError):pausePlayback());
     els.mixerOpen.addEventListener('click',()=>{ pausePlayback(); els.mixer.showModal(); });
     els.mixerClose.addEventListener('click',()=>els.mixer.close());
+    els.mixer.addEventListener('click', event => {
+      if (event.target !== els.mixer) return;
+      const bounds = els.mixer.getBoundingClientRect();
+      if (event.clientX < bounds.left || event.clientX > bounds.right || event.clientY < bounds.top || event.clientY > bounds.bottom) els.mixer.close();
+    });
     els.audio.addEventListener('ended',pausePlayback);
     els.audio.addEventListener('timeupdate',synchronizeStems);
     window.addEventListener('pagehide',clearSeekableAudioUrls);
     document.addEventListener('keydown',(event)=>{
+      if (els.mixer.open || ['INPUT','SELECT','TEXTAREA','BUTTON','A'].includes(document.activeElement?.tagName)) return;
       if (event.code === 'Space') {
         event.preventDefault();
         event.stopPropagation();
@@ -413,6 +434,7 @@
       if(event.key==='-')setZoom(zoom-120);
       if(event.key==='0')document.body.dataset.zoom='fit';
     });
+    await openPiece(selected,{updateHistory:requested!==selected});
   }
   initialize().catch((error)=>{els.title.textContent='Partitura non disponibile';setStatus(error.message,true);console.error(error);});
 }());

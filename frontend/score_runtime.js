@@ -262,7 +262,7 @@
     }
 
     get running() {
-      return !this.media.paused && !this.media.ended;
+      return this.warmupTime == null && !this.media.paused && !this.media.ended;
     }
 
     get speed() {
@@ -276,6 +276,7 @@
     }
 
     pause() {
+      this.finishWarmup();
       this.media.pause();
       return this.snapshot();
     }
@@ -288,6 +289,7 @@
       const duration = Number.isFinite(this.media.duration) && this.media.duration > 0
         ? this.media.duration : Infinity;
       this.media.currentTime = Math.max(0, Math.min(duration, mediaSeconds));
+      if (this.warmupTime != null) this.warmupTime = this.media.currentTime;
       return this.snapshot();
     }
 
@@ -318,7 +320,7 @@
     }
 
     snapshot() {
-      const mediaTime = this.media.currentTime || 0;
+      const mediaTime = this.warmupTime ?? (this.media.currentTime || 0);
       const performanceTime = mediaTime * (this.preRenderedSpeed || 1);
       return {
         mediaTime,
@@ -327,6 +329,17 @@
         running: this.running,
         speed: this.preRenderedSpeed || this.speed,
       };
+    }
+
+    beginWarmup() {
+      if (this.warmupTime == null) this.warmupTime = this.media.currentTime || 0;
+    }
+
+    finishWarmup() {
+      if (this.warmupTime == null) return;
+      const position = this.warmupTime;
+      this.warmupTime = null;
+      this.media.currentTime = position;
     }
   }
 

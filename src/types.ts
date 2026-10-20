@@ -11,11 +11,17 @@ export interface Env {
 }
 
 export type ChoirRole = "singer" | "section_viewer" | "director" | "admin";
+export type VoicePart = "soprano" | "contralto" | "tenore" | "basso";
 
 export interface MemberContext {
   memberId: string;
   choirId: string;
   displayName: string;
+  firstName?: string | null;
+  lastName?: string | null;
+  profileCompleted?: boolean;
+  voicePart: VoicePart | null;
+  preferredVoicePart?: VoicePart | null;
   roles: ChoirRole[];
   groupIds: string[];
   viewableGroupIds: string[];

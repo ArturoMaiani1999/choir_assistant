@@ -19,7 +19,7 @@
     const plot = { left: 72, right: width - 28, top: 126, bottom: height - 66 };
     const pitches = [
       ...targetEvents.map(event => event.midiPitch),
-      ...pitchSamples.map(sample => sample.displayPitch),
+      ...pitchSamples.filter(global.PianoRoll.isAcceptedObservation).map(sample => sample.displayPitch),
     ].filter(Number.isFinite);
     const minPitch = Math.floor(Math.min(...pitches, 48)) - 2;
     const maxPitch = Math.ceil(Math.max(...pitches, 72)) + 2;
@@ -59,7 +59,7 @@
     ctx.strokeStyle = '#70ddd1'; ctx.lineWidth = 3; ctx.lineCap = 'round'; ctx.lineJoin = 'round';
     ctx.beginPath(); let previous = null;
     for (const sample of [...pitchSamples].sort((a, b) => a.beat - b.beat)) {
-      if (!Number.isFinite(sample.displayPitch) || !Number.isFinite(sample.beat)) { previous = null; continue; }
+      if (!global.PianoRoll.isAcceptedObservation(sample)) { previous = null; continue; }
       const point = { beat: sample.beat, pitch: sample.displayPitch };
       if (!previous || point.beat - previous.beat > .3 || Math.abs(point.pitch - previous.pitch) > 12) ctx.moveTo(x(point.beat), y(point.pitch));
       else ctx.lineTo(x(point.beat), y(point.pitch));
@@ -76,7 +76,7 @@
   }
 
   async function api(path, options) {
-    const response = await fetch(path, { cache: 'no-store', ...options });
+    const response = await global.ChoirAuthFetch(path, { cache: 'no-store', ...options });
     if (!response.ok) throw new Error((await response.json().catch(() => null))?.error || `HTTP ${response.status}`);
     return response.status === 204 ? null : response.json();
   }
@@ -91,9 +91,13 @@
   global.PerformanceSharing = Object.freeze({
     PROFILE, MIN_COVERAGE, renderPianoRoll, submitBest,
     me: () => api('/api/me'),
+    updateProfile: profile => api('/api/me', {
+      method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(profile),
+    }),
     mine: () => api('/api/performances/mine'),
     groups: () => api('/api/groups'),
     group: id => api(`/api/groups/${encodeURIComponent(id)}/performances`),
+    analysis: id => api(`/api/performances/${encodeURIComponent(id)}/analysis`),
     delete: id => api(`/api/performances/${encodeURIComponent(id)}`, { method: 'DELETE' }),
   });
 })(window);

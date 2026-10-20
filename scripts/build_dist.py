@@ -18,16 +18,25 @@ ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 DEFAULT_CONFIG = ROOT / "deploy" / "repertoire.json"
 CORE_ASSETS = (
-    "styles.css", "studio.css", "score_viewer.css", "performances.css", "ui_preferences.js", "score_appearance.js",
+    "styles.css", "studio.css", "ambient.css", "score_viewer.css", "performances.css", "ui_preferences.js", "score_appearance.js",
     "practice_math.js", "score_runtime.js", "pitch_detector.js",
     "pitch_detector_worker.js", "pitch_shared.js", "fluid_pitch_trail.js",
-    "vocal_feedback.js", "one_euro_filter.js", "pitch_shifter_worklet.js", "media_mixer.js", "performance_client.js", "recording_client.js", "app.js", "voice_lab_core.js",
-    "voice_lab.js", "score_viewer.js",
+    "microphone_calibration.js", "microphone_calibration_worker.js", "microphone_calibration_ui.js",
+    "echo_cancellation.js", "echo_cancellation_worker.js", "echo_cancellation_ui.js", "echo_capture_worklet.js", "echo_monitor_worklet.js", "echo_delay.js", "echo_delay_worklet.js", "echo_diagnostics.js", "echo_diagnostic_worklet.js",
+    "vocal_feedback.js", "one_euro_filter.js", "pitch_shifter_worklet.js", "media_mixer.js", "piano_roll.js",
+    "performance_client.js", "performance_review.js", "recording_client.js", "progress_client.js", "aggregate_pitch.js",
+    "cockpit.css", "cockpit.js", "pitch_lab.css", "pitch_lab_core.js", "pitch_lab_worker.js", "pitch_lab.js",
+    "repertorio.css", "repertorio.js", "auth.css", "app.js", "voice_lab_core.js",
+    "voice_lab.js", "score_viewer.js", "relax.css", "relax.js", "lissajous.js", "home.css", "home.js",
 )
 FORBIDDEN_TEXT = ("__pitchTestHooks", "/api/", "cdn.jsdelivr", "unpkg", "localhost")
 API_CLIENT_ROUTES = {
+    "voice_lab.": ("/api/me",),
     "performance_client.": ("/api/me", "/api/performances", "/api/groups"),
-    "recording_client.": ("/api/recordings",),
+    "recording_client.": ("/api/recordings", "/api/echo-diagnostics"),
+    "progress_client.": ("/api/progress",),
+    "cockpit.": ("/api/me", "/api/cockpit"),
+    "repertorio.": ("/api/me", "/api/progress"),
 }
 FORBIDDEN_SUFFIXES = (".mscz", ".env", ".py", ".map", ".musicxml", ".xml", ".onnx")
 MAX_FILE_BYTES = 25 * 1024 * 1024
@@ -122,7 +131,7 @@ def fingerprint_text(source_name: str, contents: str, destination: Path) -> str:
 
 def build_core_assets(destination: Path) -> dict[str, str]:
     """Copy core assets while preserving dependencies between hashed scripts."""
-    generated = {"app.js", "pitch_detector_worker.js"}
+    generated = {"app.js", "pitch_detector_worker.js", "pitch_lab_worker.js", "pitch_lab.js", "microphone_calibration_worker.js", "microphone_calibration_ui.js", "echo_cancellation_worker.js", "echo_cancellation_ui.js", "echo_delay_worklet.js", "echo_diagnostics.js"}
     names = {
         name: fingerprint_copy(FRONTEND / name, destination)
         for name in CORE_ASSETS
@@ -138,6 +147,40 @@ def build_core_assets(destination: Path) -> dict[str, str]:
     names["pitch_detector_worker.js"] = fingerprint_text(
         "pitch_detector_worker.js", worker, destination,
     )
+
+    lab_worker = (FRONTEND / "pitch_lab_worker.js").read_text(encoding="utf-8")
+    lab_worker = lab_worker.replace("pitch_lab_core.js", names["pitch_lab_core.js"])
+    names["pitch_lab_worker.js"] = fingerprint_text(
+        "pitch_lab_worker.js", lab_worker, destination,
+    )
+
+    pitch_lab = (FRONTEND / "pitch_lab.js").read_text(encoding="utf-8")
+    pitch_lab = pitch_lab.replace("pitch_lab_worker.js", names["pitch_lab_worker.js"])
+    names["pitch_lab.js"] = fingerprint_text("pitch_lab.js", pitch_lab, destination)
+
+    calibration_worker = (FRONTEND / "microphone_calibration_worker.js").read_text(encoding="utf-8")
+    for dependency in ("pitch_detector.js", "microphone_calibration.js"):
+        calibration_worker = calibration_worker.replace(dependency, names[dependency])
+    names["microphone_calibration_worker.js"] = fingerprint_text("microphone_calibration_worker.js", calibration_worker, destination)
+    calibration_ui = (FRONTEND / "microphone_calibration_ui.js").read_text(encoding="utf-8")
+    calibration_ui = calibration_ui.replace("microphone_calibration_worker.js", names["microphone_calibration_worker.js"])
+    names["microphone_calibration_ui.js"] = fingerprint_text("microphone_calibration_ui.js", calibration_ui, destination)
+
+    echo_worker = (FRONTEND / "echo_cancellation_worker.js").read_text(encoding="utf-8")
+    echo_worker = echo_worker.replace("echo_cancellation.js", names["echo_cancellation.js"])
+    echo_worker = echo_worker.replace("echo_delay.js", names["echo_delay.js"])
+    names["echo_cancellation_worker.js"] = fingerprint_text("echo_cancellation_worker.js", echo_worker, destination)
+    delay_worklet = (FRONTEND / "echo_delay_worklet.js").read_text(encoding="utf-8")
+    for dependency in ("echo_cancellation.js", "echo_delay.js"):
+        delay_worklet = delay_worklet.replace(dependency, names[dependency])
+    names["echo_delay_worklet.js"] = fingerprint_text("echo_delay_worklet.js", delay_worklet, destination)
+    echo_ui = (FRONTEND / "echo_cancellation_ui.js").read_text(encoding="utf-8")
+    for dependency in ("echo_cancellation_worker.js", "echo_capture_worklet.js", "echo_monitor_worklet.js", "echo_delay_worklet.js"):
+        echo_ui = echo_ui.replace(dependency, names[dependency])
+    names["echo_cancellation_ui.js"] = fingerprint_text("echo_cancellation_ui.js", echo_ui, destination)
+    diagnostic = (FRONTEND / "echo_diagnostics.js").read_text(encoding="utf-8")
+    diagnostic = diagnostic.replace("echo_diagnostic_worklet.js", names["echo_diagnostic_worklet.js"])
+    names["echo_diagnostics.js"] = fingerprint_text("echo_diagnostics.js", diagnostic, destination)
 
     app = (FRONTEND / "app.js").read_text(encoding="utf-8")
     app = re.sub(
@@ -159,13 +202,16 @@ def build_auth_client(destination: Path) -> None:
     npx = shutil.which("npx")
     if not npx:
         raise ValueError("Node/npm non trovato; eseguire npm install prima della build")
-    command = [
-        npx, "--no-install", "esbuild", str(FRONTEND / "auth-client.ts"),
-        "--bundle", "--minify", "--platform=browser", "--target=es2022",
-        f"--outfile={destination / 'auth-client.js'}",
-    ]
     try:
-        subprocess.run(command, cwd=ROOT, check=True)
+        for source, output in (
+            ("auth-client.ts", "auth-client.js"),
+            ("session-client.ts", "session-client.js"),
+        ):
+            subprocess.run([
+                npx, "--no-install", "esbuild", str(FRONTEND / source),
+                "--bundle", "--minify", "--platform=browser", "--target=es2022",
+                f"--outfile={destination / output}",
+            ], cwd=ROOT, check=True)
     except FileNotFoundError as error:
         raise ValueError("Node/npm non trovato; eseguire npm install prima della build") from error
     except subprocess.CalledProcessError as error:
@@ -273,7 +319,7 @@ def build_piece(piece: dict, destination: Path) -> dict:
 
 def write_headers(destination: Path) -> None:
     (destination / "_headers").write_text("""/*
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob:; media-src 'self' blob:; connect-src 'self'; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://img.clerk.com; media-src 'self' blob:; connect-src 'self' https://clerk.staging.epistrophe.it https://*.protect.clerk.com:*; worker-src 'self' blob:; frame-src https://challenges.cloudflare.com https://*.protect.clerk.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Permissions-Policy: microphone=(self), camera=(), geolocation=()
@@ -283,16 +329,31 @@ def write_headers(destination: Path) -> None:
 /index.html
   Cache-Control: no-cache
 
+/cockpit.html
+  Cache-Control: no-cache
+
+/repertorio.html
+  Cache-Control: no-cache
+
+/relax.html
+  Cache-Control: no-cache
+
 /sign-in.html
   Cache-Control: no-store
 
 /sign-up.html
   Cache-Control: no-store
 
+/sign-out.html
+  Cache-Control: no-store
+
 /not-authorized.html
   Cache-Control: no-store
 
 /auth-client.js
+  Cache-Control: no-store
+
+/session-client.js
   Cache-Control: no-store
 
 /*.js
@@ -339,7 +400,7 @@ def audit(destination: Path) -> dict[str, str]:
                     raise ValueError(f"Route API non autorizzata in {relative}")
             forbidden = (
                 tuple(marker for marker in FORBIDDEN_TEXT if marker not in {"/api/", "localhost"})
-                if relative == "auth-client.js"
+                if relative in {"auth-client.js", "session-client.js"}
                 else tuple(marker for marker in FORBIDDEN_TEXT if marker != "/api/")
                 if allowed_api_routes
                 else FORBIDDEN_TEXT
@@ -385,6 +446,14 @@ def main() -> int:
     temporary_runtime.unlink()
     index = index.replace("runtime-config.js", runtime_name)
     (destination / "index.html").write_text(index, encoding="utf-8")
+    cockpit_index = (FRONTEND / "cockpit.html").read_text(encoding="utf-8")
+    for original, fingerprinted in names.items():
+        cockpit_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, cockpit_index)
+    (destination / "cockpit.html").write_text(cockpit_index, encoding="utf-8")
+    repertoire_index = (FRONTEND / "repertorio.html").read_text(encoding="utf-8")
+    for original, fingerprinted in names.items():
+        repertoire_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, repertoire_index)
+    (destination / "repertorio.html").write_text(repertoire_index, encoding="utf-8")
     lab_index = (FRONTEND / "voice-lab.html").read_text(encoding="utf-8")
     for original, fingerprinted in names.items():
         lab_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, lab_index)
@@ -395,9 +464,14 @@ def main() -> int:
         viewer_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, viewer_index)
     viewer_index = viewer_index.replace("runtime-config.js", runtime_name)
     (destination / "score-viewer.html").write_text(viewer_index, encoding="utf-8")
-    shutil.copy2(FRONTEND / "sign-in.html", destination / "sign-in.html")
-    shutil.copy2(FRONTEND / "sign-up.html", destination / "sign-up.html")
-    shutil.copy2(FRONTEND / "not-authorized.html", destination / "not-authorized.html")
+    relax_index = (FRONTEND / "relax.html").read_text(encoding="utf-8")
+    for original, fingerprinted in names.items():
+        relax_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, relax_index)
+    (destination / "relax.html").write_text(relax_index, encoding="utf-8")
+    for auth_page in ("sign-in.html", "sign-up.html", "sign-out.html", "not-authorized.html"):
+        auth_index = (FRONTEND / auth_page).read_text(encoding="utf-8")
+        auth_index = auth_index.replace("auth.css", names["auth.css"])
+        (destination / auth_page).write_text(auth_index, encoding="utf-8")
     lab_assets = destination / "voice-lab-assets"
     lab_assets.mkdir()
     shutil.copy2(FRONTEND / "voice-lab-assets" / "manifest.json", lab_assets / "manifest.json")

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="robots" content="noindex,nofollow,noarchive">
+    <title>Esci · Epistrophe</title>
+    <link rel="stylesheet" href="auth.css">
+  </head>
+  <body data-auth-mode="sign-out">
+    <main>
+      <h1>Esci da Epistrophe?</h1>
+      <p>La sessione verrà chiusa su questo dispositivo.</p>
+      <p id="auth-status" role="status">Verifica della sessione…</p>
+      <div id="clerk-sign-in" hidden></div>
+      <div id="signed-in-actions" hidden></div>
+    </main>
+    <script type="module" src="/auth-client.js"></script>
+  </body>
+</html>

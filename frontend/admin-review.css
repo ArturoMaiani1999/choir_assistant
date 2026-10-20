@@ -1,7 +1,8 @@
 :root { color-scheme: dark; font-family: Inter, system-ui, sans-serif; background: #071319; color: #eaf1ed; }
 * { box-sizing: border-box; }
 body { margin: 0; }
-header { position: sticky; top: 0; z-index: 5; display: flex; justify-content: space-between; gap: 2rem; align-items: center; padding: 1rem clamp(1rem, 4vw, 4rem); border-bottom: 1px solid #284047; background: rgba(7,19,25,.96); }
+:focus-visible { outline: 3px solid #75cbc5; outline-offset: 3px; }
+header { position: sticky; top: 0; z-index: 5; display: flex; justify-content: space-between; gap: 2rem; align-items: center; padding: max(1rem, env(safe-area-inset-top)) max(clamp(1rem, 4vw, 4rem), env(safe-area-inset-right)) 1rem max(clamp(1rem, 4vw, 4rem), env(safe-area-inset-left)); border-bottom: 1px solid #284047; background: rgba(7,19,25,.96); }
 h1, h2, p { margin-top: 0; } h1 { margin-bottom: .25rem; font-family: Georgia, serif; } h2 { font-size: 1rem; }
 header a { color: #e5b766; } .eyebrow { margin-bottom: .25rem; color: #75cbc5; font-size: .7rem; letter-spacing: .12em; text-transform: uppercase; }
 main { width: min(1500px, 96vw); margin: 1.5rem auto 4rem; display: grid; gap: 1rem; }
@@ -19,3 +20,4 @@ audio { width: min(760px, 100%); } .audio-review p { color: #91aaa9; }
 .file-picker { border: 1px solid #c59245; border-radius: 5px; padding: .65rem .9rem; background: #b57b28; color: #111; cursor: pointer; font-weight: 800; }
 .source-edit { background: #10272e; }
 @media (max-width: 800px) { .comparison { grid-template-columns: 1fr; } .image-frame { height: 320px; } .status-card { align-items: flex-start; flex-direction: column; } }
+@media (prefers-reduced-motion: reduce) { *, *::before, *::after { scroll-behavior: auto !important; transition-duration: .01ms !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; } }

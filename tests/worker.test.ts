@@ -37,6 +37,7 @@ function fakeEnv(options: { active?: boolean; dbError?: boolean } = {}): Env {
               if (query.includes("FROM authorized_members m JOIN choirs")) {
                 return {
                   member_id: "member-test", choir_id: "choir-primary", display_name: "Singer",
+                  voice_part: "tenore",
                   clerk_subject: IDENTITY.subject, active: options.active === false ? 0 : 1,
                 };
               }
@@ -112,6 +113,8 @@ describe("post-authentication return URL", () => {
     "/auth/config",
     "/sign-in",
     "/sign-up",
+    "/sign-out",
+    "/sign-out.html?return_url=/",
   ])("rejects unsafe target %s", (target) => {
     expect(safeReturnPath(target, origin)).toBe("/");
   });
@@ -249,6 +252,7 @@ describe("edge authorization", () => {
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
       member: { id: "member-test", displayName: "Singer" },
+      voicePart: "tenore",
       roles: ["singer"],
       canViewAllGroups: false,
     });
@@ -291,13 +295,29 @@ describe("edge authorization", () => {
     expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
-  it("serves the local first-access page with the same protections", async () => {
+  it("serves only the fingerprinted authentication stylesheet before login", async () => {
+    const worker = createWorker(anonymous);
+    const publicStyle = await worker.fetch(
+      new Request("https://choir.example.org/auth.0123456789ab.css"),
+      fakeEnv(),
+    );
+    expect(publicStyle.status).toBe(200);
+    expect(await publicStyle.text()).toBe("asset:/auth.0123456789ab.css");
+
+    const privateStyle = await worker.fetch(
+      new Request("https://choir.example.org/cockpit.0123456789ab.css"),
+      fakeEnv(),
+    );
+    expect(privateStyle.status).toBe(401);
+  });
+
+  it.each(["sign-up", "sign-out", "sign-out.html"])("serves the local %s page with the same protections", async (page) => {
     const response = await createWorker(anonymous).fetch(
-      new Request("https://choir.example.org/sign-up"),
+      new Request(`https://choir.example.org/${page}`),
       fakeEnv(),
     );
     expect(response.status).toBe(200);
-    expect(await response.text()).toBe("asset:/sign-up");
+    expect(await response.text()).toBe(`asset:/${page}`);
     expect(response.headers.get("Content-Security-Policy")).toContain(
       "https://clerk.choir.example.org",
     );

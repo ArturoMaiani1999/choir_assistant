@@ -1,0 +1,2441 @@
+{
+  "date": "2026-10-18",
+  "algorithmVersion": "2026.10.18-3",
+  "real": {
+    "id": "R01",
+    "piece": "o-sacrum",
+    "voicePart": "tenore",
+    "durationSec": 57.66,
+    "sampleRate": 48000,
+    "sampleCount": 2767680,
+    "audioSha256": "9237139778bb7e7025ed6079cd5173b0ed8e648a7c715f17c8a8792c55128166",
+    "acousticReferenceAvailable": false,
+    "frameCount": 1798,
+    "originalYinStandalone": {
+      "config": {
+        "algorithm": "yin",
+        "frameLength": 2048,
+        "hopLength": 512,
+        "analysisSampleRate": 16000,
+        "fmin": 70,
+        "fmax": 1000,
+        "removeDc": true,
+        "rmsThreshold": 0.000002,
+        "yinThreshold": 0.42,
+        "levelConfidenceFloor": 0.36,
+        "minClarity": 0.45,
+        "minConfidence": 0.3,
+        "warmupFrames": 3,
+        "releaseFrames": 3,
+        "weakSignalHoldFrames": 0,
+        "medianWindowFrames": 3,
+        "fastAlpha": 0.65,
+        "slowAlpha": 0.3,
+        "smallJumpCents": 300,
+        "largeJumpConfirmFrames": 3,
+        "octaveCenterCents": 1200,
+        "octaveToleranceCents": 180,
+        "octaveConfirmFrames": 5,
+        "candidateConsistencyCents": 100,
+        "tracking": true,
+        "nThresholds": 100,
+        "betaAlpha": 2,
+        "betaBeta": 18,
+        "boltzmannParameter": 2,
+        "resolution": 0.1,
+        "maxTransitionRate": 35.92,
+        "switchProb": 0.01,
+        "noTroughProb": 0.01,
+        "discontinuityCents": 700,
+        "disagreementCents": 100,
+        "label": "YIN Production",
+        "presetId": "yin-production"
+      },
+      "metrics": {
+        "coveragePercent": 74.80533926585095,
+        "processingMs": 851.1354
+      }
+    },
+    "batchPerformance": {
+      "batchProcessingMs": 2128.5480000000002,
+      "sharedPreprocessingMs": 615.3796,
+      "configurationCount": 6,
+      "cmndFrameCount": 1798
+    },
+    "evaluations": [
+      {
+        "config": {
+          "algorithm": "pyin",
+          "frameLength": 2048,
+          "hopLength": 512,
+          "analysisSampleRate": 16000,
+          "fmin": 70,
+          "fmax": 1000,
+          "removeDc": false,
+          "rmsThreshold": 0.000002,
+          "yinThreshold": 0.42,
+          "levelConfidenceFloor": 0.36,
+          "minClarity": 0.45,
+          "minConfidence": 0.3,
+          "warmupFrames": 3,
+          "releaseFrames": 3,
+          "weakSignalHoldFrames": 0,
+          "medianWindowFrames": 3,
+          "fastAlpha": 0.65,
+          "slowAlpha": 0.3,
+          "smallJumpCents": 300,
+          "largeJumpConfirmFrames": 3,
+          "octaveCenterCents": 1200,
+          "octaveToleranceCents": 180,
+          "octaveConfirmFrames": 5,
+          "candidateConsistencyCents": 100,
+          "tracking": true,
+          "nThresholds": 100,
+          "betaAlpha": 2,
+          "betaBeta": 18,
+          "boltzmannParameter": 2,
+          "resolution": 0.1,
+          "maxTransitionRate": 35.92,
+          "switchProb": 0.01,
+          "noTroughProb": 0.01,
+          "decoder": "legacy-sparse",
+          "minVoicedProbability": 0,
+          "discontinuityCents": 700,
+          "disagreementCents": 100,
+          "label": "pYIN Default",
+          "presetId": "pyin-default"
+        },
+        "configHash": "a87e16bb",
+        "metrics": {
+          "audioDurationSec": 57.66,
+          "processingMs": 145.3529666666667,
+          "processingMsPerFrame": 0.08084147200593254,
+          "realtimeFactor": 0.0025208631055613374,
+          "frameRate": 31.25,
+          "frameCount": 1798,
+          "rawDetectedPercent": 99.55506117908787,
+          "detectedPercent": 2.947719688542825,
+          "gaps": [
+            {
+              "startSec": 0.064,
+              "endSec": 5.92,
+              "durationSec": 5.856
+            },
+            {
+              "startSec": 6.08,
+              "endSec": 9.28,
+              "durationSec": 3.2
+            },
+            {
+              "startSec": 9.344,
+              "endSec": 9.664,
+              "durationSec": 0.32
+            },
+            {
+              "startSec": 9.696,
+              "endSec": 11.52,
+              "durationSec": 1.824
+            },
+            {
+              "startSec": 11.552,
+              "endSec": 18.4,
+              "durationSec": 6.848
+            },
+            {
+              "startSec": 18.432,
+              "endSec": 18.688,
+              "durationSec": 0.256
+            },
+            {
+              "startSec": 18.848,
+              "endSec": 19.616,
+              "durationSec": 0.768
+            },
+            {
+              "startSec": 19.712,
+              "endSec": 37.471999999999994,
+              "durationSec": 17.76
+            },
+            {
+              "startSec": 37.536,
+              "endSec": 39.775999999999996,
+              "durationSec": 2.24
+            },
+            {
+              "startSec": 39.904,
+              "endSec": 40.352,
+              "durationSec": 0.448
+            },
+            {
+              "startSec": 40.384,
+              "endSec": 40.57599999999999,
+              "durationSec": 0.192
+            },
+            {
+              "startSec": 41.024,
+              "endSec": 45.855999999999995,
+              "durationSec": 4.832
+            },
+            {
+              "startSec": 46.016,
+              "endSec": 49.919999999999995,
+              "durationSec": 3.904
+            },
+            {
+              "startSec": 49.952,
+              "endSec": 50.912,
+              "durationSec": 0.96
+            },
+            {
+              "startSec": 50.944,
+              "endSec": 52.63999999999999,
+              "durationSec": 1.696
+            },
+            {
+              "startSec": 52.736,
+              "endSec": 52.992,
+              "durationSec": 0.256
+            },
+            {
+              "startSec": 53.088,
+              "endSec": 53.791999999999994,
+              "durationSec": 0.704
+            },
+            {
+              "startSec": 53.824,
+              "endSec": 57.599999999999994,
+              "durationSec": 3.7760000000000002
+            }
+          ],
+          "gapDurationSec": 55.84000000000001,
+          "gapMedianSec": 1.76,
+          "gapP95Sec": 8.484799999999986,
+          "rejectionReasons": {
+            "pyin-low-voicing": 546,
+            "pyin-decoder-unvoiced": 1191,
+            "pyin-no-candidate": 8
+          },
+          "discontinuities": 0,
+          "possibleOctaveJumps": 0,
+          "diagnostics": {
+            "noCandidateFrames": 8,
+            "candidateRejectedFrames": 1737,
+            "highProbabilityRejectedFrames": 1191
+          },
+          "targetEvaluableSec": 0,
+          "targetEvaluablePercent": 0,
+          "targetMedianAbsoluteCents": null,
+          "conditionalIntonationPercent": null,
+          "acousticAccuracy": null,
+          "scientificNote": "Le distanze dalla partitura misurano aderenza musicale, non accuratezza acustica della F0."
+        }
+      },
+      {
+        "config": {
+          "algorithm": "pyin",
+          "frameLength": 2048,
+          "hopLength": 512,
+          "analysisSampleRate": 16000,
+          "fmin": 70,
+          "fmax": 1000,
+          "removeDc": false,
+          "rmsThreshold": 0.000002,
+          "yinThreshold": 0.42,
+          "levelConfidenceFloor": 0.36,
+          "minClarity": 0.45,
+          "minConfidence": 0.3,
+          "warmupFrames": 3,
+          "releaseFrames": 3,
+          "weakSignalHoldFrames": 0,
+          "medianWindowFrames": 3,
+          "fastAlpha": 0.65,
+          "slowAlpha": 0.3,
+          "smallJumpCents": 300,
+          "largeJumpConfirmFrames": 3,
+          "octaveCenterCents": 1200,
+          "octaveToleranceCents": 180,
+          "octaveConfirmFrames": 5,
+          "candidateConsistencyCents": 100,
+          "tracking": true,
+          "nThresholds": 100,
+          "betaAlpha": 2,
+          "betaBeta": 18,
+          "boltzmannParameter": 2,
+          "resolution": 0.1,
+          "maxTransitionRate": 35.92,
+          "switchProb": 0.01,
+          "noTroughProb": 0.01,
+          "decoder": "normalized-grid",
+          "minVoicedProbability": 0,
+          "discontinuityCents": 700,
+          "disagreementCents": 100,
+          "label": "pYIN Default",
+          "presetId": "pyin-default"
+        },
+        "configHash": "906331f1",
+        "metrics": {
+          "audioDurationSec": 57.66,
+          "processingMs": 296.7502666666667,
+          "processingMsPerFrame": 0.1650446421950315,
+          "realtimeFactor": 0.0051465533587698,
+          "frameRate": 31.25,
+          "frameCount": 1798,
+          "rawDetectedPercent": 99.55506117908787,
+          "detectedPercent": 86.26251390433815,
+          "gaps": [
+            {
+              "startSec": 0.064,
+              "endSec": 2.464,
+              "durationSec": 2.4
+            },
+            {
+              "startSec": 9.888,
+              "endSec": 10.208,
+              "durationSec": 0.32
+            },
+            {
+              "startSec": 11.84,
+              "endSec": 12.288,
+              "durationSec": 0.448
+            },
+            {
+              "startSec": 13.344,
+              "endSec": 13.376,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 14.976,
+              "endSec": 15.392,
+              "durationSec": 0.41600000000000004
+            },
+            {
+              "startSec": 21.76,
+              "endSec": 22.176,
+              "durationSec": 0.41600000000000004
+            },
+            {
+              "startSec": 23.648,
+              "endSec": 23.712,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 27.744,
+              "endSec": 28.064,
+              "durationSec": 0.32
+            },
+            {
+              "startSec": 33.824,
+              "endSec": 34.208,
+              "durationSec": 0.384
+            },
+            {
+              "startSec": 35.04,
+              "endSec": 35.071999999999996,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 40.128,
+              "endSec": 40.16,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 42.944,
+              "endSec": 43.263999999999996,
+              "durationSec": 0.32
+            },
+            {
+              "startSec": 44.224,
+              "endSec": 44.25599999999999,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 54.08,
+              "endSec": 55.135999999999996,
+              "durationSec": 1.056
+            },
+            {
+              "startSec": 55.968,
+              "endSec": 57.599999999999994,
+              "durationSec": 1.6320000000000001
+            }
+          ],
+          "gapDurationSec": 7.904000000000002,
+          "gapMedianSec": 0.32,
+          "gapP95Sec": 1.8623999999999992,
+          "rejectionReasons": {
+            "pyin-low-voicing": 239,
+            "pyin-no-candidate": 8
+          },
+          "discontinuities": 1,
+          "possibleOctaveJumps": 0,
+          "diagnostics": {
+            "noCandidateFrames": 8,
+            "candidateRejectedFrames": 239,
+            "highProbabilityRejectedFrames": 0
+          },
+          "targetEvaluableSec": 0,
+          "targetEvaluablePercent": 0,
+          "targetMedianAbsoluteCents": null,
+          "conditionalIntonationPercent": null,
+          "acousticAccuracy": null,
+          "scientificNote": "Le distanze dalla partitura misurano aderenza musicale, non accuratezza acustica della F0."
+        }
+      },
+      {
+        "config": {
+          "algorithm": "pyin",
+          "frameLength": 2048,
+          "hopLength": 512,
+          "analysisSampleRate": 16000,
+          "fmin": 70,
+          "fmax": 1000,
+          "removeDc": false,
+          "rmsThreshold": 0.000002,
+          "yinThreshold": 0.42,
+          "levelConfidenceFloor": 0.36,
+          "minClarity": 0.45,
+          "minConfidence": 0.3,
+          "warmupFrames": 3,
+          "releaseFrames": 3,
+          "weakSignalHoldFrames": 0,
+          "medianWindowFrames": 3,
+          "fastAlpha": 0.65,
+          "slowAlpha": 0.3,
+          "smallJumpCents": 300,
+          "largeJumpConfirmFrames": 3,
+          "octaveCenterCents": 1200,
+          "octaveToleranceCents": 180,
+          "octaveConfirmFrames": 5,
+          "candidateConsistencyCents": 100,
+          "tracking": true,
+          "nThresholds": 100,
+          "betaAlpha": 2,
+          "betaBeta": 18,
+          "boltzmannParameter": 2,
+          "resolution": 0.1,
+          "maxTransitionRate": 35.92,
+          "switchProb": 0.01,
+          "noTroughProb": 0.01,
+          "decoder": "normalized-grid",
+          "minVoicedProbability": 0.05,
+          "discontinuityCents": 700,
+          "disagreementCents": 100,
+          "label": "pYIN Default",
+          "presetId": "pyin-default"
+        },
+        "configHash": "13c57042",
+        "metrics": {
+          "audioDurationSec": 57.66,
+          "processingMs": 285.4498666666666,
+          "processingMsPerFrame": 0.15875965888023727,
+          "realtimeFactor": 0.0049505700080934205,
+          "frameRate": 31.25,
+          "frameCount": 1798,
+          "rawDetectedPercent": 99.55506117908787,
+          "detectedPercent": 78.75417130144605,
+          "gaps": [
+            {
+              "startSec": 0.064,
+              "endSec": 2.496,
+              "durationSec": 2.432
+            },
+            {
+              "startSec": 3.168,
+              "endSec": 3.2640000000000002,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 4.16,
+              "endSec": 4.224,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 5.696,
+              "endSec": 5.824,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 8.672,
+              "endSec": 8.704,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 9.12,
+              "endSec": 9.152,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 9.888,
+              "endSec": 10.24,
+              "durationSec": 0.352
+            },
+            {
+              "startSec": 11.776,
+              "endSec": 12.32,
+              "durationSec": 0.544
+            },
+            {
+              "startSec": 13.248,
+              "endSec": 13.408,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 14.528,
+              "endSec": 15.424,
+              "durationSec": 0.896
+            },
+            {
+              "startSec": 16.096,
+              "endSec": 16.224,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 18.208,
+              "endSec": 18.272,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 21.728,
+              "endSec": 22.208,
+              "durationSec": 0.48
+            },
+            {
+              "startSec": 23.616,
+              "endSec": 23.744,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 24.192,
+              "endSec": 24.256,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 27.68,
+              "endSec": 28.224,
+              "durationSec": 0.544
+            },
+            {
+              "startSec": 29.568,
+              "endSec": 29.696,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 30.112,
+              "endSec": 30.176,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 31.136,
+              "endSec": 31.296,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 32.192,
+              "endSec": 32.288,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 32.544,
+              "endSec": 32.736,
+              "durationSec": 0.192
+            },
+            {
+              "startSec": 33.76,
+              "endSec": 34.239999999999995,
+              "durationSec": 0.48
+            },
+            {
+              "startSec": 35.008,
+              "endSec": 35.232,
+              "durationSec": 0.224
+            },
+            {
+              "startSec": 36.16,
+              "endSec": 36.224,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 39.168,
+              "endSec": 39.263999999999996,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 40.064,
+              "endSec": 40.224,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 42.784,
+              "endSec": 43.296,
+              "durationSec": 0.512
+            },
+            {
+              "startSec": 44.192,
+              "endSec": 44.31999999999999,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 47.616,
+              "endSec": 47.711999999999996,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 48.224,
+              "endSec": 48.25599999999999,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 53.952,
+              "endSec": 57.599999999999994,
+              "durationSec": 3.648
+            }
+          ],
+          "gapDurationSec": 12.224000000000004,
+          "gapMedianSec": 0.128,
+          "gapP95Sec": 1.664,
+          "rejectionReasons": {
+            "pyin-voicing-gate": 371,
+            "pyin-low-voicing": 3,
+            "pyin-no-candidate": 8
+          },
+          "discontinuities": 0,
+          "possibleOctaveJumps": 0,
+          "diagnostics": {
+            "noCandidateFrames": 8,
+            "candidateRejectedFrames": 374,
+            "highProbabilityRejectedFrames": 0
+          },
+          "targetEvaluableSec": 0,
+          "targetEvaluablePercent": 0,
+          "targetMedianAbsoluteCents": null,
+          "conditionalIntonationPercent": null,
+          "acousticAccuracy": null,
+          "scientificNote": "Le distanze dalla partitura misurano aderenza musicale, non accuratezza acustica della F0."
+        }
+      },
+      {
+        "config": {
+          "algorithm": "pyin",
+          "frameLength": 2048,
+          "hopLength": 512,
+          "analysisSampleRate": 16000,
+          "fmin": 70,
+          "fmax": 1000,
+          "removeDc": false,
+          "rmsThreshold": 0.000002,
+          "yinThreshold": 0.42,
+          "levelConfidenceFloor": 0.36,
+          "minClarity": 0.45,
+          "minConfidence": 0.3,
+          "warmupFrames": 3,
+          "releaseFrames": 3,
+          "weakSignalHoldFrames": 0,
+          "medianWindowFrames": 3,
+          "fastAlpha": 0.65,
+          "slowAlpha": 0.3,
+          "smallJumpCents": 300,
+          "largeJumpConfirmFrames": 3,
+          "octaveCenterCents": 1200,
+          "octaveToleranceCents": 180,
+          "octaveConfirmFrames": 5,
+          "candidateConsistencyCents": 100,
+          "tracking": true,
+          "nThresholds": 100,
+          "betaAlpha": 2,
+          "betaBeta": 18,
+          "boltzmannParameter": 2,
+          "resolution": 0.1,
+          "maxTransitionRate": 35.92,
+          "switchProb": 0.01,
+          "noTroughProb": 0.01,
+          "decoder": "normalized-grid",
+          "minVoicedProbability": 0.1,
+          "discontinuityCents": 700,
+          "disagreementCents": 100,
+          "label": "pYIN Default",
+          "presetId": "pyin-default"
+        },
+        "configHash": "029dfab0",
+        "metrics": {
+          "audioDurationSec": 57.66,
+          "processingMs": 296.55696666666665,
+          "processingMsPerFrame": 0.1649371338524286,
+          "realtimeFactor": 0.005143200948086484,
+          "frameRate": 31.25,
+          "frameCount": 1798,
+          "rawDetectedPercent": 99.55506117908787,
+          "detectedPercent": 78.03114571746384,
+          "gaps": [
+            {
+              "startSec": 0.064,
+              "endSec": 2.496,
+              "durationSec": 2.432
+            },
+            {
+              "startSec": 3.168,
+              "endSec": 3.2640000000000002,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 4.16,
+              "endSec": 4.224,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 5.696,
+              "endSec": 5.824,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 8.64,
+              "endSec": 8.704,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 9.12,
+              "endSec": 9.152,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 9.856,
+              "endSec": 10.24,
+              "durationSec": 0.384
+            },
+            {
+              "startSec": 11.328,
+              "endSec": 11.36,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 11.744,
+              "endSec": 12.32,
+              "durationSec": 0.5760000000000001
+            },
+            {
+              "startSec": 13.248,
+              "endSec": 13.408,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 14.528,
+              "endSec": 15.424,
+              "durationSec": 0.896
+            },
+            {
+              "startSec": 15.552,
+              "endSec": 15.584,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 16.096,
+              "endSec": 16.256,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 18.208,
+              "endSec": 18.272,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 21.728,
+              "endSec": 22.208,
+              "durationSec": 0.48
+            },
+            {
+              "startSec": 23.584,
+              "endSec": 23.744,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 24.192,
+              "endSec": 24.256,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 27.648,
+              "endSec": 28.224,
+              "durationSec": 0.5760000000000001
+            },
+            {
+              "startSec": 29.568,
+              "endSec": 29.728,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 30.112,
+              "endSec": 30.176,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 31.136,
+              "endSec": 31.328,
+              "durationSec": 0.192
+            },
+            {
+              "startSec": 32.192,
+              "endSec": 32.31999999999999,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 32.544,
+              "endSec": 32.736,
+              "durationSec": 0.192
+            },
+            {
+              "startSec": 33.76,
+              "endSec": 34.272,
+              "durationSec": 0.512
+            },
+            {
+              "startSec": 35.008,
+              "endSec": 35.232,
+              "durationSec": 0.224
+            },
+            {
+              "startSec": 36.16,
+              "endSec": 36.224,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 39.168,
+              "endSec": 39.263999999999996,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 40.064,
+              "endSec": 40.224,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 42.784,
+              "endSec": 43.296,
+              "durationSec": 0.512
+            },
+            {
+              "startSec": 44.192,
+              "endSec": 44.31999999999999,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 47.616,
+              "endSec": 47.711999999999996,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 48.192,
+              "endSec": 48.25599999999999,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 53.952,
+              "endSec": 57.599999999999994,
+              "durationSec": 3.648
+            }
+          ],
+          "gapDurationSec": 12.640000000000004,
+          "gapMedianSec": 0.16,
+          "gapP95Sec": 1.510399999999998,
+          "rejectionReasons": {
+            "pyin-voicing-gate": 386,
+            "pyin-low-voicing": 1,
+            "pyin-no-candidate": 8
+          },
+          "discontinuities": 0,
+          "possibleOctaveJumps": 0,
+          "diagnostics": {
+            "noCandidateFrames": 8,
+            "candidateRejectedFrames": 387,
+            "highProbabilityRejectedFrames": 0
+          },
+          "targetEvaluableSec": 0,
+          "targetEvaluablePercent": 0,
+          "targetMedianAbsoluteCents": null,
+          "conditionalIntonationPercent": null,
+          "acousticAccuracy": null,
+          "scientificNote": "Le distanze dalla partitura misurano aderenza musicale, non accuratezza acustica della F0."
+        }
+      },
+      {
+        "config": {
+          "algorithm": "pyin",
+          "frameLength": 2048,
+          "hopLength": 512,
+          "analysisSampleRate": 16000,
+          "fmin": 70,
+          "fmax": 1000,
+          "removeDc": false,
+          "rmsThreshold": 0.000002,
+          "yinThreshold": 0.42,
+          "levelConfidenceFloor": 0.36,
+          "minClarity": 0.45,
+          "minConfidence": 0.3,
+          "warmupFrames": 3,
+          "releaseFrames": 3,
+          "weakSignalHoldFrames": 0,
+          "medianWindowFrames": 3,
+          "fastAlpha": 0.65,
+          "slowAlpha": 0.3,
+          "smallJumpCents": 300,
+          "largeJumpConfirmFrames": 3,
+          "octaveCenterCents": 1200,
+          "octaveToleranceCents": 180,
+          "octaveConfirmFrames": 5,
+          "candidateConsistencyCents": 100,
+          "tracking": true,
+          "nThresholds": 100,
+          "betaAlpha": 2,
+          "betaBeta": 12,
+          "boltzmannParameter": 2,
+          "resolution": 0.1,
+          "maxTransitionRate": 35.92,
+          "switchProb": 0.01,
+          "noTroughProb": 0.01,
+          "decoder": "normalized-grid",
+          "minVoicedProbability": 0.05,
+          "discontinuityCents": 700,
+          "disagreementCents": 100,
+          "label": "pYIN Default",
+          "presetId": "pyin-default"
+        },
+        "configHash": "4aac3b00",
+        "metrics": {
+          "audioDurationSec": 57.66,
+          "processingMs": 287.20066666666673,
+          "processingMsPerFrame": 0.15973340748980352,
+          "realtimeFactor": 0.004980934212047637,
+          "frameRate": 31.25,
+          "frameCount": 1798,
+          "rawDetectedPercent": 99.6106785317019,
+          "detectedPercent": 80.81201334816463,
+          "gaps": [
+            {
+              "startSec": 0.064,
+              "endSec": 2.464,
+              "durationSec": 2.4
+            },
+            {
+              "startSec": 3.2,
+              "endSec": 3.2640000000000002,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 4.16,
+              "endSec": 4.192,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 5.696,
+              "endSec": 5.824,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 8.672,
+              "endSec": 8.704,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 9.12,
+              "endSec": 9.152,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 9.888,
+              "endSec": 10.208,
+              "durationSec": 0.32
+            },
+            {
+              "startSec": 11.776,
+              "endSec": 12.32,
+              "durationSec": 0.544
+            },
+            {
+              "startSec": 13.28,
+              "endSec": 13.376,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 14.688,
+              "endSec": 15.424,
+              "durationSec": 0.736
+            },
+            {
+              "startSec": 16.128,
+              "endSec": 16.224,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 18.208,
+              "endSec": 18.272,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 21.728,
+              "endSec": 22.208,
+              "durationSec": 0.48
+            },
+            {
+              "startSec": 23.616,
+              "endSec": 23.712,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 27.68,
+              "endSec": 28.192,
+              "durationSec": 0.512
+            },
+            {
+              "startSec": 29.6,
+              "endSec": 29.696,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 30.112,
+              "endSec": 30.176,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 31.168,
+              "endSec": 31.296,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 32.576,
+              "endSec": 32.736,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 33.76,
+              "endSec": 34.239999999999995,
+              "durationSec": 0.48
+            },
+            {
+              "startSec": 35.008,
+              "endSec": 35.199999999999996,
+              "durationSec": 0.192
+            },
+            {
+              "startSec": 40.096,
+              "endSec": 40.224,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 42.784,
+              "endSec": 42.848,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 42.944,
+              "endSec": 43.263999999999996,
+              "durationSec": 0.32
+            },
+            {
+              "startSec": 44.224,
+              "endSec": 44.288,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 47.616,
+              "endSec": 47.68,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 53.952,
+              "endSec": 57.599999999999994,
+              "durationSec": 3.648
+            }
+          ],
+          "gapDurationSec": 11.040000000000003,
+          "gapMedianSec": 0.128,
+          "gapP95Sec": 1.9007999999999987,
+          "rejectionReasons": {
+            "pyin-voicing-gate": 334,
+            "pyin-low-voicing": 4,
+            "pyin-no-candidate": 7
+          },
+          "discontinuities": 0,
+          "possibleOctaveJumps": 0,
+          "diagnostics": {
+            "noCandidateFrames": 7,
+            "candidateRejectedFrames": 338,
+            "highProbabilityRejectedFrames": 0
+          },
+          "targetEvaluableSec": 0,
+          "targetEvaluablePercent": 0,
+          "targetMedianAbsoluteCents": null,
+          "conditionalIntonationPercent": null,
+          "acousticAccuracy": null,
+          "scientificNote": "Le distanze dalla partitura misurano aderenza musicale, non accuratezza acustica della F0."
+        }
+      },
+      {
+        "config": {
+          "algorithm": "pyin",
+          "frameLength": 2048,
+          "hopLength": 512,
+          "analysisSampleRate": 16000,
+          "fmin": 70,
+          "fmax": 1000,
+          "removeDc": false,
+          "rmsThreshold": 0.000002,
+          "yinThreshold": 0.42,
+          "levelConfidenceFloor": 0.36,
+          "minClarity": 0.45,
+          "minConfidence": 0.3,
+          "warmupFrames": 3,
+          "releaseFrames": 3,
+          "weakSignalHoldFrames": 0,
+          "medianWindowFrames": 3,
+          "fastAlpha": 0.65,
+          "slowAlpha": 0.3,
+          "smallJumpCents": 300,
+          "largeJumpConfirmFrames": 3,
+          "octaveCenterCents": 1200,
+          "octaveToleranceCents": 180,
+          "octaveConfirmFrames": 5,
+          "candidateConsistencyCents": 100,
+          "tracking": true,
+          "nThresholds": 100,
+          "betaAlpha": 2,
+          "betaBeta": 18,
+          "boltzmannParameter": 2,
+          "resolution": 0.1,
+          "maxTransitionRate": 35.92,
+          "switchProb": 0.03,
+          "noTroughProb": 0.01,
+          "decoder": "normalized-grid",
+          "minVoicedProbability": 0.05,
+          "discontinuityCents": 700,
+          "disagreementCents": 100,
+          "label": "pYIN Default",
+          "presetId": "pyin-default"
+        },
+        "configHash": "3104ca84",
+        "metrics": {
+          "audioDurationSec": 57.66,
+          "processingMs": 813.1497666666668,
+          "processingMsPerFrame": 0.4522523730070449,
+          "realtimeFactor": 0.014102493351832586,
+          "frameRate": 31.25,
+          "frameCount": 1798,
+          "rawDetectedPercent": 99.55506117908787,
+          "detectedPercent": 78.75417130144605,
+          "gaps": [
+            {
+              "startSec": 0.064,
+              "endSec": 2.496,
+              "durationSec": 2.432
+            },
+            {
+              "startSec": 3.168,
+              "endSec": 3.2640000000000002,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 4.16,
+              "endSec": 4.224,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 5.696,
+              "endSec": 5.824,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 8.672,
+              "endSec": 8.704,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 9.12,
+              "endSec": 9.152,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 9.888,
+              "endSec": 10.24,
+              "durationSec": 0.352
+            },
+            {
+              "startSec": 11.776,
+              "endSec": 12.32,
+              "durationSec": 0.544
+            },
+            {
+              "startSec": 13.248,
+              "endSec": 13.408,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 14.528,
+              "endSec": 15.424,
+              "durationSec": 0.896
+            },
+            {
+              "startSec": 16.096,
+              "endSec": 16.224,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 18.208,
+              "endSec": 18.272,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 21.728,
+              "endSec": 22.208,
+              "durationSec": 0.48
+            },
+            {
+              "startSec": 23.616,
+              "endSec": 23.744,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 24.192,
+              "endSec": 24.256,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 27.68,
+              "endSec": 28.224,
+              "durationSec": 0.544
+            },
+            {
+              "startSec": 29.568,
+              "endSec": 29.696,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 30.112,
+              "endSec": 30.176,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 31.136,
+              "endSec": 31.296,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 32.192,
+              "endSec": 32.288,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 32.544,
+              "endSec": 32.736,
+              "durationSec": 0.192
+            },
+            {
+              "startSec": 33.76,
+              "endSec": 34.239999999999995,
+              "durationSec": 0.48
+            },
+            {
+              "startSec": 35.008,
+              "endSec": 35.232,
+              "durationSec": 0.224
+            },
+            {
+              "startSec": 36.16,
+              "endSec": 36.224,
+              "durationSec": 0.064
+            },
+            {
+              "startSec": 39.168,
+              "endSec": 39.263999999999996,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 40.064,
+              "endSec": 40.224,
+              "durationSec": 0.16
+            },
+            {
+              "startSec": 42.784,
+              "endSec": 43.296,
+              "durationSec": 0.512
+            },
+            {
+              "startSec": 44.192,
+              "endSec": 44.31999999999999,
+              "durationSec": 0.128
+            },
+            {
+              "startSec": 47.616,
+              "endSec": 47.711999999999996,
+              "durationSec": 0.096
+            },
+            {
+              "startSec": 48.224,
+              "endSec": 48.25599999999999,
+              "durationSec": 0.032
+            },
+            {
+              "startSec": 53.952,
+              "endSec": 57.599999999999994,
+              "durationSec": 3.648
+            }
+          ],
+          "gapDurationSec": 12.224000000000004,
+          "gapMedianSec": 0.128,
+          "gapP95Sec": 1.664,
+          "rejectionReasons": {
+            "pyin-voicing-gate": 371,
+            "pyin-low-voicing": 3,
+            "pyin-no-candidate": 8
+          },
+          "discontinuities": 0,
+          "possibleOctaveJumps": 0,
+          "diagnostics": {
+            "noCandidateFrames": 8,
+            "candidateRejectedFrames": 374,
+            "highProbabilityRejectedFrames": 0
+          },
+          "targetEvaluableSec": 0,
+          "targetEvaluablePercent": 0,
+          "targetMedianAbsoluteCents": null,
+          "conditionalIntonationPercent": null,
+          "acousticAccuracy": null,
+          "scientificNote": "Le distanze dalla partitura misurano aderenza musicale, non accuratezza acustica della F0."
+        }
+      }
+    ]
+  },
+  "synthetic": {
+    "environment": {
+      "node": "v24.19.0",
+      "platform": "win32",
+      "cpu": "Intel(R) Core(TM) Ultra 9 275HX"
+    },
+    "selectedIndex": 2,
+    "configs": [
+      {
+        "algorithm": "pyin",
+        "frameLength": 2048,
+        "hopLength": 512,
+        "analysisSampleRate": 16000,
+        "fmin": 70,
+        "fmax": 1000,
+        "removeDc": false,
+        "rmsThreshold": 0.000002,
+        "yinThreshold": 0.42,
+        "levelConfidenceFloor": 0.36,
+        "minClarity": 0.45,
+        "minConfidence": 0.3,
+        "warmupFrames": 3,
+        "releaseFrames": 3,
+        "weakSignalHoldFrames": 0,
+        "medianWindowFrames": 3,
+        "fastAlpha": 0.65,
+        "slowAlpha": 0.3,
+        "smallJumpCents": 300,
+        "largeJumpConfirmFrames": 3,
+        "octaveCenterCents": 1200,
+        "octaveToleranceCents": 180,
+        "octaveConfirmFrames": 5,
+        "candidateConsistencyCents": 100,
+        "tracking": true,
+        "nThresholds": 100,
+        "betaAlpha": 2,
+        "betaBeta": 18,
+        "boltzmannParameter": 2,
+        "resolution": 0.1,
+        "maxTransitionRate": 35.92,
+        "switchProb": 0.01,
+        "noTroughProb": 0.01,
+        "decoder": "legacy-sparse",
+        "minVoicedProbability": 0,
+        "discontinuityCents": 700,
+        "disagreementCents": 100,
+        "label": "pYIN Default",
+        "presetId": "pyin-default"
+      },
+      {
+        "algorithm": "pyin",
+        "frameLength": 2048,
+        "hopLength": 512,
+        "analysisSampleRate": 16000,
+        "fmin": 70,
+        "fmax": 1000,
+        "removeDc": false,
+        "rmsThreshold": 0.000002,
+        "yinThreshold": 0.42,
+        "levelConfidenceFloor": 0.36,
+        "minClarity": 0.45,
+        "minConfidence": 0.3,
+        "warmupFrames": 3,
+        "releaseFrames": 3,
+        "weakSignalHoldFrames": 0,
+        "medianWindowFrames": 3,
+        "fastAlpha": 0.65,
+        "slowAlpha": 0.3,
+        "smallJumpCents": 300,
+        "largeJumpConfirmFrames": 3,
+        "octaveCenterCents": 1200,
+        "octaveToleranceCents": 180,
+        "octaveConfirmFrames": 5,
+        "candidateConsistencyCents": 100,
+        "tracking": true,
+        "nThresholds": 100,
+        "betaAlpha": 2,
+        "betaBeta": 18,
+        "boltzmannParameter": 2,
+        "resolution": 0.1,
+        "maxTransitionRate": 35.92,
+        "switchProb": 0.01,
+        "noTroughProb": 0.01,
+        "decoder": "normalized-grid",
+        "minVoicedProbability": 0,
+        "discontinuityCents": 700,
+        "disagreementCents": 100,
+        "label": "pYIN Default",
+        "presetId": "pyin-default"
+      },
+      {
+        "algorithm": "pyin",
+        "frameLength": 2048,
+        "hopLength": 512,
+        "analysisSampleRate": 16000,
+        "fmin": 70,
+        "fmax": 1000,
+        "removeDc": false,
+        "rmsThreshold": 0.000002,
+        "yinThreshold": 0.42,
+        "levelConfidenceFloor": 0.36,
+        "minClarity": 0.45,
+        "minConfidence": 0.3,
+        "warmupFrames": 3,
+        "releaseFrames": 3,
+        "weakSignalHoldFrames": 0,
+        "medianWindowFrames": 3,
+        "fastAlpha": 0.65,
+        "slowAlpha": 0.3,
+        "smallJumpCents": 300,
+        "largeJumpConfirmFrames": 3,
+        "octaveCenterCents": 1200,
+        "octaveToleranceCents": 180,
+        "octaveConfirmFrames": 5,
+        "candidateConsistencyCents": 100,
+        "tracking": true,
+        "nThresholds": 100,
+        "betaAlpha": 2,
+        "betaBeta": 18,
+        "boltzmannParameter": 2,
+        "resolution": 0.1,
+        "maxTransitionRate": 35.92,
+        "switchProb": 0.01,
+        "noTroughProb": 0.01,
+        "decoder": "normalized-grid",
+        "minVoicedProbability": 0.05,
+        "discontinuityCents": 700,
+        "disagreementCents": 100,
+        "label": "pYIN Default",
+        "presetId": "pyin-default"
+      },
+      {
+        "algorithm": "pyin",
+        "frameLength": 2048,
+        "hopLength": 512,
+        "analysisSampleRate": 16000,
+        "fmin": 70,
+        "fmax": 1000,
+        "removeDc": false,
+        "rmsThreshold": 0.000002,
+        "yinThreshold": 0.42,
+        "levelConfidenceFloor": 0.36,
+        "minClarity": 0.45,
+        "minConfidence": 0.3,
+        "warmupFrames": 3,
+        "releaseFrames": 3,
+        "weakSignalHoldFrames": 0,
+        "medianWindowFrames": 3,
+        "fastAlpha": 0.65,
+        "slowAlpha": 0.3,
+        "smallJumpCents": 300,
+        "largeJumpConfirmFrames": 3,
+        "octaveCenterCents": 1200,
+        "octaveToleranceCents": 180,
+        "octaveConfirmFrames": 5,
+        "candidateConsistencyCents": 100,
+        "tracking": true,
+        "nThresholds": 100,
+        "betaAlpha": 2,
+        "betaBeta": 18,
+        "boltzmannParameter": 2,
+        "resolution": 0.1,
+        "maxTransitionRate": 35.92,
+        "switchProb": 0.01,
+        "noTroughProb": 0.01,
+        "decoder": "normalized-grid",
+        "minVoicedProbability": 0.1,
+        "discontinuityCents": 700,
+        "disagreementCents": 100,
+        "label": "pYIN Default",
+        "presetId": "pyin-default"
+      },
+      {
+        "algorithm": "pyin",
+        "frameLength": 2048,
+        "hopLength": 512,
+        "analysisSampleRate": 16000,
+        "fmin": 70,
+        "fmax": 1000,
+        "removeDc": false,
+        "rmsThreshold": 0.000002,
+        "yinThreshold": 0.42,
+        "levelConfidenceFloor": 0.36,
+        "minClarity": 0.45,
+        "minConfidence": 0.3,
+        "warmupFrames": 3,
+        "releaseFrames": 3,
+        "weakSignalHoldFrames": 0,
+        "medianWindowFrames": 3,
+        "fastAlpha": 0.65,
+        "slowAlpha": 0.3,
+        "smallJumpCents": 300,
+        "largeJumpConfirmFrames": 3,
+        "octaveCenterCents": 1200,
+        "octaveToleranceCents": 180,
+        "octaveConfirmFrames": 5,
+        "candidateConsistencyCents": 100,
+        "tracking": true,
+        "nThresholds": 100,
+        "betaAlpha": 2,
+        "betaBeta": 12,
+        "boltzmannParameter": 2,
+        "resolution": 0.1,
+        "maxTransitionRate": 35.92,
+        "switchProb": 0.01,
+        "noTroughProb": 0.01,
+        "decoder": "normalized-grid",
+        "minVoicedProbability": 0.05,
+        "discontinuityCents": 700,
+        "disagreementCents": 100,
+        "label": "pYIN Default",
+        "presetId": "pyin-default"
+      },
+      {
+        "algorithm": "pyin",
+        "frameLength": 2048,
+        "hopLength": 512,
+        "analysisSampleRate": 16000,
+        "fmin": 70,
+        "fmax": 1000,
+        "removeDc": false,
+        "rmsThreshold": 0.000002,
+        "yinThreshold": 0.42,
+        "levelConfidenceFloor": 0.36,
+        "minClarity": 0.45,
+        "minConfidence": 0.3,
+        "warmupFrames": 3,
+        "releaseFrames": 3,
+        "weakSignalHoldFrames": 0,
+        "medianWindowFrames": 3,
+        "fastAlpha": 0.65,
+        "slowAlpha": 0.3,
+        "smallJumpCents": 300,
+        "largeJumpConfirmFrames": 3,
+        "octaveCenterCents": 1200,
+        "octaveToleranceCents": 180,
+        "octaveConfirmFrames": 5,
+        "candidateConsistencyCents": 100,
+        "tracking": true,
+        "nThresholds": 100,
+        "betaAlpha": 2,
+        "betaBeta": 18,
+        "boltzmannParameter": 2,
+        "resolution": 0.1,
+        "maxTransitionRate": 35.92,
+        "switchProb": 0.03,
+        "noTroughProb": 0.01,
+        "decoder": "normalized-grid",
+        "minVoicedProbability": 0.05,
+        "discontinuityCents": 700,
+        "disagreementCents": 100,
+        "label": "pYIN Default",
+        "presetId": "pyin-default"
+      }
+    ],
+    "objectiveDefinition": {
+      "version": 1,
+      "voicingF1": 0.45,
+      "rawPitchAccuracy50": 0.4,
+      "grossPitchErrorRate": -0.1,
+      "octaveErrorRate": -0.05,
+      "realtimeFactor": -0.02,
+      "realtimeFactorBucket": 0.1,
+      "maxRealtimeFactor": 1
+    },
+    "train": [
+      {
+        "index": 0,
+        "recordingCount": 3,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 162,
+          "unvoicedReferenceFrames": 45,
+          "pitchReferenceFrames": 162,
+          "truePositiveFrames": 0,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 162,
+          "voicingF1": 0,
+          "rawPitchAccuracy50": 0,
+          "grossPitchErrorRate": null,
+          "octaveErrorRate": null
+        },
+        "realtimeFactor": 0.0032541296296296333,
+        "quality": 0,
+        "objective": 0
+      },
+      {
+        "index": 1,
+        "recordingCount": 3,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 162,
+          "unvoicedReferenceFrames": 45,
+          "pitchReferenceFrames": 162,
+          "truePositiveFrames": 162,
+          "falsePositiveFrames": 12,
+          "falseNegativeFrames": 0,
+          "voicingF1": 0.9642857142857143,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.00615181851851852,
+        "quality": 0.8339285714285715,
+        "objective": 0.8339285714285715
+      },
+      {
+        "index": 2,
+        "recordingCount": 3,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 162,
+          "unvoicedReferenceFrames": 45,
+          "pitchReferenceFrames": 162,
+          "truePositiveFrames": 162,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.006475596296296299,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      },
+      {
+        "index": 3,
+        "recordingCount": 3,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 162,
+          "unvoicedReferenceFrames": 45,
+          "pitchReferenceFrames": 162,
+          "truePositiveFrames": 162,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.005396018518518517,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      },
+      {
+        "index": 4,
+        "recordingCount": 3,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 162,
+          "unvoicedReferenceFrames": 45,
+          "pitchReferenceFrames": 162,
+          "truePositiveFrames": 162,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.005369018518518518,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      },
+      {
+        "index": 5,
+        "recordingCount": 3,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 162,
+          "unvoicedReferenceFrames": 45,
+          "pitchReferenceFrames": 162,
+          "truePositiveFrames": 162,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.005158474074074073,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      }
+    ],
+    "validation": [
+      {
+        "index": 0,
+        "recordingCount": 1,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "truePositiveFrames": 0,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 54,
+          "voicingF1": 0,
+          "rawPitchAccuracy50": 0,
+          "grossPitchErrorRate": null,
+          "octaveErrorRate": null
+        },
+        "realtimeFactor": 0.002471966666666674,
+        "quality": 0,
+        "objective": 0
+      },
+      {
+        "index": 1,
+        "recordingCount": 1,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "truePositiveFrames": 54,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.00496229999999999,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      },
+      {
+        "index": 2,
+        "recordingCount": 1,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "truePositiveFrames": 54,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.005251566666666672,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      },
+      {
+        "index": 3,
+        "recordingCount": 1,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "truePositiveFrames": 54,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.00543143333333334,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      },
+      {
+        "index": 4,
+        "recordingCount": 1,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "truePositiveFrames": 54,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.004987400000000018,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      },
+      {
+        "index": 5,
+        "recordingCount": 1,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "truePositiveFrames": 54,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.004853666666666679,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      }
+    ],
+    "test": [
+      {
+        "index": 0,
+        "recordingCount": 2,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 108,
+          "unvoicedReferenceFrames": 30,
+          "pitchReferenceFrames": 108,
+          "truePositiveFrames": 0,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 108,
+          "voicingF1": 0,
+          "rawPitchAccuracy50": 0,
+          "grossPitchErrorRate": null,
+          "octaveErrorRate": null
+        },
+        "realtimeFactor": 0.0028790694444444476,
+        "quality": 0,
+        "objective": 0
+      },
+      {
+        "index": 1,
+        "recordingCount": 2,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 108,
+          "unvoicedReferenceFrames": 30,
+          "pitchReferenceFrames": 108,
+          "truePositiveFrames": 108,
+          "falsePositiveFrames": 6,
+          "falseNegativeFrames": 0,
+          "voicingF1": 0.972972972972973,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.006988102777777781,
+        "quality": 0.8378378378378379,
+        "objective": 0.8378378378378379
+      },
+      {
+        "index": 2,
+        "recordingCount": 2,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 108,
+          "unvoicedReferenceFrames": 30,
+          "pitchReferenceFrames": 108,
+          "truePositiveFrames": 108,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.005212886111111097,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      },
+      {
+        "index": 3,
+        "recordingCount": 2,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 108,
+          "unvoicedReferenceFrames": 30,
+          "pitchReferenceFrames": 108,
+          "truePositiveFrames": 108,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.0052262861111110875,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      },
+      {
+        "index": 4,
+        "recordingCount": 2,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 108,
+          "unvoicedReferenceFrames": 30,
+          "pitchReferenceFrames": 108,
+          "truePositiveFrames": 108,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.005251219444444452,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      },
+      {
+        "index": 5,
+        "recordingCount": 2,
+        "acousticAccuracy": {
+          "voicedReferenceFrames": 108,
+          "unvoicedReferenceFrames": 30,
+          "pitchReferenceFrames": 108,
+          "truePositiveFrames": 108,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicingF1": 1,
+          "rawPitchAccuracy50": 1,
+          "grossPitchErrorRate": 0,
+          "octaveErrorRate": 0
+        },
+        "realtimeFactor": 0.005185202777777778,
+        "quality": 0.8500000000000001,
+        "objective": 0.8500000000000001
+      }
+    ],
+    "recordings": [
+      {
+        "id": "train-low",
+        "split": "train",
+        "audioSha256": "f62ae744402556daaa2d00d6c945b0d11cfab3efc86c8d4171e875b680c99fe2",
+        "annotatedIntervals": 74,
+        "baseline": {
+          "rawPitchAccuracy30": 0,
+          "rawPitchAccuracy50": 0,
+          "rawChromaAccuracy50": 0,
+          "voicingRecall": 0,
+          "voicingPrecision": null,
+          "voicingF1": 0,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 0,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 54,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 0,
+          "octaveErrorRate": null,
+          "grossPitchErrorRate": null,
+          "maeCents": null,
+          "medianAbsoluteCents": null,
+          "p90AbsoluteCents": null,
+          "p95AbsoluteCents": null,
+          "lostVoicedSegmentPercent": 100,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 2,
+          "dropoutDurationSec": 1.7280000000000002,
+          "dropoutMedianSec": 0.8640000000000001,
+          "dropoutP95Sec": 0.8928,
+          "dropout": [
+            {
+              "startSec": 0.416,
+              "endSec": 1.312,
+              "durationSec": 0.896
+            },
+            {
+              "startSec": 1.76,
+              "endSec": 2.592,
+              "durationSec": 0.8320000000000001
+            }
+          ],
+          "overallAccuracy30": 0.21739130434782608,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        },
+        "selected": {
+          "rawPitchAccuracy30": 0.8148148148148148,
+          "rawPitchAccuracy50": 1,
+          "rawChromaAccuracy50": 1,
+          "voicingRecall": 1,
+          "voicingPrecision": 1,
+          "voicingF1": 1,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 54,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 54,
+          "octaveErrorRate": 0,
+          "grossPitchErrorRate": 0,
+          "maeCents": 19.246810820517037,
+          "medianAbsoluteCents": 19.868185878806067,
+          "p90AbsoluteCents": 35.37033725551868,
+          "p95AbsoluteCents": 37.51987348093852,
+          "lostVoicedSegmentPercent": 0,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 0,
+          "dropoutDurationSec": 0,
+          "dropoutMedianSec": null,
+          "dropoutP95Sec": null,
+          "dropout": [],
+          "overallAccuracy30": 0.855072463768116,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        }
+      },
+      {
+        "id": "train-tenor",
+        "split": "train",
+        "audioSha256": "684cf439c11dc5de2e5c55caf4d060bcb1c7869204d3b8dec00c30d122d515b2",
+        "annotatedIntervals": 74,
+        "baseline": {
+          "rawPitchAccuracy30": 0,
+          "rawPitchAccuracy50": 0,
+          "rawChromaAccuracy50": 0,
+          "voicingRecall": 0,
+          "voicingPrecision": null,
+          "voicingF1": 0,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 0,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 54,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 0,
+          "octaveErrorRate": null,
+          "grossPitchErrorRate": null,
+          "maeCents": null,
+          "medianAbsoluteCents": null,
+          "p90AbsoluteCents": null,
+          "p95AbsoluteCents": null,
+          "lostVoicedSegmentPercent": 100,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 2,
+          "dropoutDurationSec": 1.7280000000000002,
+          "dropoutMedianSec": 0.8640000000000001,
+          "dropoutP95Sec": 0.8928,
+          "dropout": [
+            {
+              "startSec": 0.416,
+              "endSec": 1.312,
+              "durationSec": 0.896
+            },
+            {
+              "startSec": 1.76,
+              "endSec": 2.592,
+              "durationSec": 0.8320000000000001
+            }
+          ],
+          "overallAccuracy30": 0.21739130434782608,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        },
+        "selected": {
+          "rawPitchAccuracy30": 0.8333333333333334,
+          "rawPitchAccuracy50": 1,
+          "rawChromaAccuracy50": 1,
+          "voicingRecall": 1,
+          "voicingPrecision": 1,
+          "voicingF1": 1,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 54,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 54,
+          "octaveErrorRate": 0,
+          "grossPitchErrorRate": 0,
+          "maeCents": 18.822503110022907,
+          "medianAbsoluteCents": 19.147040804719374,
+          "p90AbsoluteCents": 33.863327431907635,
+          "p95AbsoluteCents": 36.85742410546921,
+          "lostVoicedSegmentPercent": 0,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 0,
+          "dropoutDurationSec": 0,
+          "dropoutMedianSec": null,
+          "dropoutP95Sec": null,
+          "dropout": [],
+          "overallAccuracy30": 0.8695652173913043,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        }
+      },
+      {
+        "id": "train-high",
+        "split": "train",
+        "audioSha256": "b1bb9a36b728b3ed34a11a5d1c89a2ddf570dc6585085f01bf1dba76127b1cd8",
+        "annotatedIntervals": 74,
+        "baseline": {
+          "rawPitchAccuracy30": 0,
+          "rawPitchAccuracy50": 0,
+          "rawChromaAccuracy50": 0,
+          "voicingRecall": 0,
+          "voicingPrecision": null,
+          "voicingF1": 0,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 0,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 54,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 0,
+          "octaveErrorRate": null,
+          "grossPitchErrorRate": null,
+          "maeCents": null,
+          "medianAbsoluteCents": null,
+          "p90AbsoluteCents": null,
+          "p95AbsoluteCents": null,
+          "lostVoicedSegmentPercent": 100,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 2,
+          "dropoutDurationSec": 1.7280000000000002,
+          "dropoutMedianSec": 0.8640000000000001,
+          "dropoutP95Sec": 0.8928,
+          "dropout": [
+            {
+              "startSec": 0.416,
+              "endSec": 1.312,
+              "durationSec": 0.896
+            },
+            {
+              "startSec": 1.76,
+              "endSec": 2.592,
+              "durationSec": 0.8320000000000001
+            }
+          ],
+          "overallAccuracy30": 0.21739130434782608,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        },
+        "selected": {
+          "rawPitchAccuracy30": 0.8703703703703703,
+          "rawPitchAccuracy50": 1,
+          "rawChromaAccuracy50": 1,
+          "voicingRecall": 1,
+          "voicingPrecision": 1,
+          "voicingF1": 1,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 54,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 54,
+          "octaveErrorRate": 0,
+          "grossPitchErrorRate": 0,
+          "maeCents": 18.137593577011256,
+          "medianAbsoluteCents": 22.917906028896226,
+          "p90AbsoluteCents": 30.143855349830744,
+          "p95AbsoluteCents": 30.69865393575889,
+          "lostVoicedSegmentPercent": 0,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 0,
+          "dropoutDurationSec": 0,
+          "dropoutMedianSec": null,
+          "dropoutP95Sec": null,
+          "dropout": [],
+          "overallAccuracy30": 0.8985507246376812,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        }
+      },
+      {
+        "id": "validation",
+        "split": "validation",
+        "audioSha256": "472b9958552e9dac9ea50070a2eace8ca634e7139fc60da1629057790a03be3f",
+        "annotatedIntervals": 74,
+        "baseline": {
+          "rawPitchAccuracy30": 0,
+          "rawPitchAccuracy50": 0,
+          "rawChromaAccuracy50": 0,
+          "voicingRecall": 0,
+          "voicingPrecision": null,
+          "voicingF1": 0,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 0,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 54,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 0,
+          "octaveErrorRate": null,
+          "grossPitchErrorRate": null,
+          "maeCents": null,
+          "medianAbsoluteCents": null,
+          "p90AbsoluteCents": null,
+          "p95AbsoluteCents": null,
+          "lostVoicedSegmentPercent": 100,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 2,
+          "dropoutDurationSec": 1.7280000000000002,
+          "dropoutMedianSec": 0.8640000000000001,
+          "dropoutP95Sec": 0.8928,
+          "dropout": [
+            {
+              "startSec": 0.416,
+              "endSec": 1.312,
+              "durationSec": 0.896
+            },
+            {
+              "startSec": 1.76,
+              "endSec": 2.592,
+              "durationSec": 0.8320000000000001
+            }
+          ],
+          "overallAccuracy30": 0.21739130434782608,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        },
+        "selected": {
+          "rawPitchAccuracy30": 0.8148148148148148,
+          "rawPitchAccuracy50": 1,
+          "rawChromaAccuracy50": 1,
+          "voicingRecall": 1,
+          "voicingPrecision": 1,
+          "voicingF1": 1,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 54,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 54,
+          "octaveErrorRate": 0,
+          "grossPitchErrorRate": 0,
+          "maeCents": 18.776338797974127,
+          "medianAbsoluteCents": 19.737423591031394,
+          "p90AbsoluteCents": 31.806043897389216,
+          "p95AbsoluteCents": 36.08441578396095,
+          "lostVoicedSegmentPercent": 0,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 0,
+          "dropoutDurationSec": 0,
+          "dropoutMedianSec": null,
+          "dropoutP95Sec": null,
+          "dropout": [],
+          "overallAccuracy30": 0.855072463768116,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        }
+      },
+      {
+        "id": "test-low",
+        "split": "test",
+        "audioSha256": "089e75ff6e5f7151f2349c49065bf46c7d78203e834c2d33e2b9996bd1128f22",
+        "annotatedIntervals": 74,
+        "baseline": {
+          "rawPitchAccuracy30": 0,
+          "rawPitchAccuracy50": 0,
+          "rawChromaAccuracy50": 0,
+          "voicingRecall": 0,
+          "voicingPrecision": null,
+          "voicingF1": 0,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 0,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 54,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 0,
+          "octaveErrorRate": null,
+          "grossPitchErrorRate": null,
+          "maeCents": null,
+          "medianAbsoluteCents": null,
+          "p90AbsoluteCents": null,
+          "p95AbsoluteCents": null,
+          "lostVoicedSegmentPercent": 100,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 2,
+          "dropoutDurationSec": 1.7280000000000002,
+          "dropoutMedianSec": 0.8640000000000001,
+          "dropoutP95Sec": 0.8928,
+          "dropout": [
+            {
+              "startSec": 0.416,
+              "endSec": 1.312,
+              "durationSec": 0.896
+            },
+            {
+              "startSec": 1.76,
+              "endSec": 2.592,
+              "durationSec": 0.8320000000000001
+            }
+          ],
+          "overallAccuracy30": 0.21739130434782608,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        },
+        "selected": {
+          "rawPitchAccuracy30": 0.9074074074074074,
+          "rawPitchAccuracy50": 1,
+          "rawChromaAccuracy50": 1,
+          "voicingRecall": 1,
+          "voicingPrecision": 1,
+          "voicingF1": 1,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 54,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 54,
+          "octaveErrorRate": 0,
+          "grossPitchErrorRate": 0,
+          "maeCents": 17.54279837331995,
+          "medianAbsoluteCents": 19.30332612322747,
+          "p90AbsoluteCents": 29.79308325144254,
+          "p95AbsoluteCents": 32.34250183331934,
+          "lostVoicedSegmentPercent": 0,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 0,
+          "dropoutDurationSec": 0,
+          "dropoutMedianSec": null,
+          "dropoutP95Sec": null,
+          "dropout": [],
+          "overallAccuracy30": 0.927536231884058,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        }
+      },
+      {
+        "id": "test-high",
+        "split": "test",
+        "audioSha256": "d62bba8af4fede45e63dd7e51745fd0f08ec5319640c8a1481c097f06b4cc861",
+        "annotatedIntervals": 74,
+        "baseline": {
+          "rawPitchAccuracy30": 0,
+          "rawPitchAccuracy50": 0,
+          "rawChromaAccuracy50": 0,
+          "voicingRecall": 0,
+          "voicingPrecision": null,
+          "voicingF1": 0,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 0,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 54,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 0,
+          "octaveErrorRate": null,
+          "grossPitchErrorRate": null,
+          "maeCents": null,
+          "medianAbsoluteCents": null,
+          "p90AbsoluteCents": null,
+          "p95AbsoluteCents": null,
+          "lostVoicedSegmentPercent": 100,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 2,
+          "dropoutDurationSec": 1.7280000000000002,
+          "dropoutMedianSec": 0.8640000000000001,
+          "dropoutP95Sec": 0.8928,
+          "dropout": [
+            {
+              "startSec": 0.416,
+              "endSec": 1.312,
+              "durationSec": 0.896
+            },
+            {
+              "startSec": 1.76,
+              "endSec": 2.592,
+              "durationSec": 0.8320000000000001
+            }
+          ],
+          "overallAccuracy30": 0.21739130434782608,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        },
+        "selected": {
+          "rawPitchAccuracy30": 0.8148148148148148,
+          "rawPitchAccuracy50": 1,
+          "rawChromaAccuracy50": 1,
+          "voicingRecall": 1,
+          "voicingPrecision": 1,
+          "voicingF1": 1,
+          "voicingFalseAlarmRate": 0,
+          "truePositiveFrames": 54,
+          "falsePositiveFrames": 0,
+          "falseNegativeFrames": 0,
+          "voicedReferenceFrames": 54,
+          "unvoicedReferenceFrames": 15,
+          "pitchReferenceFrames": 54,
+          "pitchDetectedFrames": 54,
+          "octaveErrorRate": 0,
+          "grossPitchErrorRate": 0,
+          "maeCents": 18.704819192474833,
+          "medianAbsoluteCents": 19.676465278663517,
+          "p90AbsoluteCents": 32.59871029764113,
+          "p95AbsoluteCents": 33.44811087238138,
+          "lostVoicedSegmentPercent": 0,
+          "evaluatedVoicedSegmentCount": 2,
+          "dropoutCount": 0,
+          "dropoutDurationSec": 0,
+          "dropoutMedianSec": null,
+          "dropoutP95Sec": null,
+          "dropout": [],
+          "overallAccuracy30": 0.855072463768116,
+          "evaluatedFrames": 69,
+          "unknownFrames": 21,
+          "evaluatedSec": 2.208,
+          "referenceCoveragePercent": 76.66666666666667
+        }
+      }
+    ]
+  },
+  "independentDecoderOracle": {
+    "frames": 1798,
+    "voicingMismatches": 0,
+    "pitchBinMismatches": 0,
+    "librosa": "0.11.0"
+  },
+  "limitations": [
+    "R01 has no independent acoustic reference; coverage is not accuracy.",
+    "Synthetic held-out results do not validate human/device generalization.",
+    "Batch times amortize shared CMND and exclude decode/rendering."
+  ]
+}

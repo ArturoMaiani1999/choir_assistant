@@ -2,7 +2,7 @@
 
 **Status:** implementato e verificato; contratto corrente  
 **Owner:** project maintainer  
-**Last reviewed:** 2026-10-14
+**Last reviewed:** 2026-10-20
 
 ## Scopo del documento
 
@@ -20,6 +20,15 @@ Il documento nasce come proposta e ora registra il contratto implementato. Le
 estensioni future restano separate dai requisiti dell'MVP corrente.
 
 ## Stato di implementazione
+
+L'ingresso **Allena la voce** è una delle tre modalità del menù principale,
+visibile senza scroll a 390×844. Non richiede la scelta preventiva di un brano
+o della modalità di ascolto. Il menù esercizi torna al **Menù** dell'app.
+Indietro/Avanti del browser attraversano scelta e preparazione; uscire da un
+take ferma audio e microfono. Avanti ripristina la preparazione e non avvia
+una registrazione. BPM e variante scelti restano associati alla preparazione.
+La preferenza SATB del profilo viene usata anche nel laboratorio; estensione
+personalizzata e impostazioni specifiche restano disponibili nel laboratorio.
 
 Il rifacimento è stato completato il 2026-10-14:
 
@@ -44,6 +53,83 @@ Il rifacimento è stato completato il 2026-10-14:
   la storia della take, senza dissolvere i segmenti più vecchi;
 - il vecchio documento didattico è stato archiviato.
 
+Revisione didattica del 19 ottobre 2026:
+
+- ogni preparazione mette in primo piano lo spartito e una spiegazione concreta:
+  Fa è la nota 1; nella scala si sale fino a 5 e si torna a 1;
+- il pentagramma con note reali e numeri resta visibile anche in Orecchio
+  interno, fin dall'inizio. Questa richiesta sostituisce la precedente politica
+  del template con soli gradi; soltanto il confronto sul piano roll resta nascosto;
+- il comando testuale `Esercizi` torna alla scelta dei percorsi anche durante
+  canto e risultato. `Prepara` torna alla configurazione. L'uscita interrompe
+  audio e microfono e non salva la prova incompleta;
+- la preparazione spiega anche arpeggi, nota singola e nota iniziale dei rivolti;
+  la dimostrazione è disponibile in `Istruzioni` e le posizioni dell'accordo
+  sono espandibili;
+- scala e accordi richiedono la stessa voce guida renderizzata come frase legata
+  e, se attivo, il pad armonico. Un download fallito mostra un errore con la
+  possibilità di riprovare, invece di degradare silenziosamente il timbro o
+  eliminare l'accompagnamento. Anche per estensioni personalizzate, una frase
+  non presente nella banca viene segnalata e non sostituita con campioni separati;
+- la preparazione usa impaginazione senza card, spartito avorio e controlli
+  laterali su desktop; su mobile li dispone in sequenza con `Comincia` in basso.
+  Le opzioni espanse possono richiedere scorrimento intenzionale.
+
+Verifica della revisione: browser smoke a 1366×768 e 390×844, screenshot dei
+quattro tipi di preparazione, canto/risultato e controllo della banca audio.
+
+### Preparazione e istruzioni del 20 ottobre 2026
+
+Il contratto corrente sostituisce le precedenti indicazioni di preparazione
+mobile a scorrimento: scala, accordi e orecchio interno stanno nel primo
+viewport a **1366×768** e **390×844**, con spartito dominante, velocità
+e `Comincia` sempre raggiungibili. Il ritorno `Esercizi` è testuale; i pulsanti
+precedente/successivo sono eliminati. Le impostazioni usano soltanto un
+ingranaggio con nome accessibile. Non compaiono più i tre passi statici,
+`Come leggo lo spartito?` e la nota sull'attivazione del microfono.
+
+La revisione visiva del 20 ottobre usa il fondo inchiostro già presente,
+con note e pentagramma bianco caldo, anche durante canto e nelle istruzioni.
+Questa scelta sostituisce intenzionalmente il foglio avorio nel laboratorio
+per ridurre la luminosità. Lo spartito di preparazione ha altezza compatta
+(260 px desktop, fino a 190 px mobile), senza estendersi per riempire lo schermo;
+velocità e `Comincia` seguono la musica senza vuoti artificiali. L'SVG inciso
+resta invariato: il foglio bianco delle immagini viene reso trasparente con
+un filtro, mentre nella dimostrazione i tracciati chiari mantengono l'ocra
+per la nota attiva. Dimensioni dei controlli e assenza di scroll sono preservate.
+
+`Istruzioni` apre un dialogo HTML/SVG e avvia una sola dimostrazione, usando
+spartito, parte vocale, BPM e rivolto selezionati:
+
+1. la chiave compie piccoli salti balistici con gravità `0,75 × 9,8 m/s²`
+   mentre si ascolta la frase Muse Choir; le note restano spente;
+2. il 4/4 salta sui quattro battiti di preparazione e quattro pallini sopra
+   il pentagramma indicano l'ingresso;
+3. `Segui le note`: la melodia Muse Choir viene riprodotta insieme al metronomo
+   e le note diventano ocra una alla volta. Non compare la frase «Canta su la».
+   Il microfono resta spento e non si produce un risultato.
+
+Per Orecchio interno si ascolta soltanto la fondamentale, senza anticipare la
+melodia; il grado singolo resta evidenziato per i suoi quattro battiti.
+La coda naturale della frase termina prima del count-in e della fine della
+dimostrazione. Un clock AudioContext
+comune governa suono ed evidenziazioni. Con movimento ridotto i salti sono
+eliminati, mantenendo fasi, battiti ed evidenziazione delle note.
+
+Al termine è disponibile `Rivedi`. Chiusura esplicita, Escape e backdrop fermano
+immediatamente l'audio e restituiscono il focus a `Istruzioni`. Anche uscita
+dalla pagina e passaggio in background fermano la dimostrazione; un download
+tardivo non può riattivarla. Gli errori offrono `Riprova`.
+
+Eccezione intenzionale di accessibilità: a ingrandimenti del testo o altezze
+inferiori ai viewport di verifica, contenuto e controlli restano raggiungibili
+con scorrimento invece di essere tagliati. Le impostazioni e i dettagli del
+risultato mantengono il proprio scorrimento quando necessario.
+
+Verifica: `python scripts/browser_voice_lab_instructions_smoke.py`, smoke
+esistente del laboratorio e della navigazione; screenshot in
+`artifacts/voice-lab-instructions-*.png` e `artifacts/voice-lab-{scale,chords,ear,degree}-*.png`.
+
 Evidenza automatica:
 
 - `node frontend/voice_lab_core.test.js`;
@@ -62,8 +148,8 @@ sostituita da una struttura più semplice e coerente:
 - **Riscaldamento con modello**: la melodia è ascoltata prima alla stessa velocità scelta;
   durante il canto restano la fondamentale e il metronomo, mentre il target è
   visibile;
-- **Orecchio interno**: si ascolta soltanto la fondamentale, si vede quale grado
-  cantare ma non la sua altezza target; il confronto completo appare dopo;
+- **Orecchio interno**: si ascolta soltanto la fondamentale e si leggono note e
+  gradi sul pentagramma; il confronto dell'intonazione sul piano roll appare dopo;
 - **Trasposizione controllata**: dopo ogni scala l'utente decide se riprovare,
   salire di un semitono o terminare, sempre entro l'estensione dichiarata.
 
@@ -168,37 +254,32 @@ L'utente seleziona uno dei pattern precedenti. L'app:
 3. lascia una breve pausa di memorizzazione;
 4. dà il count-in;
 5. mostra la sequenza dei gradi e il momento esatto in cui cantarli;
-6. non riproduce la melodia target durante la take;
+6. mostra lo spartito ma non riproduce la melodia target durante la take;
 7. traccia soltanto la voce dell'utente;
 8. al termine rivela melodia target, scostamenti e punti da riprovare.
 
 L'interpretazione UX raccomandata è questa:
 
 - durante la take, i gradi (`1`, `2`, `3`, `4`, `5` oppure `3m` / `3M`)
-  stanno in una **corsia temporale neutra**, tutti alla stessa altezza;
-- lo spartito mostra ritmo, direzione richiesta e gradi senza collocare le note
-  target sul pentagramma;
+  accompagnano le note reali sul pentagramma;
+- lo spartito mostra ritmo, altezze e gradi fin dalla preparazione;
 - il piano roll mostra griglia, tastiera, linea `ORA` e plume dell'utente, ma
   nessuna banda target né etichetta collocata all'altezza corretta;
-- dopo la take, spartito e piano roll rivelano le altezze reali e sovrappongono
-  la voce registrata.
+- dopo la take, il piano roll rivela le altezze reali e sovrappone la voce registrata.
 
 La plume della voce dell'utente resta visibile in tempo reale anche in questa
 modalità.
 
-Questa soluzione mantiene l'istruzione leggibile senza suggerire la risposta.
-Mostrare la posizione verticale del grado sul piano roll o la nota sul
-pentagramma durante la take rivelerebbe infatti l'altezza target e ridurrebbe
-l'esercizio a lettura/imitazione visiva. Questa politica di visibilità è
-confermata.
+La scelta privilegia il supporto didattico alla lettura: le note sono visibili,
+ma la melodia non viene eseguita e il confronto sul piano roll arriva alla fine.
 
 ### 4. Grado singolo
 
 Questo esercizio è disponibile esclusivamente in modalità `Orecchio interno`.
-L'app presenta la fondamentale di Fa, mostra il grado richiesto in una corsia
-neutra e non esegue mai la nota target prima o durante la take. Il corista
-mantiene il grado per quattro pulsazioni; target, nota reale e scostamento
-appaiono soltanto nel confronto finale.
+L'app presenta la fondamentale di Fa, mostra il grado richiesto sul pentagramma
+e non esegue mai la nota target prima o durante la take. Il corista mantiene il
+grado per quattro pulsazioni; target sul piano roll e scostamento appaiono
+soltanto nel confronto finale.
 
 I livelli implementati sono:
 
@@ -294,8 +375,8 @@ Scegli l'allenamento → Prepara → Canta → Guarda com'è andata
    completa della voce sovrapposta al target e azioni `Riprova` e `Continua`.
    I cent e le metriche dettagliate restano dietro `Vedi dettagli`.
 
-Su mobile, home e preparazione diventano pagine a scorrimento naturale; la
-vista di canto occupa invece lo schermo e mantiene il trasporto in basso. Il
+Su mobile, la preparazione occupa il viewport senza scorrimento nello stato
+ordinario; la vista di canto mantiene il trasporto in basso. Il
 passaggio tra le quattro viste deve usare stato applicativo e routing leggero,
 non quattro implementazioni indipendenti, così timeline e sessione non vengono
 ricreate accidentalmente.
@@ -312,8 +393,9 @@ solo le scelte pertinenti; la vista di canto elimina il catalogo laterale; il
 risultato mantiene spartito e storia completa della voce, mentre metriche e
 segmenti sono raccolti nel pannello espandibile `Vedi dettagli`. Profilo SATB,
 estensione, pad e volume della guida sono riuniti in `Impostazioni`. Il layout
-mobile usa pagine scorrevoli per scelta e preparazione e una vista concentrata
-per canto e confronto.
+mobile mantiene la scelta e la preparazione nei viewport di verifica e usa
+una vista concentrata per canto e confronto. Si veda la revisione del 20 ottobre
+per il contratto corrente della preparazione.
 
 ## Contratto temporale
 
@@ -402,8 +484,9 @@ aggiungono 72 frasi d'arpeggio: maggiore e minore, nelle tre posizioni, ai tre
 tempi e per ogni ruolo. La salita manuale non usa quindi il pitch-shifting di
 un'intera frase.
 
-Il campionatore cromatico resta il fallback e il motore dei cue che non possono
-essere pre-renderizzati, come i futuri percorsi casuali dell'orecchio interno.
+Il campionatore cromatico resta il motore dei cue che non possono essere
+pre-renderizzati, come i percorsi casuali dell'orecchio interno. Nei percorsi
+guidati una frase mancante viene segnalata senza degradare al campionatore.
 Le sue voci confluiscono in un unico ambiente breve: la coda non appartiene al
 singolo file e non viene interrotta quando parte la nota successiva. I passaggi
 melodici usano inoltre una piccola sovrapposizione tra inviluppi.
@@ -432,8 +515,8 @@ potrebbe provenire dall'app stessa.
 ### Modalità orecchio interno
 
 Non viene riprodotta l'anteprima melodica. Si ascolta la fondamentale e, durante
-la take, restano udibili fondamentale continua e metronomo. Il target rimane
-silenzioso e nascosto fino al confronto finale. La plume dell'utente resta
+la take, restano udibili fondamentale continua e metronomo. Lo spartito è visibile;
+il target sul piano roll resta nascosto fino al confronto finale. La plume resta
 visibile durante l'esecuzione.
 
 La fondamentale usa una sola sorgente continua dall'ascolto alla fine della
@@ -456,10 +539,8 @@ due fasi.
 ### Modalità orecchio interno durante la take
 
 - nessuna banda target;
-- nessun indizio verticale che codifichi l'altezza richiesta;
-- gradi e pulsazioni in una corsia neutra;
-- fondamentale dichiarata testualmente e, se desiderato, mostrata da sola sul
-  pentagramma;
+- note reali, gradi e pulsazioni sul pentagramma fin dall'inizio;
+- fondamentale dichiarata testualmente come nota 1;
 - plume dell'utente visibile, salvo futura opzione “buio completo”.
 
 ### Confronto finale
@@ -478,10 +559,8 @@ motore usato per gli spartiti di `Canta brano`, non forme imitate su canvas. La
 banca corrente contiene ogni combinazione raggiungibile dai profili SATB
 standard; tempo e BPM non producono duplicati perché non cambiano l'incisione.
 
-La vista dell'orecchio interno durante la take continua a usare un template
-ritmico neutro dedicato: caricare lo spartito SVG e poi coprirlo rischierebbe di
-lasciar trapelare la risposta. Al confronto finale il template viene sostituito
-dallo SVG MuseScore corretto.
+La vista dell'orecchio interno usa lo stesso SVG MuseScore delle altre modalità.
+Il confronto finale aggiunge il target sul piano roll alla voce registrata.
 
 ## Analisi e feedback
 
@@ -713,9 +792,9 @@ estensioni valide.
 ### Fase 4 — Orecchio interno
 
 - introdurre politica audio `root-only`;
-- implementare vista neutra senza target verticale;
-- impedire ogni reveal prematuro, anche tramite attributi accessibili;
-- rivelare target e spartito reale soltanto a take conclusa;
+- mostrare subito lo spartito e spiegare la fondamentale come nota 1;
+- mantenere nascosto il confronto sul piano roll durante la take;
+- rivelare il target sul piano roll soltanto a take conclusa;
 - distinguere errore assoluto e relativo;
 - testare che nessun audio target venga schedulato nella finestra valutata.
 
@@ -783,7 +862,7 @@ I test automatici non bastano. Servono almeno:
    lo visualizza durante la take senza riprodurne la melodia.
 4. La modalità orecchio interno riproduce soltanto la fondamentale prima della
    take e nessuna nota target durante la take.
-5. Ogni grado è indicato nel momento giusto senza rivelare l'altezza nascosta.
+5. Note e gradi sono leggibili sul pentagramma fin dalla preparazione.
 6. Dopo la prova il target viene rivelato e allineato alla plume registrata.
 7. Il feedback identifica segmenti affidabili e incerti senza convertire questi
    ultimi in errori.
@@ -824,7 +903,7 @@ imitazione completa
 | Rischio | Mitigazione proposta |
 |---|---|
 | La fondamentale continua viene rilevata come voce | cuffie, test leakage, scelta d'ottava e affidabilità dichiarata |
-| Il target nascosto trapela dalla grafica | corsia neutra e test DOM/canvas prima del reveal |
+| Il confronto anticipa l'esito | test che il piano roll nasconda il target prima del risultato |
 | Finestre troppo corte a 100 BPM | soglie proporzionali alla durata e test sintetici |
 | Routine fuori estensione | planner deterministico e margine di comfort |
 | Troppi asset statici | template per pattern/root, nessun duplicato per BPM |
@@ -865,7 +944,7 @@ imitazione completa
 | 2026-10-14 | Usare MuseScore Muse Sounds Choir come timbro | confermato |
 | 2026-10-14 | Mostrare sempre la qualità maggiore/minore | confermato |
 | 2026-10-14 | Routine `maggiore → minore → maggiore → minore` | confermato |
-| 2026-10-14 | Target nascosto in corsia neutra con plume live visibile | confermato |
+| 2026-10-14 | Target nascosto in corsia neutra con plume live visibile | superato il 19 ottobre per lo spartito; confermato per il piano roll |
 | 2026-10-14 | Preparare il modello dati per primo e secondo rivolto | confermato |
 | 2026-10-14 | Conservare infrastruttura tecnica già verificata | proposta |
 | 2026-10-14 | Quattro pulsazioni al BPM reale dopo l'anteprima | confermato |
@@ -883,3 +962,5 @@ imitazione completa
 | 2026-10-14 | Separare scelta, preparazione, canto e risultato | implementato |
 | 2026-10-14 | Fondamentale orecchio interno continua, dimezzata e con fade verso il count-in | implementato |
 | 2026-10-14 | Sostituire le note canvas visibili con frammenti SVG incisi da MuseScore | implementato |
+| 2026-10-19 | Navigazione dedicata, spiegazioni iniziali e spartito sempre visibile anche in Orecchio interno | implementato |
+| 2026-10-19 | Segnalare il mancato caricamento di frase corale o pad senza degradazioni silenziose | implementato |

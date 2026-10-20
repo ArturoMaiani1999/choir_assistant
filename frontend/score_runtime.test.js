@@ -89,5 +89,17 @@ const mediaClock = new ChoirScore.MediaPlaybackClock({ mediaElement: media, scor
   assert.equal(mediaClock.snapshot().speed, .5);
   mediaClock.pause();
   assert.equal(mediaClock.running, false);
+  mediaClock.beginWarmup();
+  await media.play();
+  media.currentTime = 30;
+  assert.equal(mediaClock.running, false, 'silent media warmup is not an attempt');
+  assert.equal(mediaClock.snapshot().mediaTime, 12, 'warmup cannot move score position');
+  mediaClock.finishWarmup();
+  assert.equal(media.currentTime, 12, 'rehearsal resumes at the selected position');
+  assert.equal(media.paused, false, 'release warmup without reopening the media pipeline');
+  mediaClock.beginWarmup();
+  mediaClock.pause();
+  assert.equal(media.paused, true, 'cancellation stops warmed playback');
+  assert.equal(mediaClock.warmupTime, null);
   console.log('media playback clock: 6 assertions passed');
 })();

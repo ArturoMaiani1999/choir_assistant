@@ -14,7 +14,7 @@ REQUIRED_METADATA = ("**Status:**", "**Owner:**", "**Last reviewed:**")
 
 def main() -> int:
     errors: list[str] = []
-    root_markdown = sorted(path.name for path in ROOT.glob("*.md") if path.name != "README.md")
+    root_markdown = sorted(path.name for path in ROOT.glob("*.md") if path.name not in {"README.md", "AGENTS.md"})
     if root_markdown:
         errors.append(f"Markdown non ammessi nella root: {', '.join(root_markdown)}")
 

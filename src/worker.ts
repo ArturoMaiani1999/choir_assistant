@@ -2,6 +2,8 @@ import { appOrigin, authenticateClerkRequest, clerkFrontendOrigin } from "./auth
 import { isAuthorized, resolveMember } from "./authorization";
 import { handlePerformanceApi, purgeExpiredInactivePerformances } from "./performances";
 import { handlePersonalRecordingApi, purgeExpiredPersonalRecordings } from "./recordings";
+import { handleProgressApi, purgeExpiredPracticeAttempts } from "./progress";
+import { handleEchoDiagnosticApi, purgeExpiredEchoDiagnostics } from "./echo_diagnostics";
 import type { Env, RequestAuthenticator } from "./types";
 
 const PUBLIC_PATHS = new Set([
@@ -13,7 +15,14 @@ const PUBLIC_PATHS = new Set([
   "/sign-in.html",
   "/sign-up",
   "/sign-up.html",
+  "/sign-out",
+  "/sign-out.html",
 ]);
+const PUBLIC_AUTH_STYLE = /^\/auth\.[a-f0-9]{12}\.css$/;
+
+function isPublicPath(pathname: string): boolean {
+  return PUBLIC_PATHS.has(pathname) || PUBLIC_AUTH_STYLE.test(pathname);
+}
 
 const SECURITY_HEADERS: Record<string, string> = {
   "Referrer-Policy": "no-referrer",
@@ -128,6 +137,8 @@ async function servePublic(request: Request, env: Env): Promise<Response> {
     "/sign-in.html",
     "/sign-up",
     "/sign-up.html",
+    "/sign-out",
+    "/sign-out.html",
     "/not-authorized",
     "/not-authorized.html",
   ].includes(url.pathname)) {
@@ -158,7 +169,7 @@ export function createWorker(authenticate: RequestAuthenticator = authenticateCl
           SECURITY_HEADERS,
         );
       }
-      if (PUBLIC_PATHS.has(url.pathname)) {
+      if (isPublicPath(url.pathname)) {
         return withHeaders(await servePublic(request, env), SECURITY_HEADERS);
       }
 
@@ -198,8 +209,10 @@ export function createWorker(authenticate: RequestAuthenticator = authenticateCl
         try {
           const member = await resolveMember(identity, env);
           if (!member) return withHeaders(await forbidden(request, env), SECURITY_HEADERS);
-          const recordingResponse = await handlePersonalRecordingApi(request, env, member);
-          return withHeaders(recordingResponse ?? await handlePerformanceApi(request, env, member), SECURITY_HEADERS);
+          const diagnosticResponse = await handleEchoDiagnosticApi(request, env, member);
+          const recordingResponse = diagnosticResponse ?? await handlePersonalRecordingApi(request, env, member);
+          const progressResponse = recordingResponse ?? await handleProgressApi(request, env, member);
+          return withHeaders(progressResponse ?? await handlePerformanceApi(request, env, member), SECURITY_HEADERS);
         } catch {
           return withHeaders(unavailable("performance_unavailable"), SECURITY_HEADERS);
         }
@@ -216,6 +229,8 @@ export function createWorker(authenticate: RequestAuthenticator = authenticateCl
       ctx.waitUntil(Promise.all([
         purgeExpiredInactivePerformances(env),
         purgeExpiredPersonalRecordings(env),
+        purgeExpiredPracticeAttempts(env),
+        purgeExpiredEchoDiagnostics(env),
       ]).then(() => undefined));
     },
   };

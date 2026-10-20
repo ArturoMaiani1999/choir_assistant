@@ -1,0 +1,40 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <title>Relax mode · Epistrophe</title>
+    <link rel="stylesheet" href="relax.css" />
+    <script src="lissajous.js" defer></script>
+    <script src="relax.js" defer></script>
+  </head>
+  <body>
+    <main class="relax-scene" id="relax-scene">
+      <canvas class="relax-glow" id="relax-glow" aria-hidden="true"></canvas>
+      <canvas id="relax-canvas" role="img" tabindex="0" aria-describedby="relax-keyboard" aria-label="Una curva di Lissajous tridimensionale: un filo di luce colorata ruota lentamente sul nero e svanisce in venti secondi."></canvas>
+      <header class="relax-header">
+        <a id="relax-back" href="index.html">Menù</a>
+        <span class="relax-wordmark">EPISTROPHE</span>
+      </header>
+      <footer class="relax-footer">
+        <div class="relax-identity"><h1>Relax mode</h1><p>Un piccolo intervallo.</p></div>
+        <div class="relax-controls" aria-label="Controlli della scena">
+          <button id="relax-pause" type="button" aria-pressed="false">Pausa</button>
+          <button id="relax-fullscreen" type="button" hidden>Schermo intero</button>
+          <details class="relax-details" id="relax-details">
+            <summary>La curva</summary>
+            <div class="relax-note">
+              <h2>Tre onde, un solo filo.</h2>
+              <p class="relax-equation">x = sin(t)<br>y = sin(2t)<br>z = sin(3t)</p>
+              <p>Una scia di venti secondi, poi il nero.<br>Trascina la figura per ruotarla, oppure usa le frecce da tastiera.</p>
+            </div>
+          </details>
+        </div>
+      </footer>
+      <p id="relax-status" class="sr-only" role="status"></p>
+      <p id="relax-keyboard" class="sr-only">Usa le frecce per ruotare la curva e Spazio per metterla in pausa o riprenderla.</p>
+      <noscript>Attiva JavaScript per vedere la curva.</noscript>
+    </main>
+  </body>
+</html>

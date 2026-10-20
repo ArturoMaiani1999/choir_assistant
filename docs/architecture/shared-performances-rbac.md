@@ -2,7 +2,7 @@
 
 **Status:** implemented; pending production provisioning and cutover
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-15
+**Last reviewed:** 2026-10-19
 
 ## Purpose
 
@@ -14,6 +14,8 @@ summary metrics. It never contains microphone audio.
 Private voice recordings are a different, owner-only resource with separate
 consent and authorization rules; see
 [Personal recordings and synchronized pitch replay](personal-recordings.md).
+Named progress, repertoire assignments and anonymized per-part aggregates are
+defined separately in [Direzione, repertorio personale e avanzamento](director-cockpit.md).
 
 This document defines the authorization, identity, data, storage and update
 contracts for that feature. It extends the Clerk/D1 boundary in
@@ -247,6 +249,7 @@ authoritative and cleanup is retried later.
 
 ```text
 GET    /api/me
+PATCH  /api/me
 GET    /api/performances/mine
 GET    /api/groups
 GET    /api/groups/{group_id}/performances
@@ -259,6 +262,15 @@ DELETE /api/performances/{performance_id}
 navigation, but later endpoints authorize again. `GET /api/groups` returns
 only granted groups, or all active groups for a director. Image delivery
 rechecks access even if a prior list included the artifact.
+
+`GET /api/me` also returns nullable `preferredVoicePart`. `PATCH /api/me`
+accepts that personal SATB preference (`soprano`, `contralto`, `tenore`,
+`basso`, or `null`) alongside the existing first/last name fields. Omitted
+fields preserve the current profile. The write is scoped to the active member
+and choir and is audited. Migration `0011_preferred_voice_part.sql` adds the
+separate column; it must precede deployment of this API version. This preference
+drives practice defaults only: it never changes `voice_part`, membership,
+roles or visibility grants.
 
 | Condition | Response |
 |---|---|
@@ -377,6 +389,7 @@ silently changing the meaning of an existing best.
 - [ADR-0005: scoped performance sharing](../decisions/0005-scoped-performance-sharing.md)
 - [ADR-0006: private owner-only personal recordings](../decisions/0006-private-personal-recordings.md)
 - [Personal recordings and synchronized pitch replay](personal-recordings.md)
+- [Direzione, repertorio personale e avanzamento](director-cockpit.md)
 - [ADR-0004: consumer authentication](../decisions/0004-consumer-authentication.md)
 - [System architecture](overview.md)
 - [Consumer authentication security review](../operations/consumer-auth-security-review.md)

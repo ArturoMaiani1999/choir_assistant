@@ -1,0 +1,2 @@
+Implementa [obiettivo]. Segui AGENTS.md, docs/product/ui-design-system.md e frontend-skill. Mantieni [contenuto principale] dominante, usa progressive disclosure per i dettagli e verifica desktop e mobile con screenshot.
+
