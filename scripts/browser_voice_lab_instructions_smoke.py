@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import base64
+import argparse
 import json
 import subprocess
 import sys
@@ -23,8 +24,8 @@ class Handler(SimpleHTTPRequestHandler):
         pass
 
     def do_GET(self):
-        if '--dist' in sys.argv and Path(urlsplit(self.path).path).name.startswith('session-client.'):
-            body = b'window.ChoirAuthReady=Promise.resolve();window.ChoirAuthFetch=window.fetch.bind(window);'
+        if Path(urlsplit(self.path).path).name.startswith('session-client.'):
+            body = b'window.ChoirAuthReady=Promise.resolve();window.ChoirAuthFetch=(...args)=>window.fetch(...args);'
             self.send_response(200)
             self.send_header('Content-Type', 'text/javascript')
             self.end_headers()
@@ -74,7 +75,14 @@ def close(socket, method='button'):
 
 
 def main():
-    server = ThreadingHTTPServer(('127.0.0.1', 0), partial(Handler, directory=str(ROOT / ('dist' if '--dist' in sys.argv else 'frontend'))))
+    parser = argparse.ArgumentParser()
+    parser.add_argument('--dist', action='store_true')
+    parser.add_argument('--release', type=Path)
+    args = parser.parse_args()
+    directory = args.release or ROOT / ('dist' if args.dist else 'frontend')
+    class Server(ThreadingHTTPServer):
+        request_queue_size = 128
+    server = Server(('127.0.0.1', 0), partial(Handler, directory=str(directory)))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     (ROOT / 'artifacts').mkdir(exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='choir-instructions-') as profile:

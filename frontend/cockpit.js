@@ -238,7 +238,8 @@
       if (!me.roles.includes('director')) throw new Error('Questa pagina è riservata ai direttori.');
       state.me = me; state.library = library.pieces || [];
       await loadOverview();
-    } catch (error) { $('cockpit-status').textContent = error.message; }
+      window.ChoirStartup?.ready();
+    } catch (error) { window.ChoirStartup?.fail(); $('cockpit-status').textContent = error.message; }
   }
   void initialize();
 })();

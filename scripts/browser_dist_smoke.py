@@ -153,9 +153,9 @@ def main() -> int:
                 stored: JSON.parse(sessionStorage.getItem(AUDIO_OUTPUT_SESSION_KEY))?.type,
                 max: slider.max, firstSettingId };
               sessionStorage.setItem(AUDIO_OUTPUT_SESSION_KEY, JSON.stringify({
-                type: 'bluetooth', confirmedAt: Date.now() - AUDIO_OUTPUT_CONFIRMATION_TTL_MS,
+                type: 'bluetooth', confirmedAt: Date.now() - 3600000,
               }));
-              const expired = !restoreAudioOutputPreference() && state.audioOutputType === null;
+              const connectionRetained = restoreAudioOutputPreference() && state.audioOutputType === 'bluetooth';
               els.settingsAudioOutputStandard.checked = true;
               els.settingsAudioOutputStandard.dispatchEvent(new Event('change'));
               slider.value = '270'; slider.dispatchEvent(new Event('input'));
@@ -166,16 +166,16 @@ def main() -> int:
                 stored: JSON.parse(localStorage.getItem(GLOBAL_DETECTOR_PREFERENCES_KEY)).pianoRollDelayMs };
               slider.value = '270'; slider.dispatchEvent(new Event('input'));
               slider.dispatchEvent(new Event('change'));
-              return { initial, bluetooth, expired, changed, actualBeat, restored: state.pianoRollDelayMs, advance };
+              return { initial, bluetooth, connectionRetained, changed, actualBeat, restored: state.pianoRollDelayMs, advance };
             })()""")
             call_id += 1
             assert visual_delay["initial"]["ms"] == 270 and visual_delay["initial"]["label"] == "270 ms", visual_delay
             assert visual_delay["initial"]["beat"] < visual_delay["actualBeat"], visual_delay
             assert visual_delay["bluetooth"] == {
                 "type": "bluetooth", "delay": 270, "advance": 320, "stored": "bluetooth", "max": "600",
-                "firstSettingId": "settings-calibration-heading",
+                "firstSettingId": "settings-listening-heading",
             }, visual_delay
-            assert visual_delay["expired"] is True, visual_delay
+            assert visual_delay["connectionRetained"] is True, visual_delay
             assert visual_delay["changed"]["ms"] == visual_delay["changed"]["stored"] == 410, visual_delay
             assert visual_delay["changed"]["beat"] < visual_delay["initial"]["beat"], visual_delay
             assert visual_delay["changed"]["advance"] == visual_delay["advance"], visual_delay
@@ -586,7 +586,7 @@ def main() -> int:
             assert result["transposeLabel"] == "Transp" and result["transposeValue"] == "±0", result
             assert result["phraseUiRemoved"] and result["advancedUiRemoved"], result
             assert result["mixerChannels"] == 5, result
-            assert result["metronomeOffset"] == 50 and result["metronomeOffsetControlPresent"] is False, result
+            assert result["metronomeOffset"] == 160 and result["metronomeOffsetControlPresent"] is False, result
             assert result["scoreReady"] and f"/library-assets/{expected_piece}/" in result["audioSource"], result
             if voice_mix["available"]:
                 assert all(level > .0001 for level in audio_assets.values()), audio_assets

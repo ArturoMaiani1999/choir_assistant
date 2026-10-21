@@ -175,7 +175,7 @@ async function acceptTerms(request: Request, env: Env, member: MemberContext): P
   return json({ version: MONITORING_TERMS_VERSION, accepted: true, acceptedAt: now });
 }
 
-async function listAssignments(env: Env, member: MemberContext): Promise<Response> {
+async function readAssignments(env: Env, member: MemberContext) {
   const assignments = await rows<{
     piece_id: string;
     assigned_at: string;
@@ -201,7 +201,7 @@ async function listAssignments(env: Env, member: MemberContext): Promise<Respons
        WHERE a.choir_id = ?1 AND a.active = 1
        ORDER BY a.assigned_at, a.piece_id`,
   ).bind(member.choirId, member.memberId));
-  return json({ assignments: assignments.map(item => ({
+  return assignments.map(item => ({
     pieceId: item.piece_id,
     assignedAt: item.assigned_at,
     updatedAt: item.updated_at,
@@ -215,7 +215,34 @@ async function listAssignments(env: Env, member: MemberContext): Promise<Respons
     bestScore: item.best_score,
     bestCoverage: item.best_coverage,
     maxCompletedSpeed: item.max_completed_speed,
-  })) });
+  }));
+}
+
+async function listAssignments(env: Env, member: MemberContext): Promise<Response> {
+  return json({ assignments: await readAssignments(env, member) });
+}
+
+async function repertoireOverview(env: Env, member: MemberContext): Promise<Response> {
+  // Resolve authentication/member context once for the whole read-only page.
+  const [assignments, catalogResponse] = await Promise.all([
+    readAssignments(env, member),
+    env.ASSETS.fetch(new Request(new URL("/library.json", env.APP_ORIGIN))),
+  ]);
+  if (!catalogResponse.ok) throw new Error("Repertoire catalog unavailable");
+  const catalog = await catalogResponse.json<{ pieces: Array<{
+    piece_id: string;
+    title: string;
+    parts: Array<{ id: string; name: string }>;
+  }> }>();
+  const assignedIds = new Set(assignments.map(item => item.pieceId));
+  return json({
+    voicePart: member.preferredVoicePart ?? member.voicePart,
+    canDirect: member.roles.includes("director"),
+    assignments,
+    pieces: catalog.pieces.filter(piece => assignedIds.has(piece.piece_id)).map(piece => ({
+      piece_id: piece.piece_id, title: piece.title, parts: piece.parts,
+    })),
+  });
 }
 
 function attemptStatus(completed: boolean, score: number, coverage: number): "in_progress" | "completed" | "ready" {
@@ -607,6 +634,7 @@ export async function handleProgressApi(
   if (request.method === "GET" && url.pathname === "/api/progress/consent") return consentStatus(env, member);
   if (request.method === "POST" && url.pathname === "/api/progress/consent") return acceptTerms(request, env, member);
   if (request.method === "GET" && url.pathname === "/api/progress/assignments") return listAssignments(env, member);
+  if (request.method === "GET" && url.pathname === "/api/progress/repertoire") return repertoireOverview(env, member);
   if (request.method === "POST" && url.pathname === "/api/progress/attempts") return submitAttempt(request, env, member);
   const revokeMatch = /^\/api\/progress\/pieces\/([^/]+)$/.exec(url.pathname);
   if (request.method === "DELETE" && revokeMatch) {

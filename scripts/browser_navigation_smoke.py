@@ -21,6 +21,7 @@ ARTIFACTS = ROOT / 'artifacts' / 'navigation-fixes'
 
 class NavigationHandler(Handler):
     fail_assignments_once = False
+    assignments_override = None
 
     def translate_path(self, path):
         pathname = urlsplit(path).path
@@ -30,10 +31,14 @@ class NavigationHandler(Handler):
 
     def do_GET(self):
         pathname = urlsplit(self.path).path
-        if pathname == '/api/progress/assignments' and type(self).fail_assignments_once:
+        if pathname in ['/api/progress/assignments', '/api/progress/repertoire'] and type(self).fail_assignments_once:
             type(self).fail_assignments_once = False
             self.send_error(503, 'Fixture temporary failure')
             return
+        if pathname == '/api/progress/assignments' and type(self).assignments_override is not None:
+            return self.send_body({'assignments': type(self).assignments_override})
+        if pathname == '/api/progress/repertoire' and type(self).assignments_override is not None:
+            return self.send_repertoire(type(self).assignments_override)
         if pathname == '/auth-client.js':
             return self.send_body((ARTIFACTS / 'auth-client.fixture.js').read_bytes(), 'text/javascript')
         if pathname == '/auth/config':
@@ -75,6 +80,7 @@ def main():
                 wait_for(socket,"document.querySelector('#piece-picker-dialog')?.dataset.intro!=='waiting'")
 
             def click(selector):
+                wait_for(socket,"!document.querySelector('#startup-status')")
                 point=evaluate(socket,4,f"""(()=>{{const e=document.querySelector({json.dumps(selector)});
                   if(!e?.checkVisibility())throw Error('Control hidden: '+{json.dumps(selector)});
                   e.scrollIntoView({{block:'nearest'}});const b=e.getBoundingClientRect();return {{x:b.left+b.width/2,y:b.top+b.height/2}}}})()""")
@@ -101,7 +107,7 @@ def main():
                 ME['preferredVoicePart']=None
                 go('/index.html',"document.querySelector('#piece-picker-dialog')?.open")
                 evaluate(socket,9,"localStorage.clear();sessionStorage.clear()")
-                go('/index.html',"document.querySelector('#piece-picker-dialog')?.open&&document.querySelector('#library-part').options.length>0")
+                go('/index.html',"document.querySelector('#piece-picker-dialog')?.open")
                 assert evaluate(socket,10,"getComputedStyle(document.querySelector('#practice-shell')).visibility==='hidden'")
                 capture(f'home-{width}','#piece-picker-dialog')
                 click('#library-read');click('#library-score')
@@ -110,7 +116,12 @@ def main():
                 click('#viewer-back');wait_for(socket,"document.querySelector('#piece-picker-dialog')?.open")
                 click('#library-sing');capture(f'sources-{width}','#piece-picker-dialog')
                 click('#library-custom');capture(f'catalog-{width}','#piece-picker-dialog')
+                wait_for(socket,"document.querySelector('#library-part').options.length>0")
                 evaluate(socket,11,"document.querySelector('#library-piece').value='ave-verum';document.querySelector('#library-piece').dispatchEvent(new Event('change'))")
+                click('#library-back')
+                assert evaluate(socket,110,"document.querySelector('#piece-picker-dialog').dataset.step==='source'")
+                click('#library-custom')
+                assert evaluate(socket,111,"document.querySelector('#library-piece').value==='ave-verum'")
                 click('#library-open')
                 wait_for(socket,"document.querySelector('#piece-picker-dialog').dataset.step==='part'")
                 capture(f'first-part-{width}','#piece-picker-dialog')
@@ -160,6 +171,14 @@ def main():
                 NavigationHandler.fail_assignments_once = True
                 go('/repertorio.html',"document.querySelector('#repertoire-retry')?.checkVisibility()")
                 click('#repertoire-retry');wait_for(socket,"!document.querySelector('#repertoire-content')?.hidden")
+                capture(f'repertoire-{width}')
+                assert evaluate(socket,166,"!document.querySelector('.ambient-curve')&&document.querySelector('h1').textContent==='Brani assegnati'")
+                click('.selection-link')
+                wait_for(socket,"document.querySelector('#piece-picker-dialog')?.dataset.step==='source'&&document.querySelector('#library-assigned').checkVisibility()")
+                click('#library-back')
+                assert evaluate(socket,167,"document.querySelector('#piece-picker-dialog').dataset.step==='mode'")
+                click('#library-sing');click('#library-assigned')
+                wait_for(socket,"!document.querySelector('#repertoire-content')?.hidden")
                 click('.open-piece');practice_ready()
                 if width==390:
                     click('#mobile-toolbar-toggle');click('#practice-return')
@@ -209,7 +228,7 @@ def main():
                 click('#signed-in-actions button')
                 assert evaluate(socket,28,"window.__authRedirect.startsWith('/sign-in?return_url=')")
                 go('/sign-in.html',"document.querySelector('#clerk-sign-in')?.dataset.ready==='true'")
-                assert evaluate(socket,29,"document.querySelector('h1').textContent==='Accedi a Epistrophe'")
+                assert evaluate(socket,29,"document.querySelector('h1').textContent==='Accedi a Xynon'")
                 # Home's unified account disclosure uses the same guarded logout route.
                 evaluate(socket,290,"localStorage.removeItem('audit-signed-out')")
                 go('/index.html',"document.querySelector('#piece-picker-dialog')?.open")
@@ -219,6 +238,26 @@ def main():
                 click('#signed-in-actions a')
                 wait_for(socket,"document.querySelector('#piece-picker-dialog')?.open")
                 results.append({'viewport':[width,height],'resumeBeat':before,'satb':'tenore','navigation':'passed','logout':'passed'})
+
+            # Empty and populated repertoires stay usable across phone widths.
+            repertoire_layouts=[]
+            for width,height in [(320,568),(360,800),(390,844),(430,932),(768,1024),(1366,768)]:
+                command(socket,292,'Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':width<600})
+                for count in [0,3]:
+                    NavigationHandler.assignments_override=[{'pieceId':piece,'status':'not_started'} for piece in ['ave-verum','o-sacrum','santo'][:count]]
+                    go('/repertorio.html',"Boolean(document.querySelector('#repertoire-content'))&&!document.querySelector('#repertoire-content').hidden")
+                    layout=evaluate(socket,293,"""(()=>{
+                      const controls=[...document.querySelectorAll('a,button')].filter(e=>e.checkVisibility());
+                      return {width:innerWidth,empty:!!document.querySelector('.empty-state'),
+                        overflow:document.documentElement.scrollWidth>innerWidth,
+                        small:controls.filter(e=>{const r=e.getBoundingClientRect();return r.width<44||r.height<44}).length,
+                        clipped:controls.filter(e=>{const r=e.getBoundingClientRect();return r.left<0||r.right>innerWidth}).length};})()""")
+                    assert not layout['overflow'] and not layout['small'] and not layout['clipped'],layout
+                    assert layout['empty']==(count==0),layout
+                    capture(f'repertoire-{width}-count-{count}')
+                    repertoire_layouts.append(layout)
+            NavigationHandler.assignments_override=None
+            command(socket,294,'Emulation.setDeviceMetricsOverride',{'width':390,'height':844,'deviceScaleFactor':1,'mobile':True})
 
             # History restores safe screens and never starts a take on Forward.
             go('/voice-lab.html',"document.body.dataset.screen==='choose'")
@@ -235,7 +274,7 @@ def main():
             command(socket,35,'Page.navigateToHistoryEntry',{'entryId':history['entries'][history['currentIndex']-1]['id']})
             wait_for(socket,"document.body.dataset.screen==='prepare'&&document.body.dataset.running==='false'")
             assert evaluate(socket,36,"window.__micStreams.every(stream=>stream.getTracks().every(track=>track.readyState==='ended'))")
-            print(json.dumps({'flows':results,'voiceBack':'passed','microphoneReleased':True,'artifacts':str(ARTIFACTS)}))
+            print(json.dumps({'flows':results,'repertoireLayouts':repertoire_layouts,'voiceBack':'passed','microphoneReleased':True,'artifacts':str(ARTIFACTS)}))
         finally:
             if socket:socket.close()
             process.terminate();process.wait(timeout=5);server.shutdown()

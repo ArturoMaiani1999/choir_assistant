@@ -2,9 +2,14 @@
 
 **Status:** canonical  
 **Owner:** project maintainer  
-**Last reviewed:** 2026-10-20
+**Last reviewed:** 2026-10-21
 
 ## Direzione
+
+Il nome pubblico del prodotto è **Xynon**: usarlo nei titoli delle pagine,
+nelle firme dell'interfaccia e nei testi di accesso, uscita e informativa.
+La rinomina conserva palette, tipografia e gerarchia musicale esistenti.
+I domini e i registri storici di Epistrophe identificano l'ambiente precedente.
 
 Choir Assistant è una sala prove digitale sobria. La musica è il contenuto
 principale: fondo inchiostro, spartito avorio, ambra per l'azione primaria,
@@ -68,6 +73,41 @@ contenitori si usano solo quando chiariscono un confine o un'interazione.
 - Errori e operazioni in corso restano vicini all'azione; i successi brevi
   possono usare un toast e non occupano spazio permanente.
 - Nessuno scroll orizzontale dell'intero documento a 390 px.
+
+## Firma armonica e superfici calme
+
+Il precedente sfondo luminoso «a respiro» è eliminato da Repertorio, Direzione
+e laboratorio vocale: il fondo rimane inchiostro uniforme. La Lissajous bicolore
+della [Home](home.md) è l'unica firma animata condivisa; la Home conserva la
+composizione grande e Relax mantiene la sua superficie contemplativa dedicata.
+
+- Nel Repertorio la firma è esclusa: brani e avanzamento restano l'unico
+  contenuto, senza area decorativa riservata in fondo alla pagina.
+- Tutto il laboratorio vocale, compresa la scelta esercizi, resta privo della
+  firma piccola su desktop e mobile. Restano le tre illustrazioni dei percorsi.
+- Direzione, prova, registrazione, partitura, risultati, analisi e impostazioni
+  restano privi della firma piccola.
+
+La pagina [About](home.md#about-e-missione) riusa la firma 3D compatta al posto
+della X nel marchio Xynon. È un'eccezione intenzionale dedicata all'identità;
+il testo della missione resta integralmente visibile con lettura a scorrimento.
+
+La firma della Home, il marchio About e la superficie di Relax rispettano movimento ridotto,
+sospensione in background e ritorno da BFCache. La loro animazione è
+un'eccezione intenzionale alla regola generale delle sole animazioni funzionali.
+
+Le tre illustrazioni dei percorsi vocali costituiscono un'ulteriore eccezione
+intenzionale: curve piane monocromatiche ferme con pallino e scia sul tracciato,
+anche su mobile, secondo il [contratto del laboratorio](voice-lab-warmup-redesign-plan.md).
+Non sostituiscono la firma condivisa; rispettano movimento ridotto e sospensione
+fuori vista, in background, con dialoghi e nelle fasi di concentrazione.
+
+Verifica locale su sorgenti e build fingerprintata:
+`python scripts/browser_ambient_smoke.py` (anche con `--dist --directory`),
+oltre agli smoke di Home,
+Direzione e istruzioni vocali. Screenshot di Repertorio e laboratorio a
+1366×768 e 390×844 in `artifacts/ambient-curve`, compresa l'assenza della
+firma nel Repertorio e in tutto il laboratorio vocale.
 
 ## Definizione di completato
 

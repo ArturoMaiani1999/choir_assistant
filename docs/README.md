@@ -32,7 +32,7 @@ take precedence over anything under `archive/`.
 
 - [Practice experience](product/practice-experience.md) — canonical UX and
   temporal behavior.
-- [Home di Epistrophe](product/home.md) — composizione responsive, firma
+- [Home di Xynon](product/home.md) — composizione responsive, firma
   armonica bicolore e accesso unificato a profilo e impostazioni.
 - [Session states](product/session-states.md) — microphone, playback and
   interruption state model.
@@ -42,7 +42,7 @@ take precedence over anything under `archive/`.
 - [Audit dei flussi di navigazione](product/navigation-ux-audit.md) — passaggi,
   ritorni e conservazione del contesto verificati su desktop e mobile.
 - [Relax mode](product/relax-mode.md) — curva di Lissajous 3D sul nero,
-  scia di venti secondi e controlli discreti.
+  scia luminosa e controlli discreti.
 - [Performance monitoring privacy notice](product/performance-monitoring-privacy-notice.md) —
   draft copy shown before the first derived-metrics upload.
 

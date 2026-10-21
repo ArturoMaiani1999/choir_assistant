@@ -91,13 +91,14 @@ test('extracts the actual live detector on identical PCM without an amplitude ga
   assert.throws(() => Core.extractFrames([{ timeSec: 0, pcm: new Float32Array([NaN]) }], 48000, base, detector));
 });
 
-test('isolates profiles by user, input/chain, version and expiry', () => {
+test('isolates profiles by user, input/chain and version without a calendar expiry', () => {
   const now = 1000000, profile = { version: Core.VERSION, detectorVersion: Core.DETECTOR_VERSION,
     scope: 'user-A', chain: 'input-A', createdAt: now, quality: { noise95: .001 }, settings: base };
   assert.ok(Core.validProfile(profile, 'user-A', 'input-A', now));
   assert.equal(Core.validProfile(profile, 'user-B', 'input-A', now), false);
   assert.equal(Core.validProfile(profile, 'user-A', 'input-B', now), false);
-  assert.equal(Core.validProfile(profile, 'user-A', 'input-A', now + Core.PROFILE_TTL_MS), false);
+  assert.equal(Core.validProfile(profile, 'user-A', 'input-A', now + 365 * 86400000), true);
+  assert.equal(Core.validProfile(profile, 'user-A', 'input-A', now - 1), false);
   assert.equal(Core.validProfile({ ...profile, version: Core.VERSION - 1 }, 'user-A', 'input-A', now), false);
   assert.equal(Core.validProfile({ ...profile, settings: { minConfidence: NaN } }, 'user-A', 'input-A', now), false);
   assert.equal(Core.chainSettings({ deviceId: 'private', groupId: 'private' }, 48000).deviceId, undefined);

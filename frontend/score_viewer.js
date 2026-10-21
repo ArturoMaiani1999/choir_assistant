@@ -342,7 +342,7 @@
     const piece = library.find((item) => item.piece_id === pieceId) ?? library[0];
     if (!piece) throw new Error('Non ci sono partiture disponibili');
     setStatus('Preparazione della partitura…'); els.piece.value = piece.piece_id; els.title.textContent = displayTitle(piece);
-    document.title = `${displayTitle(piece)} · Mostra partitura`;
+    document.title = `${displayTitle(piece)} · Mostra partitura · Xynon`;
     const backQuery = new URLSearchParams({ piece: piece.piece_id });
     if (entryQuery.get('from') === 'repertorio') backQuery.set('from', 'repertorio');
     const returning = piece.piece_id === entryQuery.get('piece') && entryQuery.has('resume');
@@ -436,5 +436,5 @@
     });
     await openPiece(selected,{updateHistory:requested!==selected});
   }
-  initialize().catch((error)=>{els.title.textContent='Partitura non disponibile';setStatus(error.message,true);console.error(error);});
+  initialize().then(()=>window.ChoirStartup?.ready()).catch((error)=>{window.ChoirStartup?.fail();els.title.textContent='Partitura non disponibile';setStatus(error.message,true);console.error(error);});
 }());

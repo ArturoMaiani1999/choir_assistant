@@ -22,7 +22,7 @@
   }
   function sync() {
     const active = menu.open && !document.querySelector('dialog[open]:not(#piece-picker-dialog)');
-    scene.setActive(active);
+    if (scene.state.active !== active) scene.setActive(active);
     menu.dataset.intro = 'skip'; // Navigation is available immediately, also on first entry.
     if (!active) closeAccount();
   }
@@ -60,9 +60,12 @@
     if (event.target === menu && menu.querySelector('#library-close:not([hidden])')) menu.close();
   }, options);
   const observer = new MutationObserver(records => {
-    if (records.some(record => record.target.tagName === 'DIALOG')) sync();
+    if (records.some(record => record.target.tagName === 'DIALOG' && record.attributeName === 'open')) sync();
+    // Repaint a paused Canvas after the surrounding step changes too.
+    // Keep the same scene, clock and size throughout menu navigation.
+    if (records.some(record => record.target === menu && record.attributeName === 'data-step')) scene.render();
   });
-  observer.observe(document.body, { subtree:true, attributes:true, attributeFilter:['open'] });
+  observer.observe(document.body, { subtree:true, attributes:true, attributeFilter:['open','data-step'] });
   window.addEventListener('pagehide', event => {
     scene.setActive(false);
     if (!event.persisted) { observer.disconnect();events.abort();scene.destroy(); }

@@ -36,13 +36,21 @@ main {
 }
 
 main::before {
-  content: "EPISTROPHE";
+  content: "XYNON";
   display: block;
   margin-bottom: .8rem;
   color: var(--amber);
   font-size: .68rem;
   font-weight: 850;
   letter-spacing: .16em;
+}
+
+#clerk-sign-in,
+#clerk-sign-in .cl-rootBox,
+#clerk-sign-in .cl-cardBox {
+  width: 100%;
+  max-width: 100%;
+  min-width: 0;
 }
 
 h1 { margin: 0 0 1rem; font: 600 clamp(1.75rem, 6vw, 2.35rem)/1.05 Georgia, serif; letter-spacing: -.02em; }

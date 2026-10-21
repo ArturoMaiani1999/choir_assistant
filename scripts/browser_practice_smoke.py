@@ -12,7 +12,7 @@ from pathlib import Path
 import websocket
 
 CHROME = Path(r"C:\Program Files\Google\Chrome\Application\chrome.exe")
-URL = "http://localhost:5173/"
+URL = "http://localhost:5173/?piece=ave-verum"
 ROOT = Path(__file__).resolve().parents[1]
 ARTIFACTS = ROOT / "artifacts" / "practice-redesign"
 VIEWPORTS = [(1440, 900), (1920, 1080), (1366, 768), (844, 390), (932, 430), (390, 844)]
@@ -50,6 +50,7 @@ def main():
             try:
                 command(socket, 1, "Page.enable")
                 for _ in range(100):
+                    evaluate(socket, 2, "document.querySelector('#piece-picker-dialog[open] [data-preferred-voice=tenore]:not(:disabled)')?.click()")
                     if evaluate(socket, 2, "Boolean(typeof state !== 'undefined' && state.runtime && state.bundleManifest)"):
                         break
                     time.sleep(.1)
@@ -88,6 +89,9 @@ def main():
                       audioSrc: document.querySelector('#backing-audio').getAttribute('src'),
                       microphoneControl: Boolean(document.querySelector('#microphone')),
                       metronomeControl: Boolean(document.querySelector('#metronome-toggle') && document.querySelector('#metronome-volume')),
+                      metronomeVolume: els.metronomeVolume.value,
+                      metronomeActive: els.metronomeToggle.getAttribute('aria-pressed'),
+                      metronomeOffset: state.metronomeOffsetMs,
                       fabricatedLyrics: state.runtime.targetEvents.filter(event => ['lu','ce','can','ta'].includes(event.lyric)).length,
                       missingProvenance: state.runtime.targetEvents.filter(event => !event.sourceEventId).length
                     })"""); call_id += 1
@@ -103,6 +107,8 @@ def main():
                     if metrics["publicationStatus"] == "pending_review":
                         assert metrics["fabricatedLyrics"] == 0 and metrics["missingProvenance"] == 0
                     assert metrics["metronomeControl"] is True
+                    assert metrics["metronomeVolume"] == "30" and metrics["metronomeActive"] == "true", metrics
+                    assert metrics["metronomeOffset"] == 160, metrics
                     assert metrics["portraitHint"] == "none"
                     assert metrics["readoutDisplay"] == "none"
                     if width <= 960:
@@ -146,6 +152,8 @@ def main():
                 interaction = evaluate(socket, call_id, """(async () => {
                   const before = state.clock.snapshot(performance.now()).beat;
                   document.querySelector('#metronome-toggle').click();
+                  const metronomeMuted = {volume: els.metronomeVolume.value, pressed: els.metronomeToggle.getAttribute('aria-pressed')};
+                  document.querySelector('#metronome-toggle').click();
                   const metronome = {volume: document.querySelector('#metronome-volume').value, pressed: document.querySelector('#metronome-toggle').getAttribute('aria-pressed')};
                   const cursorBefore = document.querySelector('#score-cursor').style.left;
                   document.querySelector('#toggle-playback').click();
@@ -169,14 +177,15 @@ def main():
                     return {a, b};
                   });
                   const backwardsInsideSystem = geometryPairs.filter(({a,b}) => a && b && a.systemId === b.systemId && b.x_percent < a.x_percent).length;
-                  return {before, after, running: state.clock.running, scoringStart: state.scoringStartBeat, metronome,
+                  return {before, after, running: state.clock.running, scoringStart: state.scoringStartBeat, metronome, metronomeMuted,
                     scoreLabel: document.querySelector('#score-measure-label').textContent, backwardsInsideSystem,
                     canvasWidth: document.querySelector('#pitch-lane').width, cursorBefore, cursorAfter, pureMath, detectedPitch};
                 })()""")
                 assert interaction["after"] == interaction["before"]
                 assert interaction["running"] is False and interaction["scoringStart"] > 0
                 assert interaction["canvasWidth"] > 0
-                assert interaction["metronome"] == {"volume": "34", "pressed": "true"}
+                assert interaction["metronomeMuted"] == {"volume": "0", "pressed": "false"}
+                assert interaction["metronome"] == {"volume": "30", "pressed": "true"}
                 assert interaction["backwardsInsideSystem"] == 0
                 assert abs(interaction["pureMath"]["a4"] - 69) < 1e-9
                 assert abs(interaction["pureMath"]["octave"] - 12) < 1e-9

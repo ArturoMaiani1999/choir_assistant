@@ -25,18 +25,7 @@
 .performance-empty { color: #91aaa8; padding: 22px 4px; }
 
 body.performance-review-open { overflow: hidden; }
-.roll-navigation { position: absolute; z-index: 6; right: 10px; bottom: 10px; color: var(--text, #e8efed); font-size: .72rem; }
-.roll-navigation[hidden] { display: none; }
-.roll-navigation summary { display: grid; min-width: 54px; min-height: 44px; padding: 0 10px; place-items: center; border: 1px solid var(--line, #365057); border-radius: 6px; background: #0b1c22; cursor: pointer; list-style: none; }
-.roll-navigation summary::-webkit-details-marker { display: none; }
-.roll-navigation-panel { position: absolute; right: 0; bottom: 52px; width: min(294px, calc(100vw - 40px)); padding: 12px; border: 1px solid var(--line, #365057); border-radius: 7px; background: #0b1c22; box-shadow: 0 8px 24px #0005; }
-.roll-navigation-panel > div { display: grid; grid-template-columns: 1fr 44px 48px 44px; align-items: center; gap: 4px; }
-.roll-navigation button { min-width: 44px; min-height: 44px; padding: 4px 8px; border: 0; border-radius: 4px; background: transparent; color: inherit; cursor: pointer; font: inherit; }
-.roll-navigation button:hover { background: #193039; }
-.roll-navigation output { color: var(--muted, #8fa8a6); text-align: center; font-size: .68rem; }
-.roll-navigation [data-reset] { width: 100%; margin-top: 4px; border-top: 1px solid var(--line, #365057); border-radius: 0; text-align: left; }
-.roll-navigation p { margin: 8px 0 0; color: var(--muted, #8fa8a6); font-size: .68rem; line-height: 1.5; }
-.roll-navigation :focus-visible, canvas:focus-visible { outline: 2px solid var(--cyan, #86d6ca); outline-offset: -3px; }
+canvas:focus-visible { outline: 2px solid var(--cyan, #86d6ca); outline-offset: -3px; }
 .roll-note-status { position: absolute; z-index: 5; right: 78px; bottom: 23px; max-width: calc(100% - 140px); padding: 4px 7px; color: var(--text, #e8efed); background: #0b1c22; font-size: .72rem; pointer-events: none; }
 .roll-note-status:empty { display: none; }
 .performance-review { position: fixed; z-index: 120; inset: 0; display: grid; grid-template-rows: 78px minmax(0,1fr); color: #e8efed; background: #071419; }

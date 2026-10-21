@@ -154,12 +154,8 @@ def main() -> None:
                 detailOpen: Boolean(detail) && Boolean(document.querySelector('.assignment-preparation-trigger[aria-expanded=true]')),
                 preparedCount: groups[0].querySelector('h4 strong').textContent,
                 remainingCount: groups[1].querySelector('h4 strong').textContent,
-                ambientLayerCount: document.querySelectorAll('.ambient-respiro__glow').length,
-                ambientAnimationRunning: [...document.querySelectorAll('.ambient-respiro__glow')]
-                  .every(layer => getComputedStyle(layer).animationName !== 'none'
-                    && getComputedStyle(layer).animationPlayState === 'running'),
-                ambientBreathSeconds: [...document.querySelectorAll('.ambient-respiro__glow')]
-                  .map(layer => Number.parseFloat(getComputedStyle(layer).animationDuration)),
+                ambientAbsent: !document.querySelector('.ambient-curve'),
+                oldBreathingAbsent: !document.querySelector('.ambient-respiro'),
                 oldCircularGradientAbsent: !getComputedStyle(document.body).backgroundImage.includes('radial-gradient'),
                 documentOverflow: document.documentElement.scrollWidth > innerWidth,
               };
@@ -175,9 +171,8 @@ def main() -> None:
                 "detailOpen": True,
                 "preparedCount": "1",
                 "remainingCount": "2",
-                "ambientLayerCount": 2,
-                "ambientAnimationRunning": True,
-                "ambientBreathSeconds": [22, 29],
+                "ambientAbsent": True,
+                "oldBreathingAbsent": True,
                 "oldCircularGradientAbsent": True,
                 "documentOverflow": False,
             }, desktop
@@ -199,7 +194,7 @@ def main() -> None:
                 preparationTriggerUsable: [...document.querySelectorAll('.assignment-preparation-trigger')]
                   .every(button => button.getBoundingClientRect().height >= 44),
                 detailInsideViewport: detail.left >= 0 && detail.right <= innerWidth,
-                ambientWarmHidden: getComputedStyle(document.querySelector('.ambient-respiro__glow--warm')).display === 'none',
+                ambientAbsent: !document.querySelector('.ambient-curve'),
                 rowsInsideViewport: rows.every(row => {
                   const box = row.getBoundingClientRect(); return box.left >= 0 && box.right <= innerWidth;
                 }),
@@ -212,7 +207,7 @@ def main() -> None:
                 "buttonsUsable": True,
                 "preparationTriggerUsable": True,
                 "detailInsideViewport": True,
-                "ambientWarmHidden": True,
+                "ambientAbsent": True,
                 "rowsInsideViewport": True,
                 "documentOverflow": False,
             }, mobile
@@ -274,9 +269,9 @@ def main() -> None:
                 "features": [{"name": "prefers-reduced-motion", "value": "reduce"}],
             })
             reduced_motion = evaluate(socket, 204, """(() => ({
-              animationsStopped: [...document.querySelectorAll('.ambient-respiro__glow')]
+              animationsStopped: [...document.querySelectorAll('.ambient-curve canvas')]
                 .every(layer => getComputedStyle(layer).animationName === 'none'),
-              transitionStopped: getComputedStyle(document.querySelector('.ambient-respiro')).transitionDuration === '0s',
+              transitionStopped: getComputedStyle(document.querySelector('.ambient-curve')).transitionDuration === '0s',
             }))()""")
             assert reduced_motion == {
                 "animationsStopped": True,

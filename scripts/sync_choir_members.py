@@ -188,6 +188,7 @@ def main() -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument("source", type=Path, help="CSV privato: email,display_name,voice_part,groups,roles,view_groups")
     parser.add_argument("--database", default="choir-assistant-auth-staging")
+    parser.add_argument("--config", type=Path, help="Configurazione Wrangler dell'ambiente destinatario")
     parser.add_argument("--replace", action="store_true", help="revoca anche i membri assenti")
     parser.add_argument("--confirm-replace-count", type=int)
     parser.add_argument("--local", action="store_true")
@@ -217,6 +218,7 @@ def main() -> int:
         subprocess.run([
             npx, "wrangler", "d1", "execute", args.database,
             "--local" if args.local else "--remote", "--file", str(temporary_path),
+            *(["--config", str(args.config.resolve())] if args.config else []),
         ], cwd=ROOT, check=True, env=child_environment)
     finally:
         if temporary_path and temporary_path.exists():

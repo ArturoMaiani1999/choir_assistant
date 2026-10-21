@@ -12,6 +12,48 @@ import build_dist
 
 
 class BuildDistTest(unittest.TestCase):
+    def test_authentication_bundles_are_fingerprinted(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            names = build_dist.build_auth_client(destination)
+            for original in ('auth-client.js', 'session-client.js'):
+                self.assertEqual((destination / original).read_bytes(), (destination / names[original]).read_bytes())
+                self.assertIn(build_dist.sha256(destination / names[original])[:12], names[original])
+            build_dist.audit(destination)
+
+    def test_code_cache_headers_do_not_combine_immutable_and_no_store(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            build_dist.write_headers(destination)
+            headers = (destination / '_headers').read_text(encoding='utf-8')
+            self.assertIn('/*.js\n  Cache-Control: no-cache', headers)
+            self.assertNotIn('/auth-client.js\n  Cache-Control: no-store', headers)
+            self.assertNotIn('/session-client.js\n  Cache-Control: no-store', headers)
+
+    def test_headers_use_only_the_selected_workers_clerk_origin(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            for filename, expected, excluded in (
+                ("wrangler.jsonc", "https://clerk.staging.epistrophe.it", "https://clerk.staging.xynon.it"),
+                ("wrangler.xynon.jsonc", "https://clerk.staging.xynon.it", "https://clerk.staging.epistrophe.it"),
+            ):
+                build_dist.write_headers(destination, worker_config=build_dist.ROOT / filename)
+                headers = (destination / "_headers").read_text(encoding="utf-8")
+                self.assertIn(expected, headers)
+                self.assertNotIn(excluded, headers)
+                self.assertNotIn("CLERK_FRONTEND_API_ORIGIN", headers)
+
+    def test_headers_reject_an_invalid_or_injected_clerk_origin(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            destination = Path(directory)
+            config = destination / "worker.json"
+            for origin in (None, "http://clerk.example.org", "https://clerk.example.org/path",
+                           "https://clerk.example.org\n  Injected: value", "https://clerk.example.org;other"):
+                config.write_text(json.dumps({"vars": {"CLERK_FRONTEND_API_ORIGIN": origin}}), encoding="utf-8")
+                with self.assertRaisesRegex(ValueError, "CLERK_FRONTEND_API_ORIGIN"):
+                    build_dist.write_headers(destination, worker_config=config)
+            self.assertFalse((destination / "_headers").exists())
+
     def test_piece_build_publishes_continuous_scores(self) -> None:
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -99,6 +141,11 @@ class BuildDistTest(unittest.TestCase):
 
             self.assertIn("ui_preferences.js", names)
             self.assertIn("recording_client.js", names)
+            self.assertIn("calibration_probe.js", names)
+            probe = (destination / names["calibration_probe.js"]).read_text(encoding="utf-8")
+            self.assertIn('broadband-noise-v1', probe)
+            self.assertNotIn('fetch(', probe)
+            self.assertNotIn('decodeAudioData', probe)
             self.assertIn("pitch_detector_worker.js", names)
             self.assertIn("pitch_shifter_worklet.js", names)
             for generated_name in names.values():

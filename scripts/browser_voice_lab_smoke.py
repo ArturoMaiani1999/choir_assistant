@@ -88,6 +88,77 @@ def select_path(socket, path):
     wait_screen(socket, 'prepare')
 
 
+def check_path_curves(socket):
+    def snapshot():
+        return evaluate(socket, 540, """[...document.querySelectorAll('.warmup-path-curve')].map(svg => {
+          const path=svg.querySelector('path'), dot=svg.querySelector('circle');
+          const x=+dot.getAttribute('cx'), y=+dot.getAttribute('cy'), length=path.getTotalLength();
+          let distance=Infinity;
+          for(let i=0;i<=1600;i++) {
+            const p=path.getPointAtLength(length*i/1600);
+            distance=Math.min(distance,Math.hypot(p.x-x,p.y-y));
+          }
+          const segments=[...svg.querySelectorAll('.warmup-path-trail path')];
+          const tailHead=segments.at(-1), end=tailHead.getPointAtLength(tailHead.getTotalLength());
+          return {ratio:svg.dataset.ratio, x,y, distance,
+            rotation:svg.querySelector('g').getAttribute('transform'),
+            stroke:getComputedStyle(path).stroke, fill:getComputedStyle(dot).fill,
+            guideOpacity:+getComputedStyle(path).opacity,
+            tailVisible:getComputedStyle(svg.querySelector('.warmup-path-trail')).display!=='none',
+            tailHead:tailHead.getAttribute('d'), tailGap:Math.hypot(end.x-x,end.y-y),
+            tailOpacity:segments.map(segment=>+getComputedStyle(segment).strokeOpacity),
+            tailColors:segments.every(segment=>getComputedStyle(segment).stroke===getComputedStyle(path).stroke),
+            decorative:svg.closest('[aria-hidden=true]')!==null};
+        })""")
+
+    def settle():
+        evaluate(socket, 541, 'new Promise(resolve=>setTimeout(resolve,250))', await_promise=True)
+
+    settle()
+    first = snapshot()
+    assert [curve['ratio'] for curve in first] == ['1:3', '2:3', '3:4'], first
+    assert [curve['stroke'] for curve in first] == ['rgb(223, 184, 102)', 'rgb(113, 205, 220)', 'rgb(158, 139, 212)'], first
+    assert all(curve['stroke'] == curve['fill'] and curve['decorative'] and curve['distance'] < .5 for curve in first), first
+    assert all(curve['rotation'] is None and curve['guideOpacity'] < .2 and curve['tailVisible']
+               and curve['tailGap'] < .01 and curve['tailColors']
+               and len(curve['tailOpacity']) > 1 and curve['tailOpacity'][0] < .01
+               and curve['tailOpacity'][-1] == 1
+               and curve['tailOpacity'] == sorted(curve['tailOpacity']) for curve in first), first
+    settle()
+    moving = snapshot()
+    assert all(before['rotation'] == after['rotation'] and before['tailHead'] != after['tailHead']
+               and (before['x'], before['y']) != (after['x'], after['y'])
+               for before, after in zip(first, moving)), (first, moving)
+    # Opening settings suspends all three illustrations.
+    evaluate(socket, 542, "document.querySelector('#lab-settings').click()")
+    settle()
+    paused = snapshot()
+    settle()
+    assert snapshot() == paused
+    evaluate(socket, 543, "document.querySelector('#lab-settings-close').click()")
+    # Reduced motion works when toggled during the visit, including on mobile.
+    command(socket, 544, 'Emulation.setEmulatedMedia', {'features':[{'name':'prefers-reduced-motion','value':'reduce'}]})
+    settle()
+    static = snapshot()
+    settle()
+    assert snapshot() == static
+    assert all(curve['rotation'] is None and curve['guideOpacity'] == 1 and not curve['tailVisible'] for curve in static), static
+    command(socket, 545, 'Emulation.setEmulatedMedia', {'features':[{'name':'prefers-reduced-motion','value':'no-preference'}]})
+    settle()
+    assert snapshot() != static
+    evaluate(socket, 546, "document.querySelector('[data-path=scale]').click()")
+    wait_screen(socket, 'prepare')
+    settle()
+    hidden = snapshot()
+    settle()
+    assert snapshot() == hidden
+    evaluate(socket, 547, "document.querySelector('#warmup-back-choose').click()")
+    wait_screen(socket, 'choose')
+    settle()
+    assert snapshot() != hidden
+    assert evaluate(socket, 548, 'document.documentElement.scrollWidth<=innerWidth')
+
+
 def main() -> int:
     if not CHROME.is_file():
         raise SystemExit("Chrome non disponibile")
@@ -143,13 +214,14 @@ def main() -> int:
                     pathCount: document.querySelectorAll('[data-path]').length
                   }))()
                 """)
-                assert initial == {"title": "Allena la tua voce", "legacyActivities": 0,
+                assert initial == {"title": "Esercizi vocali", "legacyActivities": 0,
                                    "scoreTag": "CANVAS", "scoreAsset": "voice-lab-assets/scores/scale-major-r53-tenor.svg",
                                    "scoreImageHidden": False, "rollTag": "CANVAS",
                                    "plan": "Scala in Fa · 60 BPM", "progress": "Fa · 60 BPM",
                                    "volume": "100%", "settingsOpen": False, "screen": "choose",
                                    "chooseVisible": True, "prepareHidden": True, "workspaceHidden": True,
                                    "pathCount": 3}, initial
+                check_path_curves(socket)
                 evaluate(socket, 3, "document.querySelector('#lab-settings').click(); document.querySelector('#lab-settings-save').click()")
                 home = command(socket, 30, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
                 (ROOT / "artifacts" / "voice-lab-home.png").write_bytes(base64.b64decode(home["data"]))
@@ -532,6 +604,7 @@ def main() -> int:
                 (ROOT / "artifacts" / "voice-lab-prepare-mobile.png").write_bytes(base64.b64decode(mobile_prepare["data"]))
                 evaluate(socket, 93, "document.querySelector('#warmup-back-choose').click()")
                 wait_screen(socket, 'choose')
+                check_path_curves(socket)
                 mobile_home = command(socket, 94, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
                 (ROOT / "artifacts" / "voice-lab-home-mobile.png").write_bytes(base64.b64decode(mobile_home["data"]))
                 print(json.dumps({"initial": initial, "plans": plans, "layouts": layouts, "modelEvents": len(model["events"]),

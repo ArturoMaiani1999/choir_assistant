@@ -4,6 +4,24 @@ const Core = require('../frontend/echo_cancellation.js');
 const fs = require('node:fs');
 const vm = require('node:vm');
 const sr = 32000;
+test('training detects both signs of a 40 ms jump without inspecting the holdout',()=>{
+  for (const rate of [32000, 44100, 48000, 96000]) {
+    const x = new Float32Array(rate * 10);
+    x.set(Core.noise(rate * 3, .08, 173), rate * 3);
+    for (const sign of [-1, 1]) {
+      const delays = [Math.round(.13 * rate), Math.round(.17 * rate)];
+      if (sign < 0) delays.reverse();
+      const y = Float32Array.from(x, (_, i) => -.6 * (x[i - delays[i < rate * 4.3 ? 0 : 1]] || 0));
+      const result = Core.trainingStability(x, y, rate);
+      assert.equal(result.unstable, true, JSON.stringify(result));
+      y.fill(.9, rate * 7);
+      assert.deepEqual(Core.trainingStability(x, y, rate), result);
+    }
+    const stable = Float32Array.from(x, (_, i) => -.6 * (x[i - Math.round(.153 * rate)] || 0));
+    assert.equal(Core.trainingStability(x, stable, rate).unstable, false);
+    assert.equal(Core.trainingStability(x, new Float32Array(x.length), rate).unstable, false);
+  }
+});
 function capture(pathChange=false) {
   const x = new Float32Array(sr*14), h = new Float32Array(6000);
   h[481]=.45; h[790]=-.12; h[3800]=.08;
@@ -132,8 +150,9 @@ test('an interrupted or inconsistent gain candidate cannot be applied later',()=
 test('monitor advances through silent zero-channel inputs and recycles only one window',()=>{
   let Processor, message, emitted=0;
   const sandbox={AudioWorkletProcessor:class { constructor(){this.port={postMessage:data=>{message=data;emitted++;}};} },
-    registerProcessor:(_,value)=>{Processor=value;},sampleRate:48000,currentFrame:0,Float32Array};
-  vm.runInNewContext(fs.readFileSync(require.resolve('../frontend/echo_monitor_worklet.js'),'utf8'),sandbox);
+    registerProcessor:(_,value)=>{Processor=value;},sampleRate:48000,currentFrame:0,Float32Array,
+    ChoirAudioSampleClock:require('../frontend/audio_sample_clock.js')};
+  vm.runInNewContext(fs.readFileSync(require.resolve('../frontend/echo_monitor_worklet.js'),'utf8').replace(/^import .*;\r?$/gm,''),sandbox);
   const monitor=new Processor(),mic=new Float32Array(128).fill(.03),out=[[new Float32Array(128)]];
   for(let i=0;i<64;i++){sandbox.currentFrame=i*128;monitor.process([[mic],[]],out);}
   assert.equal(emitted,1);assert.ok(message.microphone.every(v=>Math.abs(v-.03)<1e-7));

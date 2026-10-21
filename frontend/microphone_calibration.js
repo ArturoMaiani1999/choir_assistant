@@ -5,9 +5,7 @@
 })(typeof globalThis !== 'undefined' ? globalThis : this, function () {
   'use strict';
   const VERSION = 2;
-  const DETECTOR_VERSION = 'yin-live-calibration-2';
-  const PROFILE_TTL_MS = 7 * 24 * 3600_000;
-  const SESSION_TTL_MS = 30 * 60_000;
+  const DETECTOR_VERSION = 'yin-live-harmonics-3';
   const MARGIN_SEC = .5;
   const STAGES = Object.freeze([
     { start: 0, end: 4, voiced: null, instruction: 'Mettiti comodo', hint: 'Tra poco misuriamo il silenzio. Non cantare ancora.' },
@@ -64,19 +62,21 @@
     return captured.map((frame, index) => {
       const pcm = frame.pcm instanceof Float32Array ? frame.pcm : new Float32Array(frame.buffer);
       if (pcm.length !== 2048 || !pcm.every(Number.isFinite) || !Number.isFinite(frame.timeSec)) throw new Error('Frame microfono non valido');
-      const raw = detector.detectPitch(pcm, sampleRate, { rmsThreshold: 0, yinThreshold: config.yinThreshold });
+      const raw = detector.detectPitch(pcm, sampleRate, { rmsThreshold: 0, yinThreshold: config.yinThreshold, resolveHarmonics: true });
       let clipped = 0;
       for (const value of pcm) if (Math.abs(value) >= .99) clipped += 1;
       if (index % 25 === 0) progress?.(index / captured.length);
-      return { timeSec: frame.timeSec, rms: raw.rms, hz: raw.hz, clarity: raw.clarity, clippedFraction: clipped / pcm.length };
+      return { timeSec: frame.timeSec, rms: raw.rms, hz: raw.hz, originalHz: raw.originalHz??raw.hz, clarity: raw.clarity, clippedFraction: clipped / pcm.length };
     });
   }
   function scoreFrames(frames, config, trackerSettings, detector, stages = STAGES) {
-    const tracker = new detector.PitchSmoother({ ...trackerSettings, ...config });
+    const Tracker = detector.HarmonicPitchSmoother || detector.PitchSmoother;
+    const tracker = new Tracker({ ...trackerSettings, ...config });
     const counts = { train: { tp: 0, tn: 0, fp: 0, fn: 0 }, validation: { tp: 0, tn: 0, fp: 0, fn: 0 } };
     for (const frame of frames) {
       const floor = config.levelConfidenceFloor ?? (config.rmsThreshold < .001 ? .36 : 0);
-      const raw = { hz: frame.rms >= config.rmsThreshold ? frame.hz : null, rms: frame.rms,
+      const raw = { hz: frame.rms >= config.rmsThreshold ? frame.hz : null,
+        originalHz: frame.rms >= config.rmsThreshold ? frame.originalHz??frame.hz : null, rms: frame.rms,
         clarity: frame.clarity, confidence: frame.clarity * Math.max(floor, Math.min(1, frame.rms / .08)) };
       const tracked = tracker.update(raw, frame.timeSec * 1000), label = labelAt(frame.timeSec, stages);
       if (!label) continue;
@@ -136,7 +136,7 @@
   function validProfile(profile, scope, chain, now = Date.now()) {
     try {
       return profile?.version === VERSION && profile.detectorVersion === DETECTOR_VERSION && profile.scope === scope
-        && profile.chain === chain && Number.isFinite(profile.createdAt) && now >= profile.createdAt && now - profile.createdAt < PROFILE_TTL_MS
+        && profile.chain === chain && Number.isFinite(profile.createdAt) && now >= profile.createdAt
         && Number.isFinite(profile.quality?.noise95) && profile.quality.noise95 >= 0 && Boolean(settings(profile.settings));
     } catch (_) { return false; }
   }
@@ -156,6 +156,6 @@
     }
     return fp / interior.length <= .1;
   }
-  return Object.freeze({ VERSION, DETECTOR_VERSION, PROFILE_TTL_MS, SESSION_TTL_MS, STAGES, AUDIO_STAGES, REUSE_STAGES, DURATION_SEC, REUSE_DURATION_SEC, MAX_FRAMES, MARGIN_SEC,
+  return Object.freeze({ VERSION, DETECTOR_VERSION, STAGES, AUDIO_STAGES, REUSE_STAGES, DURATION_SEC, REUSE_DURATION_SEC, MAX_FRAMES, MARGIN_SEC,
     labelAt, settings, extractFrames, scoreFrames, evaluate, chainSettings, validProfile, verifyNoise });
 });

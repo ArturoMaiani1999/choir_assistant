@@ -1,0 +1,19 @@
+html:has(.about-body){height:auto;min-height:100%;overflow:auto;background:#000}
+.about-body{--home-voice:var(--cyan);--home-target:var(--amber);height:auto;min-height:100dvh;overflow:visible;background:#000}
+.about-navigation{padding:var(--navigation-top) max(var(--navigation-gutter),env(safe-area-inset-right)) var(--navigation-bottom) max(var(--navigation-gutter),env(safe-area-inset-left))}
+.about-main{width:min(100% - 48px,640px);margin:0 auto;padding:16px 0 calc(64px + env(safe-area-inset-bottom))}
+.about-wordmark{display:flex;align-items:center;justify-content:center;gap:0;margin:0 0 48px;font:400 clamp(72px,12vw,104px)/1 Georgia,serif;letter-spacing:-.055em}
+.about-mark{position:relative;display:block;flex:none;width:1.2em;height:1.2em;margin-right:-.08em}
+.about-mark canvas{position:absolute;inset:0;display:block;width:100%;height:100%}
+#about-glow{filter:blur(6px);opacity:.5}
+.about-mission h1{margin:0 0 12px;font:400 clamp(30px,5vw,36px)/1.2 Georgia,serif;letter-spacing:-.035em}
+.about-mission p{margin:0 0 24px;color:var(--muted);font-size:16px;line-height:1.8}
+.about-mission .about-motto{margin-bottom:36px;color:var(--text);font-family:Georgia,serif;font-size:20px;line-height:1.5}
+.about-mission strong{color:var(--text);font-weight:600}
+.about-mission .about-closing{margin:36px 0 0;padding-top:28px;border-top:1px solid var(--line)}
+@media(max-width:599px){
+  .about-main{padding-top:12px}
+  .about-wordmark{margin-bottom:36px}
+  .about-mission p{font-size:15px;line-height:1.8}
+  .about-mission .about-motto{font-size:19px;margin-bottom:28px}
+}

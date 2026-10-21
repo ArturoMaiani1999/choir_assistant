@@ -1,0 +1,42 @@
+#startup-status {
+  position: fixed;
+  inset: 0;
+  z-index: 10000;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 16px;
+  padding: 24px;
+  margin: 0;
+  background: var(--bg, #081419);
+  color: var(--text, #f0e8d8);
+  font: 16px/1.5 Inter, ui-sans-serif, system-ui, sans-serif;
+  text-align: center;
+}
+body[data-view="home"] #startup-status { background: #000; }
+#startup-status p { margin: 0; }
+#startup-status button {
+  min-width: 120px;
+  min-height: 44px;
+  padding: 10px 24px;
+  border: 1px solid var(--amber, #e7bb72);
+  border-radius: 8px;
+  background: var(--amber, #e7bb72);
+  color: #17200f;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+  touch-action: manipulation;
+}
+#startup-status button[hidden] { display: none; }
+#startup-status button:focus-visible { outline: 3px solid var(--cyan, #86d6ca); outline-offset: 4px; }
+html[data-startup-auth] #startup-status {
+  position: static;
+  display: none;
+  background: transparent;
+}
+html[data-startup-auth] #startup-status[data-failed] {
+  display: flex;
+  padding: 16px 0 0;
+}

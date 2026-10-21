@@ -2,6 +2,7 @@
 self.window = self;
 importScripts('pitch_detector.js', 'microphone_calibration.js');
 self.onmessage = ({ data }) => {
+  if (data.mode === 'ready') { self.postMessage({ type: 'ready' }); return; }
   const startedAt = performance.now();
   try {
     const Core = self.ChoirMicrophoneCalibration;

@@ -19,10 +19,21 @@
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
   })[character]);
 
-  async function api(path) {
-    const response = await window.ChoirAuthFetch(path, { cache: 'no-store' });
-    const payload = await response.json().catch(() => null);
-    if (!response.ok) throw new Error(payload?.error || `HTTP ${response.status}`);
+  async function loadRepertoire() {
+    // The Worker verifies the same-origin session cookie on every request.
+    // This read-only page does not need to download/initialize ClerkJS.
+    const response = await fetch('/api/progress/repertoire', {
+      credentials: 'same-origin', cache: 'no-store', redirect: 'manual',
+      headers: { Accept: 'application/json' }, signal: AbortSignal.timeout(15_000),
+    });
+    if (response.status === 401 || response.type === 'opaqueredirect') {
+      const returnPath = `${location.pathname}${location.search}`;
+      location.replace(`/sign-in?return_url=${encodeURIComponent(returnPath)}`);
+      return null;
+    }
+    if (!response.ok) throw new Error('Repertorio non disponibile. Riprova.');
+    const payload = await response.json();
+    if (!payload) throw new Error('Repertorio non disponibile. Riprova.');
     return payload;
   }
 
@@ -67,7 +78,7 @@
     const completed = assignments.filter(item => ['completed', 'ready'].includes(item.status)).length;
     const ready = assignments.filter(item => item.status === 'ready').length;
     $('summary').innerHTML = [
-      [assignments.length, 'Brani assegnati'],
+      [assignments.length, 'Assegnati'],
       [completed, 'Completati'],
       [ready, 'Pronti'],
     ].map(([value, label]) => `<article><strong>${value}</strong><span>${label}</span></article>`).join('');
@@ -76,7 +87,7 @@
   function renderAssignments(assignments, library, voicePart) {
     const pieces = new Map(library.map(piece => [piece.piece_id, piece]));
     if (!assignments.length) {
-      $('assignment-list').innerHTML = '<article class="empty-state"><h3>Nessun brano assegnato</h3><p>Quando i direttori pubblicheranno il programma, lo troverai qui.</p></article>';
+      $('assignment-list').innerHTML = '<article class="empty-state"><h2>Nessun brano assegnato</h2><p>I brani compariranno qui quando i direttori li assegneranno.</p><a class="browse-library" href="index.html?menu=sing">Scegli brano</a></article>';
       return;
     }
     $('assignment-list').innerHTML = assignments.map(item => {
@@ -84,11 +95,10 @@
       const progress = progressPercent(item);
       return `<article class="piece-card" data-status="${escapeHtml(item.status)}">
         <div class="piece-main">
+          <h2>${escapeHtml(piece.title)}</h2>
           <div class="piece-kicker">
             <span class="state state-${escapeHtml(item.status)}">${escapeHtml(STATUS_LABELS[item.status] || item.status)}</span>
-            <span class="piece-voice">${escapeHtml(VOICE_LABELS[voicePart] || 'Parte da definire')}</span>
           </div>
-          <h3>${escapeHtml(piece.title)}</h3>
           <progress class="progress-track" aria-label="Avanzamento" max="100" value="${progress}">${progress}%</progress>
           <div class="piece-meta">
             <span>Ultimo risultato<strong>${scoreLabel(item.latestScore)}</strong></span>
@@ -108,18 +118,17 @@
     $('repertoire-status').hidden = false;
     $('repertoire-status').textContent = 'Caricamento…';
     try {
-      const [me, progress, library] = await Promise.all([
-        api('/api/me'), api('/api/progress/assignments'), api('/library.json'),
-      ]);
-      $('member-name').textContent = me.member?.firstName || me.member?.displayName || 'corista';
-      const voicePart = me.preferredVoicePart || me.voicePart;
+      const repertoire = await loadRepertoire();
+      if (!repertoire) return;
+      const voicePart = repertoire.voicePart;
       $('member-detail').textContent = voicePart
         ? `La tua parte: ${VOICE_LABELS[voicePart] || voicePart}.`
         : 'Completa il profilo e indica la tua parte vocale.';
-      $('direction-link').hidden = !me.roles?.includes('director');
-      const assignments = progress.assignments || [];
+      $('member-detail').hidden = false;
+      $('direction-link').hidden = !repertoire.canDirect;
+      const assignments = repertoire.assignments || [];
       renderSummary(assignments);
-      renderAssignments(assignments, library.pieces || [], voicePart);
+      renderAssignments(assignments, repertoire.pieces || [], voicePart);
       $('repertoire-status').hidden = true;
       $('repertoire-content').hidden = false;
       try {
@@ -127,7 +136,9 @@
         if (savedScroll) requestAnimationFrame(() => window.scrollTo(0, Number(savedScroll) || 0));
       } catch (_) {}
     } catch (error) {
-      $('repertoire-status').textContent = `Repertorio non disponibile: ${error.message}`;
+      $('member-detail').hidden = true;
+      $('repertoire-status').textContent = error.name === 'TimeoutError'
+        ? 'La connessione è lenta. Riprova.' : 'Repertorio non disponibile. Riprova.';
       $('repertoire-retry').hidden = false;
     }
   }

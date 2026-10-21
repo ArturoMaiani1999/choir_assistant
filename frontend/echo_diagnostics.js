@@ -18,11 +18,13 @@
   function create(adapter) {
     const $=id=>document.getElementById('echo-test-'+id),modules=new WeakMap();
     let busy=false,preparing=false,pending=null,chunks=[],frames=[],events=[],node=null,silent=null,wiring=[],
-      token=0,metadata=null,origin=0,rate=0,stopPromise=null,resolveStop=null,stopTimeout=null,saved=null,saving=false,stopReason=null;
+      token=0,metadata=null,origin=0,rate=0,stopPromise=null,resolveStop=null,stopTimeout=null,saved=null,saving=false,stopReason=null,
+      captureContext=null,onContextStateChange=null;
     const active=()=>busy||preparing;
     const hasPending=()=>Boolean(pending);
     function cleanup(){
       clearTimeout(stopTimeout);stopTimeout=null;
+      captureContext?.removeEventListener('statechange',onContextStateChange);captureContext=null;onContextStateChange=null;
       for(const [source]of wiring)try{source.disconnect(node);}catch(_){}wiring=[];
       if(node){node.port.onmessage=null;node.port.close();node.disconnect();node=null;}
       silent?.disconnect();silent=null;
@@ -56,8 +58,9 @@
       pending=count?{id:crypto.randomUUID(),chunks,frames:count,metadata:{...metadata,stoppedReason:reason,events,pitchFrames:frames,
         echoLifecycleEnd:adapter.lifecycle?.()||null,
         pcmContinuity:{firstFrame:chunks[0]?.firstFrame??null,lastFrameExclusive:chunks.length?chunks.at(-1).firstFrame+chunks.at(-1).valid:null,
-          capturedFrames:count,packets:chunks.length,discontinuous:reason==='discontinuous-capture'},
-        acousticTruth:null,frameClockNote:'Pitch callbacks use the existing analyser/worker bridge; channel PCM shares one audio clock.'}}:null;
+          capturedFrames:count,packets:chunks.length,discontinuous:reason==='discontinuous-capture',
+          clock:chunks.at(-1)?.clock||null},
+        acousticTruth:null,frameClockNote:'PCM counts rendered samples; stale browser timestamps are telemetry. ADC/OS losses are not measured. Pitch callbacks use the analyser/worker bridge.'}}:null;
       chunks=[];frames=[];events=[];saved=null;
       if(resolveStop){resolveStop();resolveStop=null;}stopPromise=null;
       await adapter.pause();resultView();void savePending();
@@ -102,9 +105,17 @@
         chunks=[];frames=[];events=[];stopReason=null;
         node=new AudioWorkletNode(context,'choir-echo-diagnostic',{numberOfInputs:4,numberOfOutputs:1,outputChannelCount:[1],
           channelCount:1,channelCountMode:'explicit',processorOptions:{startFrame,maximumFrames:rate*MAX_SECONDS}});
-        for(const [i,source]of [graph.raw,graph.reference,graph.processed,graph.prediction].entries()){source.connect(node,0,i);wiring.push([source]);}
+        for(const [i,source]of [graph.raw,graph.reference,graph.processed,graph.prediction].entries()){
+          if(source){source.connect(node,0,i);wiring.push([source]);}
+        }
         silent=context.createGain();silent.gain.value=0;node.connect(silent);silent.connect(context.destination);
         node.onprocessorerror=()=>void finish('processor-error');
+        captureContext=context;onContextStateChange=()=>{
+          events.push({type:'audio-context-state-change',state:context.state,contextTime:context.currentTime-origin});
+          // Keep only the prefix already delivered; never join across resume.
+          void finish(`audio-context-${context.state}`);
+        };
+        context.addEventListener('statechange',onContextStateChange);
         node.port.onmessage=({data})=>{
           if(current!==token)return;
           if(data.error){events.push({type:data.error,expectedFrame:data.expectedFrame,actualFrame:data.actualFrame});void finish('discontinuous-capture');return;}

@@ -7,7 +7,155 @@
     weak: 'Il suono di prova è troppo debole. Controlla volume e microfono.',
     validation: 'Il secondo controllo non conferma la riduzione. Riprova senza muovere il dispositivo.',
   };
+  // Platform AEC is a separate capture route. Never chain the custom room
+  // filter after it, or report a pre-AEC waveform/ERLE that we cannot observe.
+  function createNative(adapter) {
+    const Core=window.ChoirEchoCancellation;
+    let graph=null,profile=null,preparing=false,busy=false,generation=0,cancelMeasurement=null,sequence=0;
+    const events=[],key=`choir-speaker-listening:v1:${adapter.userId()}`;
+    let journalScope=adapter.userId(),sessionId=crypto.randomUUID();
+    try{$('enabled').checked=localStorage.getItem(key)==='true';}catch(_){}
+    const enabled=()=>$('enabled').checked;
+    const settings=stream=>stream?.getAudioTracks()[0]?.getSettings()||{};
+    function journalAccount(){if(journalScope!==adapter.userId()){journalScope=adapter.userId();sessionId=crypto.randomUUID();events.length=0;sequence=0;}}
+    function checkpoint(reason,details={}){
+      journalAccount();
+      events.push({sequence:++sequence,reason,wallTime:Date.now(),contextTime:graph?.context.currentTime??null,
+        strategy:'platform',...details});if(events.length>256)events.shift();
+    }
+    const lifecycle=()=>{journalAccount();return {schemaVersion:1,sessionId,events:events.map(e=>({...e})),
+      clockNote:'Platform capture follows the browser AEC. No simultaneous pre-AEC microphone or ERLE is available.'};};
+    // Capture settings establish an operational native route, not a new
+    // acoustic measurement. Keep this distinct from ready()/calibrationVerified.
+    function operational(){
+      if(!graph)return false;
+      const s=settings(graph.stream);
+      return enabled()&&graph.scope===adapter.userId()&&graph.track.readyState==='live'
+        &&graph.context.state==='running'&&s.echoCancellation===true&&s.noiseSuppression===false&&s.autoGainControl===false;
+    }
+    function ready(){
+      if(!graph||!profile)return false;
+      const s=settings(graph.stream);
+      const valid=enabled()&&profile.scope===adapter.userId()&&graph.track.readyState==='live'
+        &&graph.context.state==='running'&&s.echoCancellation===true&&s.noiseSuppression===false&&s.autoGainControl===false
+        &&(adapter.running()||Date.now()-profile.createdAt<Core.TTL);
+      if(!valid)profile=null;
+      return valid;
+    }
+    function update(){
+      ready();const liveRoute=operational();$('entry-status').textContent=!enabled()?'Non attiva':liveRoute?'Attiva · dispositivo':'Si attiva con il microfono';
+      const live=$('live-status');live.hidden=!enabled()||!graph;live.textContent=liveRoute?'Rientro · dispositivo':'Rientro · non attivo';
+      live.title=liveRoute?'Riduzione del rientro del dispositivo attiva.':'Percorso audio non attivo.';
+      live.setAttribute('aria-label',live.title);live.dataset.state=liveRoute?'automatic':'unverified';
+    }
+    function cancel(message='Misura interrotta. Puoi riprovare.'){
+      generation++;const stop=cancelMeasurement;cancelMeasurement=null;busy=false;stop?.(new Error(message));
+    }
+    function invalidate(reason='unspecified'){
+      checkpoint(`invalidate:${reason}`);
+      // A platform canceller adapts to output automatically; no frozen H is
+      // invalidated solely by loading another piece on the same live route.
+      if(reason!=='piece-output-route')profile=null;
+      if(busy)cancel();update();
+    }
+    function detach(reason='microphone-stop'){
+      cancel();profile=null;preparing=false;
+      if(graph){graph.context.removeEventListener('statechange',graph.onState);graph.source.disconnect();graph=null;}
+      checkpoint(`detach:${reason}`);update();
+    }
+    async function attach(stream){
+      if(!enabled())return stream;
+      if(!preparing)throw Error('Avvia Calibra audio prima di iniziare.');
+      const s=settings(stream);
+      if(s.echoCancellation!==true||s.noiseSuppression!==false||s.autoGainControl!==false)
+        throw Error('La riduzione del rientro non è disponibile con queste impostazioni. Usa le cuffie.');
+      const token=generation;
+      await adapter.mixer().setReferenceOutput(true);await adapter.mixer().resume([]);
+      if(token!==generation)throw Error('Microfono annullato.');
+      const context=adapter.mixer().context,source=context.createMediaStreamSource(stream);
+      const active=graph={context,source,stream,track:stream.getAudioTracks()[0],scope:adapter.userId()};
+      active.onState=()=>{if(graph===active)invalidate(`audio-context-${context.state}`);};
+      context.addEventListener('statechange',active.onState);checkpoint('attach-platform');update();
+      return stream;
+    }
+    async function measure(onTick){
+      if(!graph||busy)throw Error('Percorso audio non disponibile.');
+      const active=graph,token=++generation,context=graph.context,account=adapter.userId();busy=true;profile=null;
+      let loadingDeadline,probes;
+      try{[ ,probes]=await Promise.race([Promise.all([context.audioWorklet.addModule('echo_capture_worklet.js'),window.ChoirCalibrationProbe.load(context)]),
+        new Promise((_,reject)=>{loadingDeadline=setTimeout(()=>reject(Error('Preparazione audio non riuscita. Controlla la connessione e riprova.')),12000);})]);}
+      catch(error){if(token===generation)busy=false;throw error;}
+      finally{clearTimeout(loadingDeadline);}
+      if(token!==generation||graph!==active)throw Error('Misura annullata.');
+      return new Promise((resolve,reject)=>{
+        const startFrame=Math.ceil((context.currentTime+.15)*context.sampleRate/128)*128,origin=startFrame/context.sampleRate;
+        const capture=new AudioWorkletNode(context,'choir-echo-capture',{numberOfInputs:2,numberOfOutputs:1,
+          channelCount:1,channelCountMode:'explicit',outputChannelCount:[1],
+          processorOptions:{startFrame,length:Math.round(8*context.sampleRate)}});
+        const ref=adapter.mixer().referenceOutput,silent=context.createGain();silent.gain.value=0;
+        active.source.connect(capture,0,0);ref.connect(capture,0,1);capture.connect(silent);silent.connect(context.destination);
+        const tones=[];let timer,finished=false;
+        const finish=(error,value)=>{
+          if(finished)return;finished=true;clearInterval(timer);busy=false;cancelMeasurement=null;
+          for(const tone of tones){try{tone.source.stop()}catch(_){}tone.source.disconnect();tone.gain.disconnect();}
+          try{active.source.disconnect(capture);ref.disconnect(capture);}catch(_){}
+          capture.port.onmessage=null;capture.port.close();capture.disconnect();silent.disconnect();
+          if(error){profile=null;checkpoint('measurement-platform-rejected',{message:error.message});update();reject(error);}
+          else{profile={...value,scope:adapter.userId(),createdAt:Date.now()};checkpoint('model-applied',{strategy:'platform',clock:value.clock});update();resolve(value);}
+        };
+        cancelMeasurement=error=>finish(error);
+        capture.onprocessorerror=()=>finish(Error('Misura interrotta. Riprova.'));
+        capture.port.onmessage=({data})=>{
+          if(token!==generation||graph!==active||active.track.readyState!=='live'||data.error){finish(Error('Misura interrotta. Riprova lasciando aperta la pagina.'));return;}
+          if(data.microphone?.length!==context.sampleRate*8||data.reference?.length!==context.sampleRate*8
+            ||!data.microphone.every(Number.isFinite)||!data.reference.every(Number.isFinite)){
+            finish(Error('Misura incompleta. Riprova.'));return;
+          }
+          let energy=0,peak=0,referenceEnergy=0;
+          const a=Math.round(2*context.sampleRate),b=Math.round(7.8*context.sampleRate);
+          for(let i=a;i<b;i++){const y=data.microphone[i];energy+=y*y;peak=Math.max(peak,Math.abs(y));referenceEnergy+=data.reference[i]**2;}
+          const residualRms=Math.sqrt(energy/(b-a)),s=settings(active.stream);
+          if(s.echoCancellation!==true||s.noiseSuppression!==false||s.autoGainControl!==false||adapter.userId()!==account){
+            finish(Error('Impostazioni audio cambiate. Ripeti il controllo.'));return;
+          }
+          if(referenceEnergy<1e-8||residualRms>.004||peak>=.98){
+            finish(Error('Il rientro è ancora forte. Abbassa il volume o usa le cuffie, poi riprova.'));return;
+          }
+          finish(null,{usable:true,strategy:'platform',probeId:window.ChoirCalibrationProbe.id,nativeResidualRms:residualRms,noiseRms:residualRms,
+            validationDb:null,peakDelayMs:null,clock:data.clock});
+        };
+        for(const [index,at] of [2,5].entries()){
+          const source=context.createBufferSource(),gain=context.createGain();
+          gain.gain.value=Math.max(0,Math.min(1,adapter.volume()));source.buffer=probes[index];
+          source.connect(gain);gain.connect(ref);tones.push({source,gain});source.start(origin+at);
+        }
+        timer=setInterval(()=>{
+          const elapsed=Math.max(0,context.currentTime-origin);
+          if(document.hidden||context.state!=='running'||active.track.readyState!=='live'||elapsed>9||adapter.userId()!==account){
+            finish(Error('Misura interrotta. Riprova lasciando aperta la pagina.'));return;
+          }
+          onTick(elapsed,false,'native-check');
+        },50);
+        checkpoint('measurement-platform-start',{probeId:window.ChoirCalibrationProbe.id});
+      });
+    }
+    const open=()=>adapter.openCalibration();
+    $('enabled').addEventListener('change',async()=>{
+      try{localStorage.setItem(key,String(enabled()));}catch(_){}
+      invalidate('listening-mode-changed');await(adapter.pauseForToggle?.()??adapter.pause());
+      await adapter.mixer().setReferenceOutput(enabled());adapter.changed();update();
+    });
+    $('live-status').addEventListener('click',()=>void open());update();
+    return Object.freeze({enabled,ready,operational,attach,detach,open,invalidate,cancel,measure,checkpoint,lifecycle,
+      isNative:()=>true,prepare:()=>{preparing=true;invalidate('calibration-start');},refresh:update,isBusy:()=>busy,detectionFloor:()=>0,
+      diagnostics:()=>({enabled:enabled(),ready:ready(),operational:operational(),strategy:'platform',status:operational()?'automatic':'unverified',
+        gain:0,appliedGain:0,targetGain:0,validationDb:null,peakDelayMs:null,nativeResidualRms:profile?.nativeResidualRms??null}),
+      captureGraph:()=>graph?{context:graph.context,raw:graph.source,processed:graph.source,reference:adapter.mixer().referenceOutput,
+        prediction:null,profile:{calibrationVerified:ready(),strategy:'platform',inputStage:'post-platform-aec',
+          impulse:new Float32Array([0]),gain:0,validationDb:null,noiseRms:profile?.noiseRms??null,createdAt:profile?.createdAt??null},lifecycle}:null});
+  }
   function create(adapter) {
+    if(adapter.nativeAEC===true)return createNative(adapter);
     let profile = null, result = null, busy = false, generation = 0, graphGeneration = 0;
     let graph = null, worker = null, timer = null, capture = null, tones = [], raw = null, muted = null;
     let signature = null, scope = null, rejectCapture = null, preparing = false, analysisTimeout = null;
@@ -36,7 +184,7 @@
       journalAccount();
       const context = mixer()?.context, track = adapter.stream()?.getAudioTracks()[0];
       // High-rate monitoring must not evict calibration and routing history.
-      const monitoring = reason === 'observation-reason' || reason === 'delay-observation-reason' || reason === 'gain-target' || reason.startsWith('status:');
+      const monitoring = reason === 'clock-skew' || reason === 'observation-reason' || reason === 'delay-observation-reason' || reason === 'gain-target' || reason.startsWith('status:');
       const destination = monitoring ? observations : journal;
       destination.push({ sequence: ++sequence, reason, wallTime: Date.now(),
         contextId: identity(contextIds, context), contextTime: context?.currentTime ?? null,
@@ -57,7 +205,8 @@
       journalAccount();
       return { schemaVersion: 1, sessionId: journalId, droppedEvents: dropped,
         clockNote: 'Frame is the main-thread audio command timestamp, not a sample-exact observation of the AudioParam ramp.',
-        events: [...journal, ...observations].sort((a, b) => a.sequence - b.sequence).map(event => ({ ...event })) };
+        events: [...journal, ...observations].sort((a, b) => a.sequence - b.sequence).map(event => ({ ...event,
+          ...(event.clock ? {clock:{...event.clock}} : {}) })) };
     }
     function disableSubtraction(reason) {
       if (graph) {
@@ -123,6 +272,7 @@
       heldFloor = 0; floorAt = 0;
       if (!graph) return;
       const old = graph; graph = null;
+      old.context.removeEventListener?.('statechange', old.onContextStateChange);
       try { mixer().referenceOutput.disconnect(old.convolver); } catch (_) {}
       old.worker.terminate(); old.monitor.port.onmessage = null; old.monitor.port.close();
       old.retimer.port.onmessage = null; old.retimer.port.close();
@@ -162,12 +312,22 @@
         outputChannelCount: [1], channelCount: 1, channelCountMode: 'explicit' });
       source.connect(sum); mixer().referenceOutput.connect(convolver); convolver.connect(retimer); retimer.connect(prediction); prediction.connect(negative); negative.connect(sum); sum.connect(output);
       source.connect(monitor, 0, 0); prediction.connect(monitor, 0, 1); monitor.connect(silent); silent.connect(context.destination);
-      const active = graph = { id: token, modelId: null, targetGain: 0, source, sum, convolver, retimer, prediction, negative, output, monitor, muted: silent, worker: gainWorker,
+      const active = graph = { id: token, context, modelId: null, targetGain: 0, source, sum, convolver, retimer, prediction, negative, output, monitor, muted: silent, worker: gainWorker,
         delayEpoch: 0, delayCommand: 0, delayBaseFrames: 0, delayOffsetFrames: 0, delayTargetFrames: 0, retiming: false,
         delayFollower: new Timing.Follower(0, Math.round(context.sampleRate*Timing.MAX_SHIFT_SEC)),
         follower, status: 'automatic', pending: false, settlingUntil: 0, lastCheck: performance.now(), buffer: new Float32Array(2048) };
       liveStatus('unverified');
       checkpoint('attach-complete');
+      active.onContextStateChange = () => {
+        if (graph !== active) return;
+        // No monitor window or verified room model may cross a real context
+        // interruption, even when currentTime pauses without a forward jump.
+        active.delayEpoch++; active.delayFollower.reset(); active.follower.reset();
+        monitor.port.postMessage({type:'reset',epoch:active.delayEpoch,reanchor:true});
+        checkpoint('context-state-change',{state:context.state});
+        invalidate(`audio-context-${context.state}`);
+      };
+      context.addEventListener?.('statechange', active.onContextStateChange);
       function failed() {
         if (graph !== active) return;
         follower.reset(); active.delayFollower.reset(); active.pending = false; liveStatus('failed'); checkpoint('monitor-failed');
@@ -184,7 +344,18 @@
       };
       monitor.port.onmessage = ({ data }) => {
         if (graph !== active || token !== graphGeneration) return;
-        if(data.type==='gap'){active.delayFollower.reset();checkpoint('monitor-gap',{expectedFrame:data.expectedFrame,actualFrame:data.actualFrame});return;}
+        if(data.type==='gap'){
+          active.delayEpoch++; active.delayFollower.reset();
+          monitor.port.postMessage({type:'reset',epoch:active.delayEpoch});
+          checkpoint('monitor-gap',{expectedFrame:data.expectedFrame,actualFrame:data.actualFrame});
+          // Startup can reanchor before a full monitor window exists. During
+          // calibration its separate capture clock decides PCM completeness.
+          if(profile)invalidate('monitor-forward-gap');return;
+        }
+        if(data.clock){
+          if(data.clock.skewCount!==(active.clock?.skewCount||0))checkpoint('clock-skew',{clock:{...data.clock}});
+          active.clock={...data.clock};
+        }
         if (busy || !profile || active.retiming) { monitor.port.postMessage(data, [data.microphone.buffer, data.prediction.buffer]); return; }
         if (!ready() || !inputMatches(stream) || stream.getAudioTracks()[0]?.readyState !== 'live') { failed(); return; }
         gainWorker.postMessage({ ...data, mode: 'gain', sampleRate: context.sampleRate, noiseRms: profile.noiseRms || 0, validationDb: profile.validationDb },
@@ -271,7 +442,7 @@
     }
     const open = () => adapter.openCalibration();
     function prepare(reason = 'calibration-start') { preparing = true; invalidate(reason); }
-    async function measure(onTick) {
+    async function measure(onTick, retry = false) {
       const token = ++generation; busy = true;
       checkpoint('measurement-start');
       const context = mixer().context, stream = adapter.stream();
@@ -309,6 +480,14 @@
           if (phase !== 'analysis') return;
           checkpoint('analysis-result');
           clearWork(); busy = false; rejectCapture = null;
+          if (value.reason === 'unstable-delay') {
+            checkpoint('measurement-unstable-delay', { stability: value.stability, retry });
+            if (!retry && graph && inputMatches(stream) && !document.hidden) {
+              // Same open graph, one bounded retry; the rejected H is never applied.
+              resolve(measure((elapsed, analysing, phase) => onTick(elapsed, analysing, phase === 'loading' ? 'retry' : 'retry-capture'), true));
+            } else reject(new Error('Il ritardo audio continua a cambiare. Riprova mantenendo aperta questa pagina.'));
+            return;
+          }
           if (!value.usable) { checkpoint(`measurement-rejected:${value.reason || 'capture'}`); reject(new Error(reasons[value.reason] || reasons.capture)); return; }
           if (!graph || !inputMatches(stream) || document.hidden) { reject(new Error(reasons.capture)); return; }
           const baseFrames=value.retimeBaseFrames||0;
@@ -339,6 +518,7 @@
           capture.port.onmessage = ({data}) => {
             if (token !== generation) return;
             if (data.error || !inputMatches(stream) || scope !== adapter.userId()) { fail(new Error(reasons.capture)); return; }
+            checkpoint('measurement-clock',{clock:data.clock?{...data.clock}:null});
             clearWork(true); phase = 'analysis'; onTick(10, true); checkpoint('analysis-start');
             analysisTimeout = setTimeout(() => {
               checkpoint('analysis-timeout'); fail(new Error(reasons.capture));
@@ -379,7 +559,7 @@
         peakDelayMs: profile ? profile.peakDelayMs+(graph?.delayOffsetFrames||0)/mixer().context.sampleRate*1000 : null,
         delayOffsetMs: graph ? graph.delayOffsetFrames/mixer().context.sampleRate*1000 : 0,
         delayTargetMs: graph ? graph.delayTargetFrames/mixer().context.sampleRate*1000 : 0,
-        delayReason: graph?.delayReason ?? null }),
+        delayReason: graph?.delayReason ?? null, clock: graph?.clock ? {...graph.clock} : null }),
       captureGraph: () => graph ? { context: mixer().context, raw: graph.source,
         reference: mixer().referenceOutput, processed: graph.sum, prediction: graph.prediction,
         profile: profile && ready() ? { calibrationVerified: true, modelId: graph.modelId, impulse: profile.impulse, gain: appliedGain(), validationDb: profile.validationDb,

@@ -1,0 +1,37 @@
+{
+  "$schema": "./node_modules/wrangler/config-schema.json",
+  "name": "choir-assistant-xynon-staging",
+  "main": "./src/worker.ts",
+  "compatibility_date": "2026-10-11",
+  "workers_dev": false,
+  "preview_urls": false,
+  "routes": [
+    { "pattern": "staging.xynon.it", "custom_domain": true }
+  ],
+  "vars": {
+    "APP_ORIGIN": "https://staging.xynon.it",
+    "CLERK_FRONTEND_API_ORIGIN": "https://clerk.staging.xynon.it",
+    "CLERK_PUBLISHABLE_KEY": "pk_live_Y2xlcmsuc3RhZ2luZy54eW5vbi5pdCQ"
+  },
+  "d1_databases": [
+    {
+      "binding": "AUTH_DB",
+      "database_name": "choir-assistant-xynon-staging",
+      "database_id": "7890308a-756b-4bca-94bd-246d849ac915",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "r2_buckets": [
+    {
+      "binding": "PERFORMANCE_BUCKET",
+      "bucket_name": "choir-assistant-xynon-performances-staging"
+    }
+  ],
+  "triggers": { "crons": ["17 3 * * *"] },
+  "assets": {
+    "directory": "./artifacts/xynon-dist",
+    "binding": "ASSETS",
+    "run_worker_first": true,
+    "not_found_handling": "none"
+  }
+}

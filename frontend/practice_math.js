@@ -66,6 +66,36 @@
     const safeDelay = Math.max(0, Number(delayMs) || 0);
     return runtime.beatAtSeconds(Math.max(0, safeTime - safeDelay / 1000 * safeSpeed));
   }
+  // Presentation only. Media time remains authoritative for samples/scoring.
+  // Chromium Bluetooth positions can repeat for several animation frames.
+  class VisualPlaybackTime {
+    reset() { this.previous = null; }
+    update(snapshot, nowMs, blocked = false) {
+      const time = Math.max(0, Number(snapshot.performanceTime) || 0);
+      const speed = Math.max(.1, Number(snapshot.speed) || 1);
+      const previous = this.previous;
+      const elapsed = previous ? (nowMs - previous.nowMs) / 1000 : 0;
+      const reanchor = !previous || !snapshot.running || blocked || !previous.running
+        || speed !== previous.speed || elapsed < 0 || elapsed > .25
+        || time < previous.observed - .025 * speed
+        || Math.abs(time - previous.value) > .3 * speed;
+      let value = time, progressedAt = nowMs;
+      if (!reanchor) {
+        progressedAt = time > previous.observed + 1e-6 ? nowMs : previous.progressedAt;
+        // Limit free-running prediction to 120 ms of unchanged media time.
+        // A waiting/seeking event freezes immediately; this also bounds silent
+        // stalls where the browser has not delivered an event yet.
+        if (nowMs - progressedAt >= 120) value = previous.value;
+        else {
+          const predicted = previous.value + elapsed * speed;
+          const correction = Math.max(-elapsed * speed * .1, Math.min(elapsed * speed * .1, time - predicted));
+          value = Math.max(previous.value, Math.min(predicted + correction, time + .12 * speed));
+        }
+      }
+      this.previous = { observed: time, value, speed, nowMs, progressedAt, running: snapshot.running && !blocked };
+      return value;
+    }
+  }
   function rhythmGridLines(measures, visibleStart, visibleEnd) {
     const lines = [];
     measures.forEach((measure, index) => {
@@ -115,5 +145,5 @@
     const animating = Math.abs(target.min - bounds.min) > .01 || Math.abs(target.max - bounds.max) > .01;
     return { bounds: animating ? bounds : { ...target }, animating };
   }
-  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, attemptResumeState, metronomePerformanceTime, delayedVisualBeat, rhythmGridLines, limitTimelineWindowToMeasures, smoothPitchBounds };
+  return { NOTE_NAMES, hzToPitch, pitchToHz, pitchToName, centsBetween, pitchToY, timeToX, melodicIntervalLabel, adjacentMelodicIntervals, measureSeekState, attemptResumeState, metronomePerformanceTime, delayedVisualBeat, VisualPlaybackTime, rhythmGridLines, limitTimelineWindowToMeasures, smoothPitchBounds };
 });

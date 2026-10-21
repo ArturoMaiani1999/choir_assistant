@@ -68,9 +68,15 @@ class ChoirMemberSyncTests(unittest.TestCase):
         with mock.patch.dict(MODULE.os.environ, {MODULE.SECRET_ENV: secret}), \
              mock.patch.object(MODULE.shutil, "which", return_value="npx"), \
              mock.patch.object(MODULE.subprocess, "run") as run:
-            with mock.patch.object(sys, "argv", ["sync_choir_members.py", str(path)]):
+            with mock.patch.object(sys, "argv", [
+                "sync_choir_members.py", str(path), "--config", "wrangler.xynon.jsonc",
+                "--database", "choir-assistant-xynon-staging",
+            ]):
                 self.assertEqual(MODULE.main(), 0)
         self.assertNotIn(MODULE.SECRET_ENV, run.call_args.kwargs["env"])
+        command = run.call_args.args[0]
+        self.assertEqual(command[command.index("execute") + 1], "choir-assistant-xynon-staging")
+        self.assertEqual(command[command.index("--config") + 1], str(Path("wrangler.xynon.jsonc").resolve()))
 
 
 if __name__ == "__main__":

@@ -4,6 +4,10 @@
 **Owner:** project maintainer
 **Last reviewed:** 2026-10-20
 
+Per il nuovo ambiente Xynon affiancato a Epistrophe seguire anche
+[Xynon: staging parallelo](xynon-parallel-deployment.md), con configurazione,
+istanza Clerk, D1 e bucket R2 dedicati.
+
 This runbook provisions the Clerk + D1 authorization path without weakening
 the currently deployed Cloudflare Access application. Perform the first deploy
 under a distinct Worker name and hostname.

@@ -19,6 +19,65 @@ function trace(pitches: number[]) {
 }
 
 describe("director cockpit progress", () => {
+  it.each(["tenore", null])("loads a private repertoire snapshot with preferred voice %s", async preferredVoicePart => {
+    const bindings: unknown[][] = [];
+    const assetRequests: string[] = [];
+    const env = {
+      APP_ORIGIN: "https://choir.example",
+      AUTH_DB: {
+        prepare(query: string) {
+          expect(query).toContain("a.active = 1");
+          expect(query).toContain("p.member_id = ?2");
+          return {
+            bind(...values: unknown[]) {
+              bindings.push(values);
+              return { async all() { return { results: [{ piece_id: "ave-verum", status: null }] }; } };
+            },
+          };
+        },
+      },
+      ASSETS: {
+        async fetch(request: Request) {
+          assetRequests.push(request.url);
+          return Response.json({ pieces: [
+            { piece_id: "ave-verum", title: "Ave verum", parts: [{ id: "P3", name: "Tenore" }] },
+            { piece_id: "not-assigned", title: "Other piece", parts: [] },
+          ] });
+        },
+      },
+    } as unknown as Env;
+    const member: MemberContext = {
+      memberId: "member-one", choirId: "choir-one", displayName: "Singer",
+      voicePart: "basso", preferredVoicePart: preferredVoicePart as "tenore" | null,
+      roles: ["singer"], groupIds: [], viewableGroupIds: [],
+    };
+    const response = await handleProgressApi(new Request(
+      "https://choir.example/api/progress/repertoire?memberId=other&choirId=other",
+    ), env, member);
+    expect(bindings).toEqual([["choir-one", "member-one"]]);
+    expect(assetRequests).toEqual(["https://choir.example/library.json"]);
+    expect(response?.headers.get("Cache-Control")).toBe("no-store");
+    expect(await response?.json()).toEqual({
+      voicePart: preferredVoicePart ?? "basso", canDirect: false,
+      assignments: [{ pieceId: "ave-verum", status: "not_started", completionCount: 0 }],
+      pieces: [{ piece_id: "ave-verum", title: "Ave verum", parts: [{ id: "P3", name: "Tenore" }] }],
+    });
+  });
+
+  it("fails the repertoire snapshot when its catalog is unavailable", async () => {
+    const env = {
+      APP_ORIGIN: "https://choir.example",
+      AUTH_DB: { prepare() { return { bind() { return { async all() { return { results: [] }; } }; } }; } },
+      ASSETS: { async fetch() { return new Response(null, { status: 503 }); } },
+    } as unknown as Env;
+    const member: MemberContext = {
+      memberId: "member-one", choirId: "choir-one", displayName: "Singer",
+      voicePart: null, roles: ["singer"], groupIds: [], viewableGroupIds: [],
+    };
+    await expect(handleProgressApi(new Request("https://choir.example/api/progress/repertoire"), env, member))
+      .rejects.toThrow("Repertoire catalog unavailable");
+  });
+
   it("normalizes the four supported Italian voice parts", () => {
     expect(canonicalVoicePart("Soprano")).toBe("soprano");
     expect(canonicalVoicePart("Contralto")).toBe("contralto");

@@ -6,7 +6,7 @@
 
 ## Testo mostrato prima del primo invio
 
-Per mostrare i tuoi progressi, Epistrophe invia automaticamente dati derivati
+Per mostrare i tuoi progressi, Xynon invia automaticamente dati derivati
 dalla voce durante le prove dei brani assegnati: brano e parte cantata,
 copertura, durata della voce riconosciuta, velocità, trasposizione, precisione
 dell'intonazione e traiettoria pitch sul piano roll.

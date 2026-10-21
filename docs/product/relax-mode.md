@@ -2,7 +2,7 @@
 
 **Status:** pubblicato e verificato su staging; superficie contemplativa  
 **Owner:** project maintainer  
-**Last reviewed:** 2026-10-20
+**Last reviewed:** 2026-10-21
 
 ## Esperienza
 
@@ -25,12 +25,23 @@ Le coordinate sono esattamente `x=sin(t)`, `y=sin(2t)`, `z=sin(3t)`.
 Una camera prospettica ruota lentamente; il colore e i filamenti seguono la
 curva. Si può trascinare la figura per cambiarne l'orientamento, anche in pausa;
 le frecce da tastiera offrono la stessa rotazione quando la scena ha il focus.
-Il movimento della curva e della camera procede a metà della velocità originale.
-Ogni fotogramma ridisegna soltanto gli ultimi venti secondi reali, con opacità
+Il punto procede a metà della precedente velocità (`SPEED = 0.25`); la
+rotazione automatica della camera è il 30% più veloce. I due ritmi sono
+indipendenti e conservano la posa iniziale. Ogni fotogramma ridisegna gli
+ultimi 40 secondi reali, con opacità
 decrescente fino a zero: non si accumulano tracce permanenti. L'ingresso
 di Relax mode mostra già una scia completa, senza attendere il riempimento iniziale.
+La durata doppia mantiene la lunghezza geometrica della scia a velocità
+dimezzata. Filamenti continui e scia separata, disegnata come nastri che si
+assottigliano fino a zero, eliminano le giunzioni interne. Composizione
+luminosa additiva e campionamento parametrico fisso evitano il riordinamento
+instabile dei segmenti. Il supersampling viene ridotto esplicitamente con
+filtraggio di alta qualità verso il Canvas al DPR nativo; un limite di
+otto milioni di pixel per superficie contiene il costo della scena grande.
+Buffer interno e geometria sono riusati nello stesso RAF, senza nuove librerie
+o asset. Il buffer viene rilasciato durante il cleanup.
 
-La [Home di Epistrophe](home.md) riusa questa stessa animazione 3D, con scia,
+La [Home di Xynon](home.md) riusa questa stessa animazione 3D, con scia,
 filamenti e alone, limitando la palette a ciano e ocra. La curva occupa l'area
 separata dalle azioni prevista dal layout responsive e parte senza attesa.
 Profilo e impostazioni sono riuniti nel disclosure dell'header. La palette

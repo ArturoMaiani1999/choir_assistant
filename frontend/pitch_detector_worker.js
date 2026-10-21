@@ -14,7 +14,7 @@ self.onmessage = ({ data }) => {
     estimate = self.ChoirPitch.detectPitch(
       new Float32Array(data.buffer),
       data.sampleRate,
-      data.settings,
+      { ...data.settings, resolveHarmonics: true },
     );
   } catch (caught) {
     error = caught?.message || String(caught);

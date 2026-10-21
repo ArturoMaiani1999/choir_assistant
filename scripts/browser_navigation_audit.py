@@ -60,6 +60,19 @@ class Handler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def send_repertoire(self, assignments=None):
+        if assignments is None:
+            assignments = [{'pieceId': 'ave-verum', 'status': 'in_progress',
+                            'latestScore': 82, 'latestCoverage': 62, 'completionCount': 2}]
+        library = json.loads(Path(self.translate_path('/library.json')).read_text(encoding='utf-8'))
+        assigned_ids = {item['pieceId'] for item in assignments}
+        return self.send_body({
+            'voicePart': ME.get('preferredVoicePart') or ME.get('voicePart'),
+            'canDirect': 'director' in ME.get('roles', []),
+            'assignments': assignments,
+            'pieces': [piece for piece in library['pieces'] if piece['piece_id'] in assigned_ids],
+        })
+
     def translate_path(self, path):
         original = Path(super().translate_path(path))
         if original.is_file() or original.is_dir():
@@ -69,6 +82,8 @@ class Handler(SimpleHTTPRequestHandler):
 
     def do_GET(self):
         path = urlsplit(self.path).path
+        if path == '/api/progress/repertoire':
+            return self.send_repertoire()
         # Match deployed asset byte ranges: SimpleHTTPRequestHandler otherwise
         # exposes a zero-length seekable range for some Chromium MP3 loads.
         if path.endswith('.mp3'):

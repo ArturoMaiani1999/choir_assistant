@@ -1,7 +1,12 @@
-# Choir Assistant
+# Xynon
 
 Web application for private choir rehearsal with synchronized notation,
 backing audio and browser-local monophonic pitch feedback.
+
+The product is named **Xynon**. Its independent Clerk staging is available at
+`https://staging.xynon.it`; see the
+[Xynon deployment runbook](docs/operations/xynon-parallel-deployment.md).
+The legacy Epistrophe deployment remains separate during the transition.
 
 ## Current status
 

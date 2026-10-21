@@ -94,7 +94,7 @@ def main():
                 assert js("getComputedStyle(document.querySelector('.home-utilities')).visibility==='visible'")
                 assert js("Number(document.querySelector('#home-canvas').dataset.time)>=20.8")
                 assert js("getComputedStyle(document.querySelector('.studio-library-form')).visibility==='visible'")
-                assert js("document.querySelector('#home-canvas').dataset.speed==='0.5'")
+                assert js("document.querySelector('#home-canvas').dataset.speed==='0.25'")
                 capture(f'home-{width}')
                 click('#home-settings summary');click('#home-pause')
                 paused_home=js("document.querySelector('#home-canvas').dataset.time")
@@ -125,7 +125,7 @@ def main():
                   small:[...document.querySelectorAll('button,a,summary')].filter(e=>e.checkVisibility()).filter(e=>{const r=e.getBoundingClientRect();return r.width<44||r.height<44}).map(e=>e.id),
                   clipped:[...document.querySelectorAll('button,a,summary')].filter(e=>e.checkVisibility()).filter(e=>{const r=e.getBoundingClientRect();return r.left<0||r.right>innerWidth||r.top<0||r.bottom>innerHeight}).map(e=>e.id)}})()""")
                 assert not layout['overflow'] and not layout['small'] and not layout['clipped'],layout
-                assert layout['black']=='rgb(0, 0, 0)' and abs(layout['age']-20)<.003 and layout['tail']==20,layout
+                assert layout['black']=='rgb(0, 0, 0)' and abs(layout['age']-40)<.003 and layout['tail']==40,layout
                 assert pixels()['lit']>1000,pixels()
                 capture(f'relax-{width}')
                 before=frame_time();delay(300);assert frame_time()>before

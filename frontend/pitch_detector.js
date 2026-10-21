@@ -39,6 +39,7 @@
     rmsThreshold = 0.001,
     yinThreshold = YIN_THRESHOLD,
     levelConfidenceFloor = null,
+    resolveHarmonics = false,
   } = {}) {
     const rms = rmsOf(buffer);
     const effectiveRmsThreshold = Number.isFinite(rmsThreshold) ? Math.max(0, rmsThreshold) : 0.001;
@@ -85,6 +86,25 @@
     }
     if (tauEstimate < 0) return { hz: null, rms, clarity: 0, confidence: 0 };
 
+    // Resolve an early harmonic minimum only when a full period has much
+    // stronger acoustic evidence. No previous/target note or future frame is
+    // involved: real note/octave transitions remain immediate. Keep the raw
+    // periodicity for confidence so this cannot change the admission gate.
+    const rawTau = tauEstimate, rawCenter = cmnd[rawTau];
+    if (resolveHarmonics) {
+      for (const multiple of [2, 3]) {
+        const expected = rawTau * multiple, radius = Math.max(2, Math.ceil(expected * .03));
+        let best = -1;
+        for (let tau = Math.max(tauMin + 1, expected - radius); tau < Math.min(tauMax, expected + radius + 1); tau++) {
+          if (cmnd[tau] <= cmnd[tau - 1] && cmnd[tau] < cmnd[tau + 1]
+            && (best < 0 || cmnd[tau] < cmnd[best])) best = tau;
+        }
+        if (best > 0 && cmnd[best] <= rawCenter * .25 && rawCenter - cmnd[best] >= .04) {
+          tauEstimate = best; break;
+        }
+      }
+    }
+
     const left = cmnd[tauEstimate - 1] ?? cmnd[tauEstimate];
     const center = cmnd[tauEstimate];
     const right = cmnd[tauEstimate + 1] ?? center;
@@ -97,7 +117,7 @@
       return { hz: null, rms, clarity: 0, confidence: 0 };
     }
 
-    const clarity = Math.max(0, Math.min(1, 1 - center));
+    const clarity = Math.max(0, Math.min(1, 1 - rawCenter));
     // Preserve the frozen v1 behaviour at the default threshold. When the
     // singer deliberately selects a more sensitive gate, allow a strongly
     // periodic whisper-level signal to reach the tracker instead of rejecting
@@ -111,6 +131,8 @@
       rms,
       clarity,
       confidence: clarity * levelConfidence,
+      ...(resolveHarmonics ? { harmonicResolved: tauEstimate !== rawTau,
+        originalHz: sampleRate / refinedTauAt(cmnd, rawTau) } : {}),
     };
   }
 
@@ -565,6 +587,23 @@
     }
   }
 
+  // Voicing is decided on the original detector path. Frequency refinement
+  // cannot introduce new rejections through the tracker's transition rules.
+  class HarmonicPitchSmoother {
+    constructor(options={}){this.admission=new PitchSmoother(options);this.pitch=new PitchSmoother(options);this.lastHz=null;}
+    configure(options={}){this.admission.configure(options);this.pitch.configure(options);}
+    reset(){this.admission.reset();this.pitch.reset();this.lastHz=null;}
+    update(estimate,timestampMs){
+      const original=estimate.originalHz??estimate.hz;
+      const gate=this.admission.update({...estimate,hz:original},timestampMs);
+      const selected=this.pitch.update(estimate,timestampMs);
+      const hz=gate.accepted?(selected.accepted?selected.hz:estimate.hz??this.lastHz??gate.hz):selected.hz;
+      if(gate.accepted&&hz)this.lastHz=hz;
+      return {...gate,hz,displayHz:hz,rawHz:estimate.hz,originalHz:original,
+        harmonicResolved:Boolean(estimate.harmonicResolved)};
+    }
+  }
+
   global.ChoirPitch = {
     MIN_HZ,
     MAX_HZ,
@@ -575,6 +614,7 @@
     mpmCandidates,
     decodeCrepeProbabilities,
     PitchSmoother,
+    HarmonicPitchSmoother,
     OctaveAwarePitchTracker,
     rmsOf,
   };

@@ -1,146 +1,35 @@
-:root {
-  --ambient-respiro-opacity: .72;
-  --ambient-respiro-teal: #34787b;
-  --ambient-respiro-gold: #b88a4f;
-  --ambient-cool-low: .18;
-  --ambient-cool-high: .58;
-  --ambient-warm-low: .1;
-  --ambient-warm-high: .28;
-}
-
-/*
- * Respiro luminoso
- * One shared, non-interactive atmosphere layer for the app's quiet surfaces.
- * The moving shapes only animate transform and opacity so they remain cheap to
- * composite and never affect layout or pointer interaction.
- */
-.ambient-respiro-page {
+/* A small shared harmonic signature replaces the full-page breathing lights. */
+.ambient-page {
+  --ambient-size: calc(100vh / 6);
+  --ambient-size: calc(100dvh / 6);
   position: relative;
   isolation: isolate;
   overflow-x: clip;
-  /* Remove the old circular gradients: the moving layer is now the only light. */
   background: #071419;
 }
-
-.ambient-respiro {
-  position: fixed;
-  z-index: 0;
-  inset: 0;
-  overflow: hidden;
-  opacity: var(--ambient-respiro-opacity);
-  pointer-events: none;
-  transition: opacity 1.4s ease;
-}
-
-.ambient-respiro-page > header,
-.ambient-respiro-page > main {
-  position: relative;
-  z-index: 1;
-}
-
-.ambient-respiro__glow {
+.ambient-curve {
+  --home-voice: var(--cyan, #86d6ca);
+  --home-target: var(--amber, #e4bd78);
   position: absolute;
-  display: block;
-  width: 54vmax;
-  aspect-ratio: 1.18;
-  border-radius: 38% 62% 57% 43% / 52% 38% 62% 48%;
-  filter: blur(clamp(100px, 10vw, 180px));
-  will-change: transform, opacity;
+  z-index: 0;
+  right: max(16px, env(safe-area-inset-right));
+  bottom: max(16px, env(safe-area-inset-bottom));
+  width: var(--ambient-size);
+  height: var(--ambient-size);
+  pointer-events: none;
+  opacity: .8;
 }
-
-.ambient-respiro__glow--cool {
-  top: -18vmax;
-  left: 38vw;
-  background: var(--ambient-respiro-teal);
-  animation: ambient-respiro-cool 22s ease-in-out -5.5s infinite;
+.ambient-curve canvas { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.ambient-curve__glow { filter: blur(5px); opacity: .5; }
+.ambient-curve[data-suspended="true"] { visibility: hidden; }
+.warmup-body > .ambient-curve { position: fixed; }
+.warmup-body:not([data-screen="choose"]) > .ambient-curve { visibility: hidden; }
+@media (max-width: 899px) {
+  .warmup-body > .ambient-curve { visibility: hidden; }
 }
-
-.ambient-respiro__glow--warm {
-  right: -18vmax;
-  bottom: -22vmax;
-  width: 48vmax;
-  background: var(--ambient-respiro-gold);
-  animation: ambient-respiro-warm 29s ease-in-out -9s infinite;
-}
-
-.ambient-respiro-page--subtle {
-  --ambient-respiro-opacity: .48;
-  --ambient-cool-low: .16;
-  --ambient-cool-high: .5;
-  --ambient-warm-low: .07;
-  --ambient-warm-high: .18;
-}
-
-@keyframes ambient-respiro-cool {
-  0%, 100% { transform: translate3d(-8%, -5%, 0) rotate(-7deg) scale(.92); opacity: var(--ambient-cool-low); }
-  50% { transform: translate3d(7%, 13%, 0) rotate(7deg) scale(1.13); opacity: var(--ambient-cool-high); }
-}
-
-@keyframes ambient-respiro-warm {
-  0%, 100% { transform: translate3d(7%, 9%, 0) rotate(9deg) scale(.9); opacity: var(--ambient-warm-low); }
-  50% { transform: translate3d(-15%, -13%, 0) rotate(-8deg) scale(1.12); opacity: var(--ambient-warm-high); }
-}
-
-/* Voice Lab is atmospheric while choosing, quieter while configuring, and
-   still while the singer needs maximum visual stability. */
-.warmup-body.ambient-respiro-page .warmup-shell {
-  background: transparent;
-}
-
-.warmup-body[data-screen="prepare"] > .ambient-respiro {
-  opacity: .42;
-}
-
-.warmup-body[data-screen="session"] > .ambient-respiro,
-.warmup-body[data-screen="review"] > .ambient-respiro,
-body.performance-review-open > .ambient-respiro,
-body.pitch-lab-open > .ambient-respiro {
-  opacity: 0;
-}
-
-.warmup-body[data-screen="session"] .ambient-respiro__glow,
-.warmup-body[data-screen="review"] .ambient-respiro__glow,
-body.performance-review-open .ambient-respiro__glow,
-body.pitch-lab-open .ambient-respiro__glow {
-  animation-play-state: paused;
-}
-
-@media (max-width: 700px) {
-  .ambient-respiro {
-    --ambient-respiro-opacity: .56;
-  }
-
-  .ambient-respiro-page--subtle .ambient-respiro {
-    --ambient-respiro-opacity: .4;
-  }
-
-  .ambient-respiro__glow {
-    width: 92vmax;
-    filter: blur(72px);
-  }
-
-  .ambient-respiro__glow--cool {
-    top: -22vmax;
-    left: 14vw;
-  }
-
-  .ambient-respiro__glow--warm {
-    display: none;
-  }
-}
-
 @media (prefers-reduced-motion: reduce) {
-  .ambient-respiro {
-    transition: none !important;
-  }
-
-  .ambient-respiro__glow {
-    animation: none;
-    will-change: auto;
-  }
-
-  .ambient-respiro__glow--cool {
-    transform: translate3d(0, 7%, 0) scale(1.02);
-    opacity: .34;
-  }
+  .ambient-curve { transition: none !important; }
 }
+.ambient-page > header,
+.ambient-page > main { position: relative; z-index: 1; }
+.warmup-body.ambient-page .warmup-shell { background: transparent; }

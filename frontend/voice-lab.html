@@ -1,14 +1,19 @@
 <!doctype html>
 <html lang="it">
 <head>
+  <link rel="stylesheet" href="startup.css">
+  <script src="startup.js" data-startup="document"></script>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="theme-color" content="#081419" />
-  <title>Allena la tua voce · Choir Assistant</title>
+  <title>Esercizi vocali · Xynon</title>
   <link rel="stylesheet" href="styles.css?v=20261014-warmup" />
   <link rel="stylesheet" href="studio.css?v=20261020-compact-dark-score" />
   <link rel="stylesheet" href="ambient.css" />
+  <link rel="stylesheet" href="navigation.css" />
+  <script src="voice_lab_curves.js" defer></script>
   <script src="runtime-config.js" defer></script>
+  <script src="session-client.js" defer></script>
   <script src="pitch_detector.js?v=20261003-weak-voice" defer></script>
   <script src="one_euro_filter.js?v=1" defer></script>
   <script src="pitch_shared.js?v=20261013-live-history-visible" defer></script>
@@ -16,7 +21,7 @@
   <script src="voice_lab_core.js?v=20261014-natural-arpeggios" defer></script>
   <script src="voice_lab.js?v=20261020-instructions-listen-follow" defer></script>
 </head>
-<body class="warmup-body ambient-respiro-page">
+<body class="warmup-body ambient-page">
   <svg width="0" height="0" aria-hidden="true" focusable="false" style="position:absolute;pointer-events:none">
     <defs>
       <filter id="warmup-light-notation" color-interpolation-filters="sRGB">
@@ -25,13 +30,9 @@
       </filter>
     </defs>
   </svg>
-  <div class="ambient-respiro" aria-hidden="true">
-    <i class="ambient-respiro__glow ambient-respiro__glow--cool"></i>
-    <i class="ambient-respiro__glow ambient-respiro__glow--warm"></i>
-  </div>
   <header class="warmup-toolbar">
-    <a class="mode-button warmup-back" href="index.html">Menù</a>
-    <div class="warmup-identity"><small>CHOIR ASSISTANT</small><h1>Allena la tua voce</h1></div>
+    <a class="menu-link warmup-back" href="index.html">Menù</a>
+    <div class="warmup-identity"><small>XYNON</small><h1>Esercizi vocali</h1></div>
     <nav class="warmup-journey" aria-label="Avanzamento">
       <button type="button" data-journey="choose" class="active">Scegli</button><i></i>
       <button type="button" data-journey="prepare">Prepara</button><i></i>
@@ -58,17 +59,17 @@
       </div>
       <div class="warmup-paths">
         <button type="button" class="warmup-path warmup-path-scale" data-path="scale">
-          <span class="warmup-path-art" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></span>
+          <span class="warmup-path-art" aria-hidden="true"><svg class="warmup-path-curve" viewBox="-76 -76 152 152" data-ratio="1:3" focusable="false"><g><path/><circle r="4"/></g></svg></span>
           <span class="warmup-path-copy"><small>PER COMINCIARE</small><strong>Scalda la voce</strong><em>Una scala dolce per attivare voce e respiro.</em></span>
           <span class="warmup-path-meta"><b>Una scala, poi decidi tu</b><span>Inizia</span></span>
         </button>
         <button type="button" class="warmup-path warmup-path-chords" data-path="chords">
-          <span class="warmup-path-art" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="warmup-path-art" aria-hidden="true"><svg class="warmup-path-curve" viewBox="-76 -76 152 152" data-ratio="2:3" focusable="false"><g><path/><circle r="4"/></g></svg></span>
           <span class="warmup-path-copy"><small>ARMONIA</small><strong>Accordi e arpeggi</strong><em>Riconosci maggiore e minore mentre canti.</em></span>
           <span class="warmup-path-meta"><b>4–12 esercizi</b><span>Inizia</span></span>
         </button>
         <button type="button" class="warmup-path warmup-path-ear" data-path="ear">
-          <span class="warmup-path-art" aria-hidden="true"><i></i><i></i><i></i></span>
+          <span class="warmup-path-art" aria-hidden="true"><svg class="warmup-path-curve" viewBox="-76 -76 152 152" data-ratio="3:4" focusable="false"><g><path/><circle r="4"/></g></svg></span>
           <span class="warmup-path-copy"><small>ORECCHIO INTERNO</small><strong>Trova le note</strong><em>Parti dalla fondamentale e immagina il suono.</em></span>
           <span class="warmup-path-meta"><b>Scala, accordi o gradi</b><span>Inizia</span></span>
         </button>

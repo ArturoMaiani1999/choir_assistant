@@ -13,21 +13,23 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 from check_voice_lab_artifacts import audit_voice_lab_artifacts
+from check_deploy_config import https_origin
 
 ROOT = Path(__file__).resolve().parents[1]
 FRONTEND = ROOT / "frontend"
 DEFAULT_CONFIG = ROOT / "deploy" / "repertoire.json"
 CORE_ASSETS = (
-    "styles.css", "studio.css", "ambient.css", "score_viewer.css", "performances.css", "ui_preferences.js", "score_appearance.js",
+    "startup.js", "startup.css",
+    "styles.css", "studio.css", "navigation.css", "ambient.css", "ambient.js", "score_viewer.css", "performances.css", "ui_preferences.js", "score_appearance.js",
     "practice_math.js", "score_runtime.js", "pitch_detector.js",
     "pitch_detector_worker.js", "pitch_shared.js", "fluid_pitch_trail.js",
     "microphone_calibration.js", "microphone_calibration_worker.js", "microphone_calibration_ui.js",
-    "echo_cancellation.js", "echo_cancellation_worker.js", "echo_cancellation_ui.js", "echo_capture_worklet.js", "echo_monitor_worklet.js", "echo_delay.js", "echo_delay_worklet.js", "echo_diagnostics.js", "echo_diagnostic_worklet.js",
+    "audio_sample_clock.js", "calibration_probe.js", "echo_cancellation.js", "echo_cancellation_worker.js", "echo_cancellation_ui.js", "echo_capture_worklet.js", "echo_monitor_worklet.js", "echo_delay.js", "echo_delay_worklet.js", "echo_diagnostics.js", "echo_diagnostic_worklet.js",
     "vocal_feedback.js", "one_euro_filter.js", "pitch_shifter_worklet.js", "media_mixer.js", "piano_roll.js",
     "performance_client.js", "performance_review.js", "recording_client.js", "progress_client.js", "aggregate_pitch.js",
     "cockpit.css", "cockpit.js", "pitch_lab.css", "pitch_lab_core.js", "pitch_lab_worker.js", "pitch_lab.js",
     "repertorio.css", "repertorio.js", "auth.css", "app.js", "voice_lab_core.js",
-    "voice_lab.js", "score_viewer.js", "relax.css", "relax.js", "lissajous.js", "home.css", "home.js",
+    "voice_lab.js", "voice_lab_curves.js", "score_viewer.js", "relax.css", "relax.js", "lissajous.js", "home.css", "home.js", "about.css", "about.js",
 )
 FORBIDDEN_TEXT = ("__pitchTestHooks", "/api/", "cdn.jsdelivr", "unpkg", "localhost")
 API_CLIENT_ROUTES = {
@@ -132,11 +134,18 @@ def fingerprint_text(source_name: str, contents: str, destination: Path) -> str:
 def build_core_assets(destination: Path) -> dict[str, str]:
     """Copy core assets while preserving dependencies between hashed scripts."""
     generated = {"app.js", "pitch_detector_worker.js", "pitch_lab_worker.js", "pitch_lab.js", "microphone_calibration_worker.js", "microphone_calibration_ui.js", "echo_cancellation_worker.js", "echo_cancellation_ui.js", "echo_delay_worklet.js", "echo_diagnostics.js"}
+    generated.update({"echo_capture_worklet.js", "echo_monitor_worklet.js", "echo_diagnostic_worklet.js", "calibration_probe.js"})
     names = {
         name: fingerprint_copy(FRONTEND / name, destination)
         for name in CORE_ASSETS
         if name not in generated
     }
+    probe = (FRONTEND / 'calibration_probe.js').read_text(encoding='utf-8')
+    for filename in ('bach-bwv846-1.wav', 'bach-bwv846-2.wav', 'MS-Basic-License.txt', 'manifest.json'):
+        original = 'audio-calibration/' + filename
+        names[original] = fingerprint_copy(FRONTEND / original, destination)
+        probe = probe.replace(original, names[original])
+    names['calibration_probe.js'] = fingerprint_text('calibration_probe.js', probe, destination)
 
     worker = (FRONTEND / "pitch_detector_worker.js").read_text(encoding="utf-8")
     worker = re.sub(
@@ -165,6 +174,11 @@ def build_core_assets(destination: Path) -> dict[str, str]:
     calibration_ui = (FRONTEND / "microphone_calibration_ui.js").read_text(encoding="utf-8")
     calibration_ui = calibration_ui.replace("microphone_calibration_worker.js", names["microphone_calibration_worker.js"])
     names["microphone_calibration_ui.js"] = fingerprint_text("microphone_calibration_ui.js", calibration_ui, destination)
+
+    for module in ("echo_capture_worklet.js", "echo_monitor_worklet.js", "echo_diagnostic_worklet.js"):
+        worklet = (FRONTEND / module).read_text(encoding="utf-8")
+        worklet = worklet.replace("audio_sample_clock.js", names["audio_sample_clock.js"])
+        names[module] = fingerprint_text(module, worklet, destination)
 
     echo_worker = (FRONTEND / "echo_cancellation_worker.js").read_text(encoding="utf-8")
     echo_worker = echo_worker.replace("echo_cancellation.js", names["echo_cancellation.js"])
@@ -197,11 +211,12 @@ def build_core_assets(destination: Path) -> dict[str, str]:
     return names
 
 
-def build_auth_client(destination: Path) -> None:
+def build_auth_client(destination: Path) -> dict[str, str]:
     """Bundle ClerkJS locally so production does not execute a third-party script."""
     npx = shutil.which("npx")
     if not npx:
         raise ValueError("Node/npm non trovato; eseguire npm install prima della build")
+    names = {}
     try:
         for source, output in (
             ("auth-client.ts", "auth-client.js"),
@@ -212,10 +227,13 @@ def build_auth_client(destination: Path) -> None:
                 "--bundle", "--minify", "--platform=browser", "--target=es2022",
                 f"--outfile={destination / output}",
             ], cwd=ROOT, check=True)
+            names[output] = fingerprint_copy(destination / output, destination)
+            # Keep revalidated aliases for HTML already open during a rollout.
     except FileNotFoundError as error:
         raise ValueError("Node/npm non trovato; eseguire npm install prima della build") from error
     except subprocess.CalledProcessError as error:
         raise ValueError("Build del client di autenticazione fallita") from error
+    return names
 
 
 def audit_local_references(destination: Path) -> None:
@@ -317,9 +335,13 @@ def build_piece(piece: dict, destination: Path) -> dict:
     }
 
 
-def write_headers(destination: Path) -> None:
+def write_headers(destination: Path, *, worker_config: Path = ROOT / "wrangler.jsonc") -> None:
+    config = json.loads(worker_config.read_text(encoding="utf-8"))
+    frontend_origin = config.get("vars", {}).get("CLERK_FRONTEND_API_ORIGIN")
+    if not https_origin(frontend_origin) or re.search(r"[\s;'\"<>]", frontend_origin):
+        raise ValueError("CLERK_FRONTEND_API_ORIGIN deve essere una singola origine HTTPS")
     (destination / "_headers").write_text("""/*
-  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://img.clerk.com; media-src 'self' blob:; connect-src 'self' https://clerk.staging.epistrophe.it https://*.protect.clerk.com:*; worker-src 'self' blob:; frame-src https://challenges.cloudflare.com https://*.protect.clerk.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
+  Content-Security-Policy: default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: blob: https://img.clerk.com; media-src 'self' blob:; connect-src 'self' CLERK_FRONTEND_API_ORIGIN https://*.protect.clerk.com:*; worker-src 'self' blob:; frame-src https://challenges.cloudflare.com https://*.protect.clerk.com; object-src 'none'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'
   X-Content-Type-Options: nosniff
   Referrer-Policy: no-referrer
   Permissions-Policy: microphone=(self), camera=(), geolocation=()
@@ -338,6 +360,9 @@ def write_headers(destination: Path) -> None:
 /relax.html
   Cache-Control: no-cache
 
+/about.html
+  Cache-Control: no-cache
+
 /sign-in.html
   Cache-Control: no-store
 
@@ -350,24 +375,18 @@ def write_headers(destination: Path) -> None:
 /not-authorized.html
   Cache-Control: no-store
 
-/auth-client.js
-  Cache-Control: no-store
-
-/session-client.js
-  Cache-Control: no-store
-
 /*.js
-  Cache-Control: public, max-age=31536000, immutable
+  Cache-Control: no-cache
 
 /*.css
-  Cache-Control: public, max-age=31536000, immutable
+  Cache-Control: no-cache
 
 /library.json
   Cache-Control: public, max-age=31536000, immutable
 
 /library-assets/*
   Cache-Control: public, max-age=31536000, immutable
-""", encoding="utf-8")
+""".replace("CLERK_FRONTEND_API_ORIGIN", frontend_origin), encoding="utf-8")
 
 
 def audit(destination: Path) -> dict[str, str]:
@@ -400,7 +419,7 @@ def audit(destination: Path) -> dict[str, str]:
                     raise ValueError(f"Route API non autorizzata in {relative}")
             forbidden = (
                 tuple(marker for marker in FORBIDDEN_TEXT if marker not in {"/api/", "localhost"})
-                if relative in {"auth-client.js", "session-client.js"}
+                if re.fullmatch(r'(?:auth-client|session-client)(?:\.[a-f0-9]{12})?\.js', relative)
                 else tuple(marker for marker in FORBIDDEN_TEXT if marker != "/api/")
                 if allowed_api_routes
                 else FORBIDDEN_TEXT
@@ -416,6 +435,7 @@ def main() -> int:
     audit_voice_lab_artifacts()
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--worker-config", type=Path, default=ROOT / "wrangler.jsonc")
     parser.add_argument("--output", type=Path, default=ROOT / "dist")
     parser.add_argument(
         "--allow-dirty", action="store_true",
@@ -426,9 +446,10 @@ def main() -> int:
     dirty = worktree_is_dirty()
     destination = args.output.resolve()
     safe_clean(destination)
-    build_auth_client(destination)
+    auth_names = build_auth_client(destination)
     version = current_version(dirty=dirty)
     names = build_core_assets(destination)
+    names.update(auth_names)
     index = (FRONTEND / "index.html").read_text(encoding="utf-8")
     index = re.sub(r'\s*<script src="https://cdn\.jsdelivr\.net/[^\n]+\n', "\n", index)
     index = re.sub(r'\s*<script src="pitch_test_harness\.js[^\n]+\n', "\n", index)
@@ -468,9 +489,14 @@ def main() -> int:
     for original, fingerprinted in names.items():
         relax_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, relax_index)
     (destination / "relax.html").write_text(relax_index, encoding="utf-8")
+    about_index = (FRONTEND / "about.html").read_text(encoding="utf-8")
+    for original, fingerprinted in names.items():
+        about_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, about_index)
+    (destination / "about.html").write_text(about_index, encoding="utf-8")
     for auth_page in ("sign-in.html", "sign-up.html", "sign-out.html", "not-authorized.html"):
         auth_index = (FRONTEND / auth_page).read_text(encoding="utf-8")
-        auth_index = auth_index.replace("auth.css", names["auth.css"])
+        for original, fingerprinted in names.items():
+            auth_index = auth_index.replace(original, fingerprinted)
         (destination / auth_page).write_text(auth_index, encoding="utf-8")
     lab_assets = destination / "voice-lab-assets"
     lab_assets.mkdir()
@@ -481,7 +507,7 @@ def main() -> int:
     shutil.copytree(FRONTEND / "voice-lab-assets" / "scores", lab_assets / "scores")
     listings = [build_piece(piece, destination) for piece in pieces]
     (destination / "library.json").write_text(json.dumps({"pieces": listings}, ensure_ascii=False), encoding="utf-8")
-    write_headers(destination)
+    write_headers(destination, worker_config=args.worker_config)
     audit_local_references(destination)
     hashes = audit(destination)
     manifest = {"build_version": version, "created_at": datetime.now(timezone.utc).isoformat(),

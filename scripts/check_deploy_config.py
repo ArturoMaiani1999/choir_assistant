@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import argparse
 import json
 import re
 from pathlib import Path
@@ -79,7 +80,10 @@ def validate(config: dict) -> list[str]:
 
 
 def main() -> int:
-    config = json.loads(CONFIG.read_text(encoding="utf-8"))
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--config", type=Path, default=CONFIG)
+    args = parser.parse_args()
+    config = json.loads(args.config.read_text(encoding="utf-8"))
     errors = validate(config)
     if errors:
         print("Configurazione deploy non valida:")

@@ -124,11 +124,24 @@
     return anchors.reduce((best, value) => Math.abs(value - midi) < Math.abs(best - midi) ? value : best, anchors[0]);
   }
 
+  async function fetchResource(url, label) {
+    // Private assets need the same renewed session token as /api/me. The
+    // navigation cookie alone may expire while the exercise page stays open.
+    const response = await (window.ChoirAuthFetch || fetch)(url, { credentials: 'same-origin' });
+    if (!response.ok) {
+      const error = new Error(response.status === 401
+        ? 'Accesso scaduto. Ricarica la pagina e accedi di nuovo.'
+        : response.status === 403 ? 'Non hai accesso a questo esercizio.' : `${label} non disponibile. Riprova.`);
+      error.status = response.status;
+      throw error;
+    }
+    return response;
+  }
+
   async function loadVoiceSample(midi, role = state.role) {
     const anchor = choirAnchor(midi, role), key = `${role}-${anchor}`;
     if (state.voiceBuffers.has(key)) return state.voiceBuffers.get(key);
-    const pending = fetch(`voice-lab-assets/choir/${role}-${anchor}.flac`).then((response) => {
-      if (!response.ok) throw new Error(`Muse Choir ${role} non disponibile`);
+    const pending = fetchResource(`voice-lab-assets/choir/${role}-${anchor}.flac`, 'Voce guida').then((response) => {
       return response.arrayBuffer();
     }).then((data) => audioContext().decodeAudioData(data)).then((buffer) => {
       let squares = 0, samples = 0, peak = 0;
@@ -162,8 +175,7 @@
 
   function loadAudioAsset(cache, key, url, label, normalizationOptions = {}) {
     if (cache.has(key)) return cache.get(key);
-    const pending = fetch(url).then((response) => {
-      if (!response.ok) throw new Error(`${label} non disponibile`);
+    const pending = fetchResource(url, label).then((response) => {
       return response.arrayBuffer();
     }).then((data) => audioContext().decodeAudioData(data))
       .then((buffer) => measureBuffer(buffer, label, normalizationOptions));
@@ -199,13 +211,19 @@
     let phrase = null;
     if (supportsRenderedPhrase(exercise)) {
       try { phrase = await loadGuidePhrase(exercise); }
-      catch (_) { throw new Error('La voce guida non è disponibile. Premi Comincia per riprovare.'); }
+      catch (error) {
+        if (error.status === 401 || error.status === 403) throw error;
+        throw new Error('La voce guida non è disponibile. Premi Comincia per riprovare.', { cause: error });
+      }
     }
     const pitches = phrase ? [exercise.rootMidi] : [exercise.rootMidi, ...exercise.events.map((event) => event.midi)];
     await Promise.all([...new Set(pitches)].map((midi) => loadVoiceSample(midi)));
     if (state.ambienceEnabled && supportsRenderedPhrase(exercise)) {
       try { await loadPad(exercise); }
-      catch (_) { throw new Error('L’accompagnamento non è disponibile. Riprova o disattivalo in Impostazioni.'); }
+      catch (error) {
+        if (error.status === 401 || error.status === 403) throw error;
+        throw new Error('L’accompagnamento non è disponibile. Riprova o disattivalo in Impostazioni.', { cause: error });
+      }
     }
   }
 
@@ -499,6 +517,7 @@
       scheduleTrial(state.exercise); animateTrial(generation);
     } catch (error) {
       if (generation !== state.generation) return;
+      console.warn('Voice Lab: avvio non riuscito', error);
       releaseMicrophone();
       setRunning(false); setPhase('idle', 'Impossibile iniziare');
       els.warmup_instruction.textContent = error.message;
@@ -775,10 +794,7 @@
       const context = audioContext();
       // Resume inside the button gesture, before any downloads (mobile Safari).
       const resumed = context.resume();
-      const score = fetch(els.warmup_lesson_score.src).then(response => {
-        if (!response.ok) throw new Error('Spartito non disponibile. Riprova.');
-        return response.text();
-      });
+      const score = fetchResource(els.warmup_lesson_score.src, 'Spartito').then(response => response.text());
       const guide = exercise.mode === 'model' ? loadGuidePhrase(exercise) : loadVoiceSample(exercise.rootMidi);
       const [markup] = await Promise.all([score, guide, resumed]);
       if (generation !== demo.generation || !els.warmup_instructions_dialog.open) return;
@@ -845,10 +861,12 @@
         demo.frame = requestAnimationFrame(animateDemo);
       }
       animateDemo();
-    } catch (_) {
+    } catch (error) {
       if (generation !== demo.generation || !els.warmup_instructions_dialog.open) return;
+      console.warn('Voice Lab: dimostrazione non riuscita', error);
       stopDemo();
-      demoStatus('error', 'ISTRUZIONI', 'Dimostrazione non disponibile', 'Controlla la connessione e riprova.');
+      demoStatus('error', 'ISTRUZIONI', 'Dimostrazione non disponibile',
+        error.status === 401 || error.status === 403 ? error.message : 'Controlla la connessione e riprova.');
       els.warmup_demo_replay.disabled = false; els.warmup_demo_replay.textContent = 'Riprova';
     }
   }

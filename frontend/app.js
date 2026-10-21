@@ -36,7 +36,6 @@ let practiceLoadGeneration = 0;
 let controlsBound = false;
 let prefetchedScoreKey = null;
 let audioOutputControlsBound = false;
-let pendingAudioOutputAction = null;
 
 async function loadBundleManifest(pieceId) {
   if (!bundleCache.has(pieceId)) {
@@ -111,18 +110,18 @@ const UI_CONFIG = Object.freeze({
 });
 
 const AUDIO_OUTPUT_SESSION_KEY = 'choir-audio-output:v1';
-const AUDIO_OUTPUT_CONFIRMATION_TTL_MS = 30 * 60 * 1000;
 const PIANO_ROLL_DELAY_MAX_MS = 600;
 const PIANO_ROLL_DELAY_DEFAULT_MS = 270;
 const STANDARD_PLUME_ADVANCE_MS = 270;
 const BLUETOOTH_PLUME_ADVANCE_MS = 320;
-const METRONOME_OFFSET_MS = 50;
+// With the default 270 ms piano-roll delay, leave a 110 ms audible lead.
+const METRONOME_OFFSET_MS = 160;
+const DEFAULT_METRONOME_VOLUME = 30;
 const MIXER_DEFAULTS_VERSION = 2;
 let practiceOrigin = new URLSearchParams(location.search).get('from') === 'repertorio' ? 'repertorio' : null;
 const DEFAULT_OWN_VOICE_LEVEL = 1;
 const DEFAULT_OTHER_VOICE_LEVEL = .5;
 const DEFAULT_ACCOMPANIMENT_LEVEL = .4;
-let audioOutputExpiryTimer = null;
 
 const els = Object.fromEntries([
   'transpose', 'transpose-value', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
@@ -186,8 +185,11 @@ const state = {
   lastMetronomeBeat: null,
   metronomeOffsetMs: METRONOME_OFFSET_MS,
   pianoRollDelayMs: PIANO_ROLL_DELAY_DEFAULT_MS,
+  pianoRollVisualTime: new window.PracticeMath.VisualPlaybackTime(),
+  pianoRollWaiting: false,
+  lastPianoRollTime: null,
   audioOutputType: null,
-  rememberedMetronomeVolume: 34,
+  rememberedMetronomeVolume: DEFAULT_METRONOME_VOLUME,
   syncDebug: new URLSearchParams(window.location.search).has('syncDebug'),
   microphoneStatus: 'idle',
   microphoneFailureMessage: null,
@@ -201,11 +203,12 @@ const state = {
   microphoneBuffer: null,
   pitchWorker: null,
   pitchWorkerInFlight: false,
+  pitchWorkerTimeout: null,
   pitchWorkerDisabled: false,
   pitchAnalysisGeneration: 0,
   pitchAnalysisTimer: null,
   microphoneRms: 0,
-  pitchSmoother: new PitchSmoother(),
+  pitchSmoother: new window.ChoirPitch.HarmonicPitchSmoother(),
   displayPitchFilter: new OneEuroFilter(),
   detectorSettings: { ...PitchShared.DETECTOR_DEFAULTS },
   plumeSettings: { ...PitchShared.PLUME_DEFAULTS },
@@ -257,16 +260,18 @@ async function savePreferredVoice(voice) {
 
 function showLibraryStep(step) {
   libraryStep = step;
-  const copy = { mode: ['Menù', ''], source: ['Canta brani', 'Quali brani vuoi preparare?'],
-    piece: [libraryMode === 'read' ? 'Vedi partitura' : 'Brani custom', 'Scegli dal catalogo.'], part: ['Qual è la tua parte?', 'Sceglila una volta, la ricorderemo.'] }[step];
+  const copy = { mode: ['Menù', ''], source: ['Scegli brano', ''],
+    piece: [libraryMode === 'read' ? 'Mostra partiture' : 'Tutti i brani', 'Scegli dal catalogo.'], part: ['Qual è la tua parte?', 'Sceglila una volta, la ricorderemo.'] }[step];
   els.piecePickerDialog.dataset.step = step;
   for (const name of ['mode', 'source', 'piece', 'part']) document.getElementById(`library-${name}-step`).hidden = name !== step;
   document.getElementById('piece-picker-heading').textContent = copy[0];
   document.getElementById('library-step-hint').textContent = copy[1];
   document.getElementById('library-back').hidden = step === 'mode';
+  document.querySelector('.home-brand').hidden = step !== 'mode';
   els.libraryOpen.hidden = libraryMode !== 'sing'; els.libraryScore.hidden = libraryMode !== 'read';
   document.getElementById('library-status').textContent = '';
   document.getElementById('piece-picker-heading').focus({ preventScroll: true });
+  if (step === 'piece' || step === 'part') void updateLibraryParts();
 }
 
 function requirePreferredVoice(action) {
@@ -329,47 +334,30 @@ function formatRmsThreshold(value) {
   return Number(value).toFixed(value < .00001 ? 6 : value < .0001 ? 5 : 4).replace('.', ',');
 }
 
-function readAudioOutputPreference(now = Date.now()) {
+function readAudioOutputPreference() {
   try {
     const preference = JSON.parse(sessionStorage.getItem(AUDIO_OUTPUT_SESSION_KEY));
     const validType = preference?.type === 'bluetooth' || preference?.type === 'standard';
     const confirmedAt = Number(preference?.confirmedAt);
-    if (!validType || !Number.isFinite(confirmedAt) || now - confirmedAt >= AUDIO_OUTPUT_CONFIRMATION_TTL_MS) return null;
+    if (!validType || !Number.isFinite(confirmedAt)) return null;
     return { type: preference.type, confirmedAt };
   } catch (_) { return null; }
 }
 
-function scheduleAudioOutputExpiry(preference) {
-  clearTimeout(audioOutputExpiryTimer);
-  if (!preference) return;
-  const remaining = Math.max(0, AUDIO_OUTPUT_CONFIRMATION_TTL_MS - (Date.now() - preference.confirmedAt));
-  audioOutputExpiryTimer = setTimeout(() => invalidateAudioOutputPreference(true), remaining);
-}
-
 function restoreAudioOutputPreference() {
   const preference = readAudioOutputPreference();
-  state.audioOutputType = preference?.type ?? null;
-  scheduleAudioOutputExpiry(preference);
-  return Boolean(preference);
+  state.audioOutputType = preference?.type ?? 'standard';
+  return true;
 }
 
 function saveAudioOutputPreference(type) {
   const preference = { type, confirmedAt: Date.now() };
   try { sessionStorage.setItem(AUDIO_OUTPUT_SESSION_KEY, JSON.stringify(preference)); } catch (_) {}
   state.audioOutputType = type;
-  scheduleAudioOutputExpiry(preference);
-}
-
-function invalidateAudioOutputPreference(notifyUser = false) {
-  if (!state.audioOutputType && !readAudioOutputPreference()) return;
-  try { sessionStorage.removeItem(AUDIO_OUTPUT_SESSION_KEY); } catch (_) {}
-  state.audioOutputType = null;
-  clearTimeout(audioOutputExpiryTimer);
-  updateDetectorSettingsUi();
-  if (notifyUser) showToast('Conferma di nuovo l’uscita audio nelle Impostazioni.');
 }
 
 function updateDetectorSettingsUi() {
+  updateListeningSettingsUi();
   const calibration = microphoneCalibrationUI?.activeSettings();
   const effectiveNote = document.getElementById('settings-calibration-effective');
   effectiveNote.hidden = !calibration;
@@ -377,7 +365,7 @@ function updateDetectorSettingsUi() {
   els.settingsAudioOutputStandard.checked = state.audioOutputType === 'standard';
   els.settingsAudioOutputBluetooth.checked = state.audioOutputType === 'bluetooth';
   els.settingsAudioOutputStatus.textContent = state.audioOutputType === 'bluetooth'
-    ? 'Bluetooth' : state.audioOutputType === 'standard' ? 'Non Bluetooth' : 'Da confermare';
+    ? 'Bluetooth' : 'Cavo o dispositivo';
   els.settingsTextScale.value = String(Math.round(state.lyricTextScale * 100));
   els.settingsTextScaleValue.textContent = `${Math.round(state.lyricTextScale * 100)}%`;
   els.settingsShowIntervals.checked = state.showIntervals;
@@ -406,6 +394,19 @@ function updateDetectorSettingsUi() {
   els.settingsV1PlumeAdvanceValue.textContent = `${state.plumeSettings.timeAdvanceMs} ms`;
   els.settingsPianoRollDelay.value = String(state.pianoRollDelayMs);
   els.settingsPianoRollDelayValue.textContent = `${state.pianoRollDelayMs} ms`;
+}
+
+function updateListeningSettingsUi() {
+  const speakers = document.getElementById('echo-enabled').checked;
+  document.getElementById('settings-listening-headphones').checked = !speakers;
+  document.getElementById('settings-listening-speakers').checked = speakers;
+  document.getElementById('settings-listening-hint').textContent = speakers
+    ? 'Volume del dispositivo consigliato: 50%. Usa i tasti del dispositivo.'
+    : 'Indossa le cuffie prima di calibrare.';
+  document.getElementById('settings-calibration-hint').textContent = speakers
+    ? 'Circa 30 secondi per voce e riduzione del rientro.'
+    : 'Una guida di circa 25 secondi, poi puoi cantare.';
+  microphoneCalibrationUI?.refresh();
 }
 
 function applyLiveTrackerSettings() {
@@ -494,8 +495,6 @@ function openDetectorSettings(mode = 'basic') {
   echoCancellationUI?.checkpoint('settings-open');
   void pausePracticeForNonExercise({ preserveCalibration: true });
   const advanced = mode === 'advanced';
-  pendingAudioOutputAction = null;
-  els.settingsDialog.classList.remove('is-audio-output-prompt');
   closeSettingsMenu();
   restoreAudioOutputPreference();
   updateDetectorSettingsUi();
@@ -506,31 +505,26 @@ function openDetectorSettings(mode = 'basic') {
   if (!els.settingsDialog.open) els.settingsDialog.showModal();
 }
 
-function openAudioOutputPrompt(action) {
-  pendingAudioOutputAction = action;
-  closeSettingsMenu();
-  restoreAudioOutputPreference();
-  updateDetectorSettingsUi();
-  els.settingsBasicPanel.hidden = false;
-  els.settingsAdvancedPanel.hidden = true;
-  els.settingsHeading.textContent = 'Come ascolti l’audio?';
-  els.settingsDialog.classList.add('is-audio-output-prompt');
-  if (!els.settingsDialog.open) els.settingsDialog.showModal();
-  requestAnimationFrame(() => els.settingsAudioOutputStandard.focus());
-}
-
 function requestAudioOutputForEntry(action) {
-  if (restoreAudioOutputPreference()) { void action(); return; }
-  openAudioOutputPrompt(action);
+  restoreAudioOutputPreference();
+  void action();
 }
 
 function bindAudioOutputControls() {
   if (audioOutputControlsBound) return;
   audioOutputControlsBound = true;
+  for (const mode of ['headphones', 'speakers']) {
+    document.getElementById(`settings-listening-${mode}`).addEventListener('change', event => {
+      if (!event.target.checked) return;
+      const toggle = document.getElementById('echo-enabled');
+      if (toggle.checked !== (mode === 'speakers')) toggle.click();
+      updateListeningSettingsUi();
+    });
+  }
+  document.getElementById('echo-enabled').addEventListener('change', updateListeningSettingsUi);
   for (const control of [els.settingsAudioOutputStandard, els.settingsAudioOutputBluetooth]) {
     control.addEventListener('change', () => {
       if (!control.checked) return;
-      const shouldCloseAfterSelection = els.settingsDialog.classList.contains('is-audio-output-prompt');
       saveAudioOutputPreference(control.value);
       state.plumeSettings.timeAdvanceMs = control.value === 'bluetooth'
         ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
@@ -539,15 +533,10 @@ function bindAudioOutputControls() {
       else { try { saveGlobalDetectorPreferences(); } catch (_) {} }
       if (state.runtime) render();
       showToast(control.value === 'bluetooth'
-        ? 'Bluetooth confermato: anticipo traccia vocale 320 ms.'
-        : 'Uscita non Bluetooth: anticipo traccia vocale 270 ms.');
-      const action = pendingAudioOutputAction;
-      pendingAudioOutputAction = null;
-      if (shouldCloseAfterSelection && els.settingsDialog.open) els.settingsDialog.close();
-      if (action) void action();
+        ? 'Connessione Bluetooth selezionata.'
+        : 'Connessione via cavo o dispositivo selezionata.');
     });
   }
-  els.settingsDialog.addEventListener('cancel', () => { pendingAudioOutputAction = null; });
   els.settingsDialog.addEventListener('click', (event) => {
     const selected = event.target.closest('.setting-info');
     const shouldOpen = selected && !selected.classList.contains('is-open');
@@ -555,8 +544,6 @@ function bindAudioOutputControls() {
     if (shouldOpen) selected.classList.add('is-open');
   });
   els.settingsDialog.addEventListener('close', () => {
-    pendingAudioOutputAction = null;
-    els.settingsDialog.classList.remove('is-audio-output-prompt');
     els.settingsDialog.querySelectorAll('.setting-info.is-open').forEach((button) => button.classList.remove('is-open'));
   });
   els.settingsDialog.addEventListener('click', closeSettingsFromBackdrop);
@@ -564,7 +551,9 @@ function bindAudioOutputControls() {
     if (Date.now() < state.ignoreAudioDeviceChangesUntil) return;
     microphoneCalibrationUI?.inputChanged();
     echoCancellationUI?.invalidate('devicechange');
-    invalidateAudioOutputPreference(true);
+    restoreAudioOutputPreference();
+    updateDetectorSettingsUi();
+    showToast('Dispositivo audio cambiato: controlla la connessione e ripeti Calibra audio.');
   });
 }
 
@@ -1236,6 +1225,7 @@ function applyPitchEstimate(rawEstimate, beat, sampledAt, analysisMs, running) {
     state.displayPitch = null;
   } else state.displayPitch = state.displayPitchFilter.filter(state.trackedPitch, sampledAt / 1000);
   echoDiagnosticsUI?.onPitchFrame({ beat, sampledAt, running, rawHz: estimate.rawHz,
+    originalHz: rawEstimate.originalHz ?? rawEstimate.hz, harmonicResolved: Boolean(rawEstimate.harmonicResolved),
     trackedHz: state.trackedPitch == null ? null : estimate.hz, displayHz: state.displayPitch == null ? null : pitchToHz(state.displayPitch),
     accepted: estimate.accepted, rejectionReason: estimate.rejectionReason, confidence: estimate.confidence,
     rms: estimate.rms, clarity: estimate.clarity, settings: activeRecognitionSettings(), echo: echoCancellationUI?.diagnostics() });
@@ -1261,10 +1251,20 @@ function applyPitchEstimate(rawEstimate, beat, sampledAt, analysisMs, running) {
 }
 
 function stopPitchWorker() {
+  clearTimeout(state.pitchWorkerTimeout);
+  state.pitchWorkerTimeout = null;
   state.pitchAnalysisGeneration += 1;
   state.pitchWorker?.terminate();
   state.pitchWorker = null;
   state.pitchWorkerInFlight = false;
+}
+
+function failPitchWorker(worker) {
+  if (state.pitchWorker !== worker) return;
+  state.pitchWorkerDisabled = true;
+  stopPitchWorker();
+  if (state.microphoneStatus === 'active')
+    state.microphoneBuffer = new Float32Array(state.microphoneAnalyser.fftSize);
 }
 
 function ensurePitchWorker() {
@@ -1272,23 +1272,19 @@ function ensurePitchWorker() {
   try {
     const worker = new Worker('pitch_detector_worker.js');
     worker.onmessage = ({ data }) => {
+      if (state.pitchWorker !== worker) return;
+      clearTimeout(state.pitchWorkerTimeout);
+      state.pitchWorkerTimeout = null;
       state.pitchWorkerInFlight = false;
       if (data.buffer && state.microphoneStatus === 'active') state.microphoneBuffer = new Float32Array(data.buffer);
       if (data.error) {
-        state.pitchWorkerDisabled = true;
-        worker.terminate(); state.pitchWorker = null;
-        if (state.microphoneStatus === 'active' && !state.microphoneBuffer)
-          state.microphoneBuffer = new Float32Array(state.microphoneAnalyser.fftSize);
+        failPitchWorker(worker);
         return;
       }
       if (data.generation !== state.pitchAnalysisGeneration) return;
       applyPitchEstimate(data.estimate, data.beat, data.sampledAt, data.analysisMs, data.running);
     };
-    worker.onerror = () => {
-      state.pitchWorkerDisabled = true;
-      stopPitchWorker();
-      if (state.microphoneStatus === 'active') state.microphoneBuffer = new Float32Array(state.microphoneAnalyser.fftSize);
-    };
+    worker.onerror = worker.onmessageerror = () => failPitchWorker(worker);
     state.pitchWorker = worker;
   } catch (_) { state.pitchWorkerDisabled = true; }
   return state.pitchWorker;
@@ -1303,20 +1299,20 @@ function analyseMicrophone(beat, running, now) {
     const buffer = state.microphoneBuffer.buffer;
     state.microphoneBuffer = null;
     state.pitchWorkerInFlight = true;
+    // A stalled script download need not raise onerror. Keep the existing
+    // detector available on the main thread when no response arrives.
+    state.pitchWorkerTimeout = setTimeout(() => failPitchWorker(worker), 1500);
     try {
       worker.postMessage({ buffer, sampleRate: state.microphoneContext.sampleRate,
         settings: activeRecognitionSettings(), beat, sampledAt: now, running,
         generation: state.pitchAnalysisGeneration }, [buffer]);
     } catch (_) {
-      state.pitchWorkerInFlight = false;
-      state.pitchWorkerDisabled = true;
-      stopPitchWorker();
-      state.microphoneBuffer = new Float32Array(state.microphoneAnalyser.fftSize);
+      failPitchWorker(worker);
     }
     return;
   }
   const startedAt = performance.now();
-  const estimate = detectPitch(state.microphoneBuffer, state.microphoneContext.sampleRate, activeRecognitionSettings());
+  const estimate = detectPitch(state.microphoneBuffer, state.microphoneContext.sampleRate, { ...activeRecognitionSettings(), resolveHarmonics: true });
   applyPitchEstimate(estimate, beat, now, performance.now() - startedAt, running);
 }
 
@@ -1564,8 +1560,12 @@ function visuallyAdvancedPitchBeat(beat) {
   return state.runtime.beatAtSeconds(Math.max(0, scoreSeconds));
 }
 
-function currentPianoRollBeat(snapshot = playbackSnapshot()) {
-  return delayedVisualBeat(state.runtime, snapshot.performanceTime, snapshot.speed, state.pianoRollDelayMs);
+function currentPianoRollBeat(snapshot = playbackSnapshot(), interpolate = false) {
+  const blocked = state.pianoRollWaiting || els.backingAudio.seeking || els.backingAudio.readyState < 3
+    || (state.playbackMixer.context && state.playbackMixer.context.state !== 'running');
+  const time = interpolate ? state.pianoRollVisualTime.update(snapshot, performance.now(), blocked) : snapshot.performanceTime;
+  if (interpolate) state.lastPianoRollTime = time;
+  return delayedVisualBeat(state.runtime, time, snapshot.speed, state.pianoRollDelayMs);
 }
 
 function drawPitchLane(beat) {
@@ -1865,7 +1865,7 @@ function render() {
   renderScore(snapshot.beat);
   // Delay only the pitch-lane timeline. Audio, metronome and scoring continue
   // to use the media clock; the plume advance remains relative to this lane.
-  drawPitchLane(currentPianoRollBeat(snapshot));
+  drawPitchLane(currentPianoRollBeat(snapshot, true));
   renderReadout(snapshot.beat, snapshot.running);
   renderSyncDebug(snapshot);
   if (snapshot.running || state.microphoneStatus === 'active' || (!state.gridInspect.active && state.pitchViewport?.animating)) state.rafId = requestAnimationFrame(render); else state.rafId = null;
@@ -2114,12 +2114,7 @@ async function togglePlayback() {
   }
   if (!state.bundleApproved) { showToast('Serve l’approvazione admin di questo bundle.'); return; }
   if (state.playbackPlan?.kind === 'muted') { showToast('Attiva almeno una traccia nel Mixer.'); return; }
-  if (!state.clock.running && !restoreAudioOutputPreference()) {
-    openDetectorSettings();
-    els.settingsAudioOutputBluetooth.focus();
-    showToast('Prima di iniziare, conferma l’uscita audio in uso.');
-    return;
-  }
+  if (!state.clock.running) restoreAudioOutputPreference();
   if (playbackSnapshot().beat >= totalBeats()) state.clock.seekBeat(0);
   echoCancellationUI?.checkpoint('playback-toggle');
   if (!state.clock.running && echoCancellationUI?.enabled() && !echoCancellationUI.ready()) {
@@ -2321,8 +2316,9 @@ async function suspendPracticeForBackground() {
 
 async function toggleMicrophone() {
   if (state.microphoneStatus === 'active') { await stopMicrophone(); return; }
-  if (echoCancellationUI?.enabled() && !echoCancellationUI.ready() && !microphoneCalibrationUI?.isBusy() && !echoDiagnosticsUI?.isBusy()) {
-    await microphoneCalibrationUI.open(); return;
+  if (echoCancellationUI?.enabled() && !echoCancellationUI.ready() && !microphoneCalibrationUI?.isBusy()
+    && !microphoneCalibrationUI?.isRestoring() && !echoDiagnosticsUI?.isBusy()) {
+    await microphoneCalibrationUI.verifyPlayback(); return;
   }
   if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
     state.microphoneStatus = 'error'; updateMicrophoneButton();
@@ -2336,7 +2332,17 @@ async function toggleMicrophone() {
   // switch and immediately ask the user the same question again.
   state.ignoreAudioDeviceChangesUntil = Date.now() + 5000;
   try {
-    const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: false, noiseSuppression: false, autoGainControl: !echoCancellationUI?.enabled(), channelCount: 1 }, video: false });
+    const nativeAEC = echoCancellationUI?.enabled() && echoCancellationUI.isNative?.();
+    const stream = await window.ChoirMedia.acquireMicrophone(navigator.mediaDevices, { audio: nativeAEC
+      ? { echoCancellation: {exact:true}, noiseSuppression: {exact:false}, autoGainControl: {exact:false}, channelCount:1 }
+      : { echoCancellation: false, noiseSuppression: false, autoGainControl: !echoCancellationUI?.enabled(), channelCount: 1 }, video: false }, {
+      preferPhone: /Android/i.test(navigator.userAgent) && !echoCancellationUI?.enabled(),
+      isCurrent: () => requestGeneration === state.microphoneRequestGeneration && document.visibilityState !== 'hidden',
+    });
+    if (!stream) {
+      if (requestGeneration === state.microphoneRequestGeneration) { state.microphoneStatus = 'idle'; updateMicrophoneButton(); render(); }
+      return;
+    }
     if (requestGeneration !== state.microphoneRequestGeneration || document.visibilityState === 'hidden') {
       stream.getTracks().forEach((track) => track.stop());
       if (requestGeneration === state.microphoneRequestGeneration) {
@@ -2379,7 +2385,7 @@ async function toggleMicrophone() {
     if (requestGeneration !== state.microphoneRequestGeneration || state.microphoneStatus !== 'active') return;
     applyLiveTrackerSettings();
     startPitchAnalysisLoop();
-    showToast('Microfono attivo. Per risultati migliori usa le cuffie.');
+    showToast('Microfono attivo.');
     if (!state.rafId) state.rafId = requestAnimationFrame(render);
   } catch (error) {
     if (requestGeneration !== state.microphoneRequestGeneration) return;
@@ -4680,10 +4686,10 @@ async function loadMemberProfile() {
       return false;
     }
     return true;
-  } catch (_) {
+  } catch (error) {
     state.performanceMe = null;
     els.cockpitLink.hidden = true;
-    return true;
+    throw error;
   }
 }
 
@@ -4889,9 +4895,11 @@ function restorePreferences() {
   state.selectedMeasureIndex = 0;
   els.playbackSpeed.value = ['0.8', '0.9', '1'].includes(saved.speed) ? saved.speed : '1';
   els.volume.value = Number.isFinite(Number(saved.volume)) ? Math.max(0, Math.min(100, Number(saved.volume))) : 62;
-  els.metronomeVolume.value = Number.isFinite(Number(saved.metronome)) ? Math.max(0, Math.min(100, Number(saved.metronome))) : 0;
+  els.metronomeVolume.value = saved.metronome != null && Number.isFinite(Number(saved.metronome))
+    ? Math.max(0, Math.min(100, Number(saved.metronome))) : DEFAULT_METRONOME_VOLUME;
+  state.rememberedMetronomeVolume = Number(els.metronomeVolume.value) || DEFAULT_METRONOME_VOLUME;
   // The click timing is deliberately fixed: legacy saved values must not
-  // override the application-wide 50 ms offset.
+  // override the application-wide 160 ms offset.
   state.metronomeOffsetMs = METRONOME_OFFSET_MS;
   const sharedPitchPreferences = PitchShared.readPreferences({
     getItem: () => JSON.stringify(detectorSaved),
@@ -5075,6 +5083,14 @@ function bindControls() {
   for (const eventName of ['loadedmetadata', 'durationchange', 'canplay', 'progress', 'seeked']) {
     els.backingAudio.addEventListener(eventName, applyPendingAudioSeek);
   }
+  for (const eventName of ['play', 'pause', 'seeking', 'seeked', 'ratechange', 'emptied', 'ended']) {
+    els.backingAudio.addEventListener(eventName, () => {
+      state.pianoRollVisualTime.reset();
+      if (['play', 'emptied', 'ended'].includes(eventName)) state.pianoRollWaiting = false;
+    });
+  }
+  els.backingAudio.addEventListener('waiting', () => { state.pianoRollWaiting = true; state.pianoRollVisualTime.reset(); });
+  els.backingAudio.addEventListener('playing', () => { state.pianoRollWaiting = false; state.pianoRollVisualTime.reset(); });
   els.backingAudio.addEventListener('play', () => {
     void playVoiceStems();
     if (state.personalRecording.replay) {
@@ -5492,6 +5508,7 @@ async function initialize() {
   });
   document.getElementById('settings-calibrate').addEventListener('click', () => void microphoneCalibrationUI.open());
   echoCancellationUI = window.ChoirEchoCancellationUI.create({
+    nativeAEC: RUNTIME_CONFIG.features.platformAEC !== false,
     openCalibration: () => microphoneCalibrationUI.open(),
     mixer: () => state.playbackMixer, stream: () => state.microphoneStream,
     volume: () => Number(els.volume.value) / 100,
@@ -5509,7 +5526,7 @@ async function initialize() {
       if (state.microphoneStatus !== 'active') throw new Error(state.microphoneFailureMessage || 'Consenti il microfono e riprova.');
     },
     stopMicrophone, stopAnalysis: () => { stopPitchAnalysisLoop(); stopPitchWorker(); },
-    changed: () => { microphoneCalibrationUI.inputChanged(); renderAutomaticBestPreference(); }, notify: showToast,
+    changed: () => { microphoneCalibrationUI.inputChanged(); updateListeningSettingsUi(); renderAutomaticBestPreference(); }, notify: showToast,
     returnFocus: () => {
       if (mobileChrome.topCollapsed) { mobileChrome.topCollapsed = false; updateMobileChrome(); redrawAfterChromeChange(); }
       els.settings.focus();
@@ -5607,9 +5624,8 @@ function openLibraryPicker(step = 'mode') {
   const selectedPiece = [requested, state.bundleManifest?.piece_id, remembered, state.library[0]?.piece_id]
     .find((pieceId) => pieceId && state.library.some((piece) => piece.piece_id === pieceId));
   populateLibraryPieces(selectedPiece);
-  const returnButton = els.piecePickerDialog.querySelector('.studio-return');
+  const returnButton = document.getElementById('library-close');
   if (returnButton) returnButton.hidden = !state.runtime;
-  updateLibraryParts();
   showLibraryStep(['mode', 'source', 'piece', 'part'].includes(step) ? step : 'mode');
   if (!els.piecePickerDialog.open) els.piecePickerDialog.showModal();
 }
@@ -5678,9 +5694,10 @@ function bindLibraryPicker() {
   document.getElementById('library-read').addEventListener('click', () => { libraryMode = 'read'; showLibraryStep('piece'); });
   document.getElementById('library-custom').addEventListener('click', () => { libraryMode = 'sing'; showLibraryStep('piece'); });
   document.getElementById('library-back').addEventListener('click', () => {
-    if (libraryStep === 'part' && practiceOrigin === 'repertorio' && !state.runtime) { void navigatePractice('repertorio.html'); return; }
     pendingVoiceAction = null;
-    showLibraryStep(libraryStep === 'source' || libraryMode === 'read' ? 'mode' : libraryStep === 'part' ? 'piece' : 'source');
+    if (libraryStep === 'part' && practiceOrigin === 'repertorio' && !state.runtime) { void navigatePractice('repertorio.html'); return; }
+    const previous = { source: 'mode', piece: libraryMode === 'read' ? 'mode' : 'source', part: 'piece' };
+    showLibraryStep(previous[libraryStep] || 'mode');
   });
   document.querySelectorAll('[data-preferred-voice]').forEach(button => button.addEventListener('click', async () => {
     document.querySelectorAll('[data-preferred-voice]').forEach(item => { item.disabled = true; });
@@ -5839,6 +5856,8 @@ async function loadPracticePiece(pieceId, { partId = null, updateHistory = false
   state.occurrenceMeasures = buildOccurrenceMeasures(state.runtime);
   configureBacking();
   state.clock = new MediaPlaybackClock({ mediaElement: els.backingAudio, scoreRuntime: state.runtime });
+  state.pianoRollVisualTime.reset();
+  state.pianoRollWaiting = false;
   // Media decoders can change the output route; retain the voice profile and
   // input, but verify the new route in silence before applying cancellation.
   if (preserveCalibratedInput && echoCancellationUI?.enabled()) echoCancellationUI.invalidate('piece-output-route');
@@ -5855,7 +5874,7 @@ async function loadPracticePiece(pieceId, { partId = null, updateHistory = false
   }
   const libraryPiece = state.library.find((piece) => piece.piece_id === bundleManifest.piece_id);
   els.pieceTitle.textContent = libraryPiece ? pieceDisplayTitle(libraryPiece) : state.runtime.title.split('·')[0].trim();
-  document.title = `${els.pieceTitle.textContent} · Choir Assistant`;
+  document.title = `${els.pieceTitle.textContent} · Xynon`;
   els.scoreViewerLink.href = `score-viewer.html?piece=${encodeURIComponent(bundleManifest.piece_id)}`;
   els.scorePartLabel.textContent = parts.find((part) => part.id === state.runtime.selectedPartId)?.name ?? 'Parte';
   bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(0); updatePlaybackButton();
@@ -5868,7 +5887,8 @@ async function loadPracticePiece(pieceId, { partId = null, updateHistory = false
   }
 }
 
-initialize().catch((error) => {
+initialize().then(() => window.ChoirStartup?.ready()).catch((error) => {
+  window.ChoirStartup?.fail();
   els.pieceTitle.textContent = 'Prova non disponibile';
   els.scoreLoading.hidden = false;
   els.scoreLoading.textContent = error.message;

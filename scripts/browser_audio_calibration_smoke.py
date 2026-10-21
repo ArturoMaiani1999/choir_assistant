@@ -15,11 +15,26 @@ from browser_echo_cancellation_smoke import FIXTURE, LIVE_CHECK, diagnostic_chec
 OUT = Path(__file__).resolve().parents[1] / 'artifacts' / 'audio-calibration'
 VOICE = r"""
 window.calibrationResults=[];
+window.calibrationProbeStarts=[];
+const NativeBufferSource=AudioContext.prototype.createBufferSource;
+AudioContext.prototype.createBufferSource=function(...args){
+  const source=NativeBufferSource.apply(this,args),start=source.start.bind(source);
+  source.start=(...times)=>{
+    if(window.testNativeRoute&&source.buffer?.duration===2){
+      const pcm=source.buffer.getChannelData(0);
+      const expected=ChoirEchoCancellation.noise(pcm.length,.08,calibrationProbeStarts.length?957:173);
+      calibrationProbeStarts.push({at:times[0],duration:source.buffer.duration,rms:Math.sqrt(pcm.reduce((s,v)=>s+v*v,0)/pcm.length),matchesNoise:pcm.every((v,i)=>v===expected[i])});
+    }
+    return start(...times);
+  };
+  return source;
+};
 const NativeWorker=window.Worker;
 window.Worker=class extends NativeWorker {
-  constructor(...args){super(...args);if(String(args[0]).includes('microphone_calibration_worker'))this.addEventListener('message',e=>{if(e.data.type==='result')calibrationResults.push(e.data.result)});}
+  constructor(...args){super(...args);this.voice=String(args[0]).includes('microphone_calibration_worker');if(this.voice)this.addEventListener('message',e=>{if(e.data.type==='result')calibrationResults.push(e.data.result)});}
   postMessage(data,...rest){
-    if(data?.mode==='ready'&&window.holdEchoWorkerReady)return;
+    if(data?.mode==='ready'&&(this.voice?window.holdVoiceWorkerReady:window.holdEchoWorkerReady))return;
+    if(this.voice&&data?.frames&&window.holdVoiceAnalysis)return;
     if(data?.frames){const times=data.frames.map(f=>f.timeSec),deltas=times.slice(1).map((t,i)=>t-times[i]);
       window.calibrationTiming={frames:times.length,first:times[0],last:times.at(-1),nonIncreasing:deltas.filter(d=>d<=0).length,maxGap:Math.max(...deltas)};}
     return super.postMessage(data,...rest);
@@ -28,6 +43,12 @@ window.Worker=class extends NativeWorker {
 setInterval(()=>{
   if(!window.echoFixture||window.manualAudio)return;
   const instruction=document.getElementById('calibration-instruction')?.textContent||'';
+  if(window.injectTrainingJump&&!window.trainingJumpDone&&instruction==='Ascolta senza cantare'){
+    window.trainingNoiseStart??=performance.now();
+    if(performance.now()-window.trainingNoiseStart>1200){
+      echoFixture.delay.delayTime.value=.075;window.trainingJumpDone=true;
+    }
+  }
   const singing=document.getElementById('calibration-dialog')?.dataset.phase==='capture'&&instruction.startsWith('Canta');
   echoFixture.voiceGain.gain.value=singing?(instruction.includes('piano')?.05:.12):0;
 },20);
@@ -45,6 +66,14 @@ def main():
     parser.add_argument('--without-piece',action='store_true',help='Calibrate from Home before loading any score/player')
     parser.add_argument('--diagnostic-only',action='store_true',help='Record/upload with no prior calibration')
     parser.add_argument('--worker-loading-check',action='store_true',help='Verify preparation, silent load timeout and cleanup')
+    parser.add_argument('--voice-worker-loading-check',action='store_true',help='Verify vocal analysis is available before any acoustic capture')
+    parser.add_argument('--voice-analysis-timeout-check',action='store_true',help='Verify missing analysis response releases capture')
+    parser.add_argument('--training-jump-check',action='store_true',help='Inject one real 40 ms acoustic-path change during initial training')
+    parser.add_argument('--graph-churn-check',action='store_true',help='Exercise the production monitor through deliberate graph contention')
+    parser.add_argument('--native-aec',action='store_true',help='Test platform capture and the unified guide with a processed synthetic input')
+    parser.add_argument('--live-voice-check',action='store_true',help='Verify admitted live pitch after calibration enters Santo, then stop')
+    parser.add_argument('--pitch-worker-timeout-check',action='store_true',help='Verify saved-profile live pitch recovers when the pitch Worker never replies')
+    parser.add_argument('--probe-loading-check','--music-loading-check',dest='probe_loading_check',action='store_true',help='Reject unavailable calibration probes before acoustic capture')
     args=parser.parse_args()
     OUT=args.output or (OUT/'headphones' if args.headphones else OUT)
     OUT.mkdir(parents=True,exist_ok=True)
@@ -56,18 +85,23 @@ def main():
         try:
             portfile=Path(profile)/'DevToolsActivePort'
             for _ in range(120):
-                if portfile.exists():break
+                try:
+                    port=portfile.read_text().splitlines()[0]
+                    if port:break
+                except (OSError,IndexError):pass
                 time.sleep(.05)
-            port=portfile.read_text().splitlines()[0]
+            else:raise RuntimeError('Chrome debugging port unavailable')
             page=next(p for p in json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/json')) if p.get('type')=='page')
             ws=websocket.create_connection(page['webSocketDebuggerUrl'],timeout=50)
             command(ws,1,'Page.enable')
-            command(ws,2,'Page.addScriptToEvaluateOnNewDocument',{'source':FIXTURE+VOICE})
+            command(ws,2,'Page.addScriptToEvaluateOnNewDocument',{'source':('window.testNativeRoute=true;' if args.native_aec else '')+FIXTURE+VOICE})
             command(ws,3,'Page.navigate',{'url':args.url})
-            for i in range(10,180):
-                if evaluate(ws,i,"typeof state!=='undefined'&&Boolean(microphoneCalibrationUI)" + ("" if args.without_piece else "&&Boolean(state.runtime)")):break
+            for i in range(10,310):
+                try:
+                    if evaluate(ws,i,"typeof state!=='undefined'&&Boolean(microphoneCalibrationUI)" + ("" if args.without_piece else "&&Boolean(state.runtime)")):break
+                except RuntimeError:pass
                 time.sleep(.1)
-            else:raise RuntimeError('Practice not ready')
+            else:raise RuntimeError('Practice not ready: '+str(evaluate(ws,190,"({url:location.href,errors:window.echoErrors,loading:document.querySelector('#asset-status')?.textContent})")))
 
             def js(source):return evaluate(ws,200,source)
             def shots(name,selector='#calibration-dialog'):
@@ -84,8 +118,24 @@ def main():
               openDetectorSettings('basic');
             })()""")
             if args.member_id:js('state.performanceMe={member:{id:'+json.dumps(args.member_id)+'}}')
+            js("""(()=>{
+              sessionStorage.removeItem(AUDIO_OUTPUT_SESSION_KEY);restoreAudioOutputPreference();updateDetectorSettingsUi();
+              const connection=document.querySelector('.settings-connection');
+              if(state.audioOutputType!=='standard'||connection.open)throw Error('Default requires a technical choice');
+              document.querySelector('#settings-listening-speakers').click();
+              if(!echoCancellationUI.enabled())throw Error('Speakers did not enable the capture route');
+              document.querySelector('#settings-listening-headphones').click();
+              if(echoCancellationUI.enabled())throw Error('Headphones retained speaker cancellation');
+              connection.open=true;document.querySelector('#settings-audio-output-bluetooth').click();
+              if(state.plumeSettings.timeAdvanceMs!==320||!document.querySelector('#settings-dialog').open)throw Error('Bluetooth choice failed');
+              sessionStorage.setItem(AUDIO_OUTPUT_SESSION_KEY,JSON.stringify({type:'bluetooth',confirmedAt:Date.now()-3600000}));
+              restoreAudioOutputPreference();
+              if(state.audioOutputType!=='bluetooth')throw Error('Connection choice expired during rehearsal');
+              document.querySelector('#settings-audio-output-standard').click();connection.open=false;
+            })()""")
             if not args.headphones:
-                js("""(async()=>{document.querySelector('#echo-enabled').click();for(let i=0;i<100&&!state.playbackMixer.referenceOutput;i++)await new Promise(r=>setTimeout(r,20));})()""")
+                js("""(async()=>{document.querySelector('#settings-listening-speakers').click();for(let i=0;i<100&&!state.playbackMixer.referenceOutput;i++)await new Promise(r=>setTimeout(r,20));})()""")
+            time.sleep(.25)
             if args.diagnostic_only:
                 result=diagnostic_checks(ws,OUT,verified=False)
                 js("if(echoErrors.length)throw Error(echoErrors.join(';'))")
@@ -95,8 +145,22 @@ def main():
             js("document.querySelector('#settings-calibrate').click()")
             time.sleep(.2);shots('ready')
             if args.worker_loading_check:js('window.holdEchoWorkerReady=true')
+            if args.voice_worker_loading_check:js('window.holdVoiceWorkerReady=true')
+            if args.voice_analysis_timeout_check:js('window.holdVoiceAnalysis=true')
+            if args.training_jump_check:js('window.injectTrainingJump=true')
+            if args.probe_loading_check:js("window.ChoirCalibrationProbe={...ChoirCalibrationProbe,load:async()=>{throw Error('Preparazione audio non riuscita. Riprova.')}}")
             js("window.sampleCountBefore=state.pitchSamples.length;document.querySelector('#calibration-start').click()")
-            if args.worker_loading_check:
+            if args.probe_loading_check:
+                for _ in range(150):
+                    if not js('microphoneCalibrationUI.isBusy()'):break
+                    time.sleep(.1)
+                result=js("""(()=>{
+                  if(state.microphoneStream||state.playbackMixer.calibrationMuted||calibrationProbeStarts.length)throw Error('Probe failure leaked capture or sound');
+                  if(!/Preparazione audio non riuscita/.test(document.querySelector('#calibration-status').textContent))throw Error('Missing recoverable preparation error: '+document.querySelector('#calibration-status').textContent);
+                  return {unavailableProbe:true,noSound:true,microphoneReleased:true};
+                })()""")
+                shots('probe-failed');(OUT/'result.json').write_text(json.dumps(result,indent=2));print(json.dumps(result));return
+            if args.worker_loading_check or args.voice_worker_loading_check:
                 time.sleep(2);shots('loading')
                 js("if(!document.querySelector('#calibration-instruction').textContent.includes('Preparazione audio'))throw Error('Missing preparation state')")
                 for _ in range(150):
@@ -105,9 +169,9 @@ def main():
                 result=js("""(()=>{
                   const assert=(v,m)=>{if(!v)throw Error(m)};
                   const journal=echoCancellationUI.lifecycle();
-                  assert(journal.events.some(e=>e.reason==='analysis-worker-load-timeout'),'Missing loading failure');
+                  assert(window.holdVoiceWorkerReady||journal.events.some(e=>e.reason==='analysis-worker-load-timeout'),'Missing loading failure');
                   assert(!journal.events.some(e=>e.reason==='analysis-worker-ready'||e.reason==='analysis-start'||e.reason==='model-applied'),'Capture started without an available worker');
-                  assert(document.querySelector('#calibration-status').textContent.includes('Preparazione audio non riuscita'),'Wrong loading error');
+                  assert(/Preparazione audio (non riuscita|troppo lenta)/.test(document.querySelector('#calibration-status').textContent),'Wrong loading error');
                   assert(!state.microphoneStream&&!state.playbackMixer.calibrationMuted,'Load failure retained microphone or warmup');
                   assert(echoErrors.length===0,echoErrors.join(';'));
                   return {loadTimeout:true,noAcousticCapture:true,microphoneReleased:true};
@@ -124,9 +188,21 @@ def main():
                 time.sleep(.1)
             else:raise AssertionError('No voice phase')
             shots('voice')
-            for _ in range(300):
+            for _ in range(500 if args.voice_analysis_timeout_check else 300):
                 if not js("microphoneCalibrationUI.isBusy()"):break
                 time.sleep(.1)
+            if args.voice_analysis_timeout_check:
+                result=js("""(()=>{
+                  if(microphoneCalibrationUI.isBusy())throw Error('Analysis remains busy');
+                  if(!document.querySelector('#calibration-status').textContent.includes('Analisi troppo lenta'))throw Error('Missing analysis deadline');
+                  if(state.microphoneStream||state.playbackMixer.calibrationMuted)throw Error('Timeout retained capture');
+                  if(calibrationResults.length)throw Error('Unverified result applied');
+                  if(echoErrors.length)throw Error(echoErrors.join(';'));
+                  return {analysisTimeout:true,microphoneReleased:true,noResultApplied:true};
+                })()""")
+                shots('analysis-timeout')
+                (OUT/'result.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
+                print(json.dumps(result));return
             result=js("""(()=>{
               const assert=(v,m)=>{if(!v)throw Error(m)};
               assert(!document.querySelector('#calibration-done').hidden,'Not applied: '+document.querySelector('#calibration-status').textContent+' / '+JSON.stringify(calibrationResults)+' timing='+JSON.stringify(window.calibrationTiming));
@@ -138,24 +214,62 @@ def main():
               assert(window.calibrationTiming?.nonIncreasing===0,'Duplicate calibration window');
               return {echo:echoCancellationUI.diagnostics(),report:document.querySelector('#calibration-report').innerText};
             })()""")
+            if args.native_aec and not args.headphones:
+                result['probe']=js("""(()=>{
+                  const p=calibrationProbeStarts;
+                  if(p.length!==2||Math.abs(p[1].at-p[0].at-3)>.001||p.some(v=>!v.matchesNoise))throw Error('Broadband PCM/timing differs: '+JSON.stringify(p));
+                  if(!echoCancellationUI.lifecycle().events.some(e=>e.reason==='measurement-platform-start'&&e.probeId==='broadband-noise-v1'))throw Error('Missing broadband provenance');
+                  return {starts:p,twoPassages:true,gapSeconds:1};
+                })()""")
             shots('result')
+            if args.training_jump_check:
+                result['trainingJump']=js("""(()=>{
+                  const events=echoCancellationUI.lifecycle().events;
+                  if(!window.trainingJumpDone)throw Error('No training jump injected');
+                  if(events.filter(e=>e.reason==='measurement-unstable-delay').length!==1)throw Error('Expected exactly one retry');
+                  if(events.filter(e=>e.reason==='model-applied').length!==1)throw Error('Rejected model applied');
+                  if(Math.abs(echoCancellationUI.diagnostics().peakDelayMs-75)>.2)throw Error('Wrong final delay');
+                  return {jumpMs:40,retries:1,finalDelayMs:echoCancellationUI.diagnostics().peakDelayMs};
+                })()""")
             js("document.querySelector('#calibration-done').click()")
             if not args.headphones:
                 result['settingsLifecycle']=js("""(async()=>{
                   const assert=(v,m)=>{if(!v)throw Error(m)};
                   const before=echoCancellationUI.diagnostics();
-                  assert(before.ready&&before.appliedGain===1&&before.modelId,'Missing applied model identity');
+                  const native=before.strategy==='platform';
+                  assert(before.ready&&(native?before.appliedGain===0:before.appliedGain===1&&before.modelId),'Missing applied model identity');
                   for(let i=0;i<5;i++){
                     openDetectorSettings('basic');await new Promise(r=>setTimeout(r,30));
                     document.querySelector('#settings-dialog').close();
                     assert(echoCancellationUI.diagnostics().modelId===before.modelId&&echoCancellationUI.ready(),'Settings invalidated model');
                   }
                   const journal=echoCancellationUI.lifecycle();
-                  assert(journal.events.some(e=>e.reason==='model-applied'&&e.targetGain===1&&e.modelId===before.modelId),'No model application command: '+JSON.stringify(journal));
+                  assert(journal.events.some(e=>e.reason==='model-applied'&&(native?e.strategy==='platform':e.targetGain===1&&e.modelId===before.modelId)),'No model application command: '+JSON.stringify(journal));
                   assert(journal.events.filter(e=>e.reason==='settings-open').length>=5,'Missing settings events');
-                  return {settingsCycles:5,modelId:before.modelId,eventCount:journal.events.length};
+                  return {settingsCycles:5,modelId:before.modelId,strategy:before.strategy,eventCount:journal.events.length};
                 })()""")
             if args.without_piece:
+                if args.native_aec:
+                    result['withoutPiece']=js("""(async()=>{
+                      const assert=(v,m)=>{if(!v)throw Error(m)};
+                      assert(state.clock===null&&!state.runtime,'Expected Home');
+                      const stream=state.microphoneStream,context=state.microphoneContext;
+                      await loadPracticePiece('ave-verum',{partId:'P3'});
+                      assert(state.microphoneStream===stream&&state.microphoneContext===context,'Loading song reopened input');
+                      assert(microphoneCalibrationUI.activeSettings()&&echoCancellationUI.ready(),'Loading song lost platform/voice verification');
+                      openDetectorSettings('basic');await new Promise(r=>setTimeout(r,100));
+                      assert(document.querySelector('#settings-calibration-status').textContent==='Profilo voce attivo','Wrong saved status');
+                      document.querySelector('#settings-audio-output-standard').click();document.querySelector('#settings-dialog').close();
+                      window.calibrationResults=[];await togglePlayback();
+                      assert(state.clock.running&&echoCancellationUI.ready(),'Play required another calibration');
+                      assert(calibrationResults.length===0,'Voice guide was repeated');
+                      openDetectorSettings('basic');await new Promise(r=>setTimeout(r,100));
+                      assert(echoCancellationUI.ready()&&state.microphoneStream===stream,'Settings lost the route');
+                      document.querySelector('#settings-dialog').close();await stopMicrophone();
+                      assert(!echoCancellationUI.ready()&&!state.playbackMixer.calibrationMuted,'Stop retained verification/warmup');
+                      return {fullGuide:true,profileRetainedIntoSong:true,noRepeatedGuide:true,settingsRetainGraph:true,stop:true};
+                    })()""")
+                    (OUT/'result.json').write_text(json.dumps(result,indent=2),encoding='utf-8');print(json.dumps(result));return
                 js("""(async()=>{
                   const assert=(v,m)=>{if(!v)throw Error(m)};
                   assert(state.clock===null&&!state.runtime,'Test must start without a score/player');
@@ -193,28 +307,160 @@ def main():
                 (OUT/'result.json').write_text(json.dumps(result,indent=2,ensure_ascii=False),encoding='utf-8')
                 print(json.dumps(result,ensure_ascii=True))
                 return
+            if args.native_aec and args.live_voice_check and not args.without_piece:
+                result['voiceDuringPlayback']=js("""(async()=>{
+                  const assert=(v,m)=>{if(!v)throw Error(m)};
+                  const input=state.microphoneStream,context=state.microphoneContext;
+                  const settings=JSON.stringify(activeRecognitionSettings()),before=state.pitchSamples.length;
+                  // This is the post-AEC synthetic voice, not a simulation of
+                  // Samsung's internal canceller. Exercise the actual live
+                  // worker, admission gate and stored trace after entering Play.
+                  window.manualAudio=true;echoFixture.voiceGain.gain.value=.05;
+                  try {
+                    await togglePlayback();await new Promise(r=>setTimeout(r,1500));
+                    assert(state.clock.running&&!state.playbackMixer.calibrationMuted,'Play retained calibration warmup');
+                    assert(state.microphoneStream===input&&state.microphoneContext===context,'Play changed microphone route');
+                    assert(JSON.stringify(activeRecognitionSettings())===settings,'Play changed recognition thresholds');
+                    const voiced=state.pitchSamples.slice(before).filter(p=>Number.isFinite(p.trackedPitch));
+                    assert(voiced.length>=5,'Voice reached calibration but not the live trace: '+JSON.stringify({rms:state.microphoneRms,pitch:state.trackedPitch,settings:activeRecognitionSettings(),samples:state.pitchSamples.length-before}));
+                    assert(voiced.every(p=>Math.abs(p.trackedPitch-57)<.2),'Live F0 differs from the supplied 220 Hz voice');
+                    return {workerRecognizesVoice:true,voicedFrames:voiced.length,sameInput:true,sameSettings:true};
+                  } finally {
+                      echoFixture.voiceGain.gain.value=0;window.manualAudio=false;
+                  }
+                })()""")
+            if args.live_voice_check:
+                (OUT/'result.json').write_text(json.dumps(result,indent=2),encoding='utf-8');print(json.dumps(result));return
+            if args.graph_churn_check and not args.headphones:
+                result['graphContention']=js("""(async()=>{
+                  const ctx=state.playbackMixer.context,bus=state.playbackMixer.referenceOutput;
+                  const before=echoCancellationUI.diagnostics(),started=performance.now();let mutations=0;
+                  while(performance.now()-started<2500){
+                    for(let i=0;i<100;i++){const n=ctx.createGain();bus.connect(n);n.connect(ctx.destination);bus.disconnect(n);n.disconnect();mutations++;}
+                    await new Promise(r=>setTimeout(r,10));
+                  }
+                  await new Promise(r=>setTimeout(r,400));const after=echoCancellationUI.diagnostics();
+                  if(!after.ready||after.modelId!==before.modelId||after.targetGain!==before.targetGain)throw Error('Graph contention invalidated the verified model: '+JSON.stringify(after));
+                  return {mutations,before:before.clock,after:after.clock,modelRetained:true};
+                })()""")
             if args.extended and not args.headphones:
                 js("window.manualAudio=true")
-                js("(async()=>{const assert=(v,m)=>{if(!v)throw Error(m)};"+LIVE_CHECK+"})()")
+                try:
+                    js("(async()=>{const assert=(v,m)=>{if(!v)throw Error(m)};"+LIVE_CHECK+"})()")
+                except Exception as error:
+                    result['failedLiveCheck']={'error':str(error),'state':js("({echo:echoCancellationUI.diagnostics(),lifecycle:echoCancellationUI.lifecycle(),microphoneRate:state.microphoneContext.sampleRate,mixerRate:state.playbackMixer.context.sampleRate,pcm:Array.from(state.microphoneBuffer)})")}
+                    (OUT/'failed-live-check.json').write_text(json.dumps(result,indent=2),encoding='utf-8')
+                    raise
                 result['volume']=js('window.echoVolumeResult')
                 js("echoFixture.voiceGain.gain.value=.03")
             if args.diagnostics:
                 result['diagnostic']=diagnostic_checks(ws,OUT)
             js("window.manualAudio=false")
-            # Opening a fresh stream requires a fresh acoustic check, while the
-            # compatible voice profile needs only the short quiet verification.
-            js("(async()=>{await stopMicrophone();if(echoCancellationUI.ready())throw Error('Stale acoustic profile');await microphoneCalibrationUI.open()})()")
-            js("window.recheckStart=performance.now();document.querySelector('#calibration-start').click()")
-            time.sleep(1)
-            for _ in range(280):
-                if not js("microphoneCalibrationUI.isBusy()"):break
-                time.sleep(.1)
-            js("""(()=>{if(document.querySelector('#calibration-done').hidden)throw Error('Reuse failed: '+document.querySelector('#calibration-status').textContent);
-              if(performance.now()-recheckStart>25000)throw Error('Repeated full voice routine');
-              document.querySelector('#calibration-done').click();})()""")
+            if not args.headphones and not args.diagnostics:
+                result['contextInterruption']=js("""(async()=>{
+                  const context=state.playbackMixer.context;
+                  if(!echoCancellationUI.ready())throw Error('No verified model before interruption');
+                  await context.suspend();await new Promise(r=>setTimeout(r,50));
+                  // AudioParam.value can retain the last rendered value while
+                  // suspended. Verify invalidation and the scheduled target;
+                  // verify the rendered value only after resuming the context.
+                  if(echoCancellationUI.ready()||echoCancellationUI.diagnostics().targetGain!==0)throw Error('Suspension retained the room model');
+                  await context.resume();await new Promise(r=>setTimeout(r,50));
+                  if(echoCancellationUI.ready()||echoCancellationUI.diagnostics().appliedGain!==0)throw Error('Resume restored an invalid model');
+                  const events=echoCancellationUI.lifecycle().events;
+                  if(!events.some(e=>e.reason==='invalidate:audio-context-suspended'))throw Error('Missing interruption checkpoint');
+                  return {suspensionInvalidates:true,resumeNeedsVerification:true};
+                })()""")
+            if args.native_aec or args.headphones:
+                result['returningVisit']=js("""(async()=>{
+                  const assert=(v,m)=>{if(!v)throw Error(m)};
+                  await stopMicrophone();assert(!microphoneCalibrationUI.activeSettings(),'Stopped input retained live profile');
+                  for(const k of Object.keys(localStorage))if(k.startsWith('choir-microphone-calibration:v2:')){
+                    const p=JSON.parse(localStorage.getItem(k));if(p?.createdAt){p.createdAt-=365*86400000;localStorage.setItem(k,JSON.stringify(p));}
+                  }
+                  const analyses=calibrationResults.length;
+                  await togglePlayback();
+                  assert(state.clock.running&&microphoneCalibrationUI.activeSettings(),'Saved profile did not start Play');
+                  assert(!document.querySelector('#calibration-dialog').open&&!microphoneCalibrationUI.isBusy(),'Return opened the guide');
+                  assert(calibrationResults.length===analyses,'Return repeated voice analysis');
+                  if(echoCancellationUI.enabled())assert(echoCancellationUI.operational()&&!echoCancellationUI.ready(),'Restored route pretended to have a fresh acoustic measure');
+                  const stream=state.microphoneStream,recognition=JSON.stringify(microphoneCalibrationUI.activeSettings());
+                  for(const n of [25,80,50]){
+                    els.volume.value=n;els.volume.dispatchEvent(new Event('input'));
+                    els.metronomeVolume.value=n;els.metronomeVolume.dispatchEvent(new Event('input'));
+                  }
+                  assert(state.clock.running&&state.microphoneStream===stream&&!document.querySelector('#calibration-dialog').open,'Volume change interrupted the route');
+                  assert(JSON.stringify(microphoneCalibrationUI.activeSettings())===recognition,'Volume change changed the voice thresholds');
+                  return {yearOldProfile:true,noNewGuide:true,noFreshAcousticClaim:true,volumeChangesKeepRoute:true};
+                })()""")
+                shots('returning-play','#practice-transport')
+                js('(async()=>{await togglePlayback();await stopMicrophone()})()')
+                previous_origin=js('performance.timeOrigin')
+                command(ws,203,'Page.reload')
+                for _ in range(300):
+                    try:
+                        if js(f"performance.timeOrigin!=={previous_origin}&&typeof togglePlayback==='function'&&typeof state!=='undefined'&&Boolean(state.runtime)&&Boolean(microphoneCalibrationUI)"):break
+                    except RuntimeError:pass
+                    time.sleep(.1)
+                else:raise AssertionError('Reload did not initialize practice')
+                if args.pitch_worker_timeout_check:
+                    js("""(()=>{const Native=window.Worker;window.Worker=class{constructor(...args){if(String(args[0]).includes('pitch_detector_worker'))return {postMessage(){},terminate(){}};return new Native(...args)}}})()""")
+                result['reload']=js("""(async()=>{
+                  await togglePlayback();
+                  if(!state.clock.running||!microphoneCalibrationUI.activeSettings()||document.querySelector('#calibration-dialog').open)throw Error('Reload asked for another guide');
+                  if(calibrationResults.length)throw Error('Reload ran vocal analysis');
+                  if(echoCancellationUI.enabled()&&(!echoCancellationUI.operational()||echoCancellationUI.ready()))throw Error('Reload lost native route/provenance');
+                  return {savedAcrossReload:true,playWithoutGuide:true};
+                })()""")
+                if args.native_aec:
+                    result['restoredLiveVoice']=js("""(async()=>{
+                      window.manualAudio=true;echoFixture.voiceGain.gain.value=.05;
+                      try {
+                        const start=state.pitchSamples.length;
+                        await new Promise(r=>setTimeout(r,4500));
+                        const voiced=state.pitchSamples.slice(start).filter(p=>Number.isFinite(p.trackedPitch));
+                        if(!state.pitchAnalysisTimer||!Number.isFinite(state.trackedPitch)||voiced.length<5)throw Error('Restored profile left live analysis stopped: '+JSON.stringify({timer:!!state.pitchAnalysisTimer,voiced:voiced.length,mic:state.microphoneStatus,pitch:state.trackedPitch}));
+                        if(voiced.some(p=>Math.abs(p.trackedPitch-57)>.2))throw Error('Restored live voice differs from supplied 220 Hz');
+                        return {analysisRunning:true,voicedFrames:voiced.length,profileReused:true};
+                      } finally {echoFixture.voiceGain.gain.value=0;window.manualAudio=false;}
+                    })()""")
+                    if args.pitch_worker_timeout_check:
+                        result['pitchWorkerTimeout']=js("""(()=>{if(!state.pitchWorkerDisabled||state.pitchWorkerInFlight||!state.pitchAnalysisTimer)throw Error('Pitch Worker fallback did not recover');return {fallback:true,analysisRunning:true,workerReleased:!state.pitchWorker}})()""")
+                js("(async()=>{await togglePlayback();openDetectorSettings('basic')})()")
+                time.sleep(.15);shots('remembered-base','#settings-dialog')
+                js("document.querySelector('#settings-dialog').close();void togglePlayback()")
+                time.sleep(.5)
+                if not args.headphones:
+                    result['incompatibleProfiles']=js("""(async()=>{
+                      const assert=(v,m)=>{if(!v)throw Error(m)},wait=ms=>new Promise(r=>setTimeout(r,ms));
+                      await togglePlayback();const gum=navigator.mediaDevices.getUserMedia;
+                      navigator.mediaDevices.getUserMedia=async c=>{const stream=await gum(c),t=stream.getAudioTracks()[0],settings=t.getSettings.bind(t);
+                        t.getSettings=()=>({...settings(),deviceId:'different-test-microphone'});return stream;};
+                      await togglePlayback();
+                      assert(!state.clock.running&&!microphoneCalibrationUI.activeSettings()&&document.querySelector('#calibration-dialog').open,'Different microphone reused old profile');
+                      navigator.mediaDevices.getUserMedia=gum;document.querySelector('#calibration-close').click();await wait(100);
+                      microphoneCalibrationUI.inputChanged();await togglePlayback();
+                      assert(state.clock.running&&microphoneCalibrationUI.activeSettings(),'Original microphone did not restore');
+                      await togglePlayback();const member=state.performanceMe.member.id;state.performanceMe.member.id='different-test-account';
+                      await togglePlayback();
+                      assert(!state.clock.running&&!microphoneCalibrationUI.activeSettings(),'Different account reused old profile');
+                      document.querySelector('#calibration-close').click();await wait(100);state.performanceMe.member.id=member;
+                      microphoneCalibrationUI.inputChanged();await togglePlayback();
+                      assert(state.clock.running&&microphoneCalibrationUI.activeSettings(),'Original account did not restore');
+                      return {differentMicrophoneRejected:true,differentAccountRejected:true,originalProfileRetained:true};
+                    })()""")
+            else:
+                # The legacy custom filter retains its explicit acoustic check.
+                js("(async()=>{await stopMicrophone();await microphoneCalibrationUI.open()})()")
+                js("window.recheckStart=performance.now();document.querySelector('#calibration-start').click()")
+                time.sleep(1)
+                for _ in range(280):
+                    if not js('microphoneCalibrationUI.isBusy()'):break
+                    time.sleep(.1)
+                js("if(document.querySelector('#calibration-done').hidden)throw Error('Reuse failed');document.querySelector('#calibration-done').click()")
             # A native user gesture releases the warm media into rehearsal.
-            js("document.querySelector('#settings-audio-output-standard').click()")
-            js("window.playStream=state.microphoneStream;window.playContext=state.microphoneContext;void togglePlayback()")
+            js("sessionStorage.removeItem(AUDIO_OUTPUT_SESSION_KEY)")
+            js("window.playStream=state.microphoneStream;window.playContext=state.microphoneContext;if(!state.clock.running)void togglePlayback()")
             time.sleep(.6)
             js("""(()=>{if(!state.clock.running||state.playbackMixer.calibrationMuted)throw Error('Play did not release warmup');
               if(state.microphoneStream!==playStream||state.microphoneContext!==playContext)throw Error('Play changed audio chain');})()""")

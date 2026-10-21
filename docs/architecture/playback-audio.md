@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-09
+**Last reviewed:** 2026-10-21
 
 ## Contract
 
@@ -10,10 +10,25 @@ During rehearsal, `HTMLAudioElement.currentTime` is the playback authority.
 `MediaPlaybackClock` converts that media position through the score tempo map;
 the resulting snapshot drives notation, target selection, metronome and
 transport. The piano roll and plotted pitch use a separate, user-adjustable
-visual delay (150 ms by default); detector timestamps and scoring keep the
+visual delay (270 ms by default); detector timestamps and scoring keep the
 undelayed media time. The plume advance is applied relative to that delayed
 visual timeline. `requestAnimationFrame` redraws state but is not a musical
-clock.
+clock. `VisualPlaybackTime` interpolates the piano-roll presentation using
+monotonic elapsed time between media observations, with bounded phase
+correction. It never replaces the canonical snapshot used by samples or scoring.
+Unreported stalls stop prediction after 120 ms; waiting/seeking, pause, rate
+changes and long frame gaps reanchor to media time. Media events explicitly
+reset the presentation epoch even for short seeks and loop restarts.
+
+The connection preference applies a fixed vocal-trace timestamp correction:
+270 ms for cable/device, 320 ms for Bluetooth. It does not change the piano-roll
+delay. These are presets, not measured input/output latency. The visual timeline
+does not consume `AudioContext.outputLatency` or `getOutputTimestamp()`; latency
+values in echo diagnostics do not compensate playback or detector timestamps.
+The [Bluetooth timing audit](../engineering/pitch-tracking/bluetooth-sync-audit-2026-10-21.md)
+records the Samsung measurements; the
+[correction report](../engineering/pitch-tracking/bluetooth-playback-fix-2026-10-21.md)
+records the implementation and physical candidate comparison.
 
 ## Bundle model
 
@@ -51,6 +66,14 @@ Playback starts microphone acquisition through a user gesture. Headphones are
 the supported condition for reliable scoring because the detector performs no
 source separation. Browser echo cancellation may improve speaker use but is
 not an accuracy guarantee.
+
+On Android in headphone mode, when device enumeration exposes Bluetooth and
+the phone's named built-in input, acquisition explicitly selects that input
+with AEC/NS/AGC off. This preserves the Bluetooth music output instead of opening
+the headset microphone's SCO route. If permission initially hides the labels,
+the first capture is stopped before reacquiring the phone. Cancellation releases
+that capture. Other platforms and the speaker/AEC path retain their requested
+constraints. Profiles are matched against the actually acquired device/chain.
 
 ## Delivery requirements
 

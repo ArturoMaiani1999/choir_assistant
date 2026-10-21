@@ -1,5 +1,49 @@
 # Calibrazione audio unica
 
+Dal 21 ottobre il percorso altoparlanti predefinito usa AEC nativo normale,
+NS/AGC spenti e controllo del residuo di 8 s seguito dalla guida vocale di
+22 s. Non applica H né una seconda sottrazione. La descrizione sotto della
+stima H riguarda la catena custom conservata per confronti tecnici. Il nuovo
+contratto è descritto nell'[integrazione live](native-aec-live-2026-10-21.md).
+
+Il controllo nativo iniziale usa nuovamente due fruscii indipendenti da 2 s,
+con i campioni del percorso precedente all'esperimento musicale. Gli
+[archi di Bach](musical-calibration-probes.md) sono sospesi dopo una
+segnalazione di mancato rilevamento della voce sul dispositivo. L'equivalenza
+di RMS non certifica l'adattamento interno dell'AEC. Il rumore della catena
+custom descritta sotto rimane invariato. Non si invalidano tutti i profili:
+per quello problematico resta disponibile **Ricalibra**. La diagnosi Samsung
+ha poi identificato il ciclo di analisi non riavviato durante il riuso del
+profilo: la correzione riparte da quello salvato, senza nuova calibrazione.
+
+**Ripristino live, 21 ottobre:** `adapter.startMicrophone()` ferma analisi e
+Worker in preparazione della guida. Nel percorso nativo con profilo salvato,
+la guida e il relativo evento di chiusura vengono saltati: `verifyPlayback()`
+deve chiamare esplicitamente `adapter.resumeAnalysis()` dopo `changed()`.
+La regressione browser verifica un segnale vocale nel Worker e nella traccia
+anche dopo ricarica, non solo la presenza del profilo o del grafo audio.
+
+**Attesa Worker:** sul Samsung una richiesta al Worker può restare senza
+risposta e senza `onerror`, lasciando il buffer trasferito e `inFlight` attivo.
+Ogni richiesta ha ora un limite di 1500 ms: il Worker viene terminato, si
+rialloca il buffer e il timer prosegue nel detector già caricato nella pagina,
+con identici settings e risoluzione armonica. Stop, risposta ed errore
+cancellano il timeout; messaggi ed errori di un Worker precedente sono ignorati.
+Questo è un recupero del ciclo di calcolo, non una modifica dell'AEC, delle
+soglie o una soluzione alla causa del blocco di rete. I test trasferiscono
+realmente il buffer e verificano il recupero di un segnale a 220 Hz.
+
+Aggiornamento UX del 21 ottobre: la guida è iniziale o volontaria, con volume
+del dispositivo consigliato al 50%. Il profilo vocale compatibile non scade
+per calendario e viene ripristinato dopo l'acquisizione del medesimo ingresso.
+L'AEC nativo si riattiva senza fruscii o verifica vocale obbligatoria. Lo stato
+`operational` verifica grafo live, account e settings effettivi; resta distinto
+da `ready`/`calibrationVerified`, che dichiarano la misura acustica iniziale.
+Ricaricare la pagina, cambiare volume di base/metronomo o far scadere la misura
+iniziale non riapre la guida. Nessun filtro o soglia nuova viene adattato al
+volume fisico, che la webapp non legge. Il promemoria 50% è un'indicazione,
+non una misura. Vedi il [contratto di prodotto](../../product/practice-experience.md).
+
 Implementazione del 19 ottobre 2026. Un solo comando in Impostazioni → Base
 coordina percorso acustico e riconoscimento voce/pausa. Non modifica il pitch
 per avvicinarlo alle note dello spartito e non promette accuratezza F0 dalla
@@ -48,6 +92,13 @@ mostra uno stato esplicito, senza un countdown fittizio. I countdown sono per
 fase e la storia del livello audio rimane visibile durante l'acquisizione.
 
 ## Riuso e invalidazione
+
+**Clock e interruzioni, 21 ottobre:** misura, monitor e diagnostica contano i
+campioni renderizzati. I timestamp Worklet temporaneamente arretrati restano
+telemetria; i salti in avanti non spiegati vengono rifiutati. Suspend/resume
+invalida il modello acustico e non unisce finestre ai due lati della pausa.
+Il flusso e i pulsanti restano gli stessi. Dettagli, test e limiti nello
+[studio del clock](audio-sample-clock-2026-10-21.md).
 
 **Robustezza acquisizione, 20 ottobre:** due callback del timer possono leggere
 la stessa finestra dell'Analyser nello stesso quantum audio. La guida conserva
@@ -110,6 +161,28 @@ gerarchia di Base restano identiche. Nessun nuovo gate del pitch durante il
 riallineamento. Restano da confermare prestazioni e costo sul S25+ dal vivo.
 
 ## Verifica e limiti
+
+**Candidato stabilità, 20 ottobre:** anche il Worker vocale viene preparato
+prima dei suoni: handshake entro 12 s, analisi entro 15 s senza estensione
+del termine ai messaggi di progresso. Annullamento ed errori terminano il
+Worker e rilasciano l'acquisizione; il profilo salvato non viene cancellato
+né dichiarato verificato per questo motivo.
+
+Durante il training acustico si confrontano nove finestre di 150 ms tra
+3,1 e 5,65 s, cercando ritardi 0–300 ms. Due coppie consecutive di osservazioni
+coerenti (entro 0,5 ms), con correlazione assoluta almeno 0,2, segnalano
+instabilità quando i plateau differiscono di oltre 2 ms. La verifica
+indipendente da 7 s non contribuisce a questa decisione.
+Un cambio rilevato provoca una sola ripetizione automatica di 10 s sulla
+stessa catena, indicata come «Ripetizione · non cantare». Le soglie di
+accettazione del filtro restano 15/12 dB. In caso di ulteriore instabilità
+il controllo si ferma senza applicare il modello. Durata eccezionale:
+circa 10 s in più, oltre al tempo di elaborazione.
+
+Questo controllo riconosce il salto di 40 ms nei dati S25+ del 20 ottobre,
+ma non lo corregge durante il canto: il follower live conserva per ora
+il limite di ±20 ms. La ripetizione automatica deve ancora dimostrare la
+propria utilità con nuove acquisizioni sul dispositivo.
 
 `browser_audio_calibration_smoke.py` esercita Worker e Web Audio reali con
 percorso acustico sintetico, voce libera, applicazione automatica, continuità

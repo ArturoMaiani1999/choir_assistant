@@ -1,0 +1,39 @@
+{
+  "id": "bach-bwv846-strings-v1",
+  "composer": "Johann Sebastian Bach",
+  "work": "Prelude in C major, BWV 846",
+  "bars": [
+    1,
+    2
+  ],
+  "tempoQuarterBpm": 120,
+  "compositionRights": "Public Domain",
+  "engravingSource": "https://www.mutopiaproject.org/ftp/BachJS/BWV846/wtk1-prelude1/wtk1-prelude1.ly",
+  "arrangement": "Xynon: first two bars, strings with light octave reinforcement; split into two probes.",
+  "renderer": "MuseScore 4 / MuseScore Basic",
+  "soundFont": "MS Basic",
+  "soundFontLicense": "MS-Basic-License.txt",
+  "targetRms": 0.046188021535170064,
+  "probes": [
+    {
+      "file": "bach-bwv846-1.wav",
+      "bar": 1,
+      "seconds": 2,
+      "sampleRate": 48000,
+      "rms": 0.046188021535170064,
+      "peak": 0.1889596293466587,
+      "renderSeconds": 5.0,
+      "sha256": "aa25f784b517315d247939a2205acc6de173151f619ac5ad233bf5c9fc2495bf"
+    },
+    {
+      "file": "bach-bwv846-2.wav",
+      "bar": 2,
+      "seconds": 2,
+      "sampleRate": 48000,
+      "rms": 0.046188021535170064,
+      "peak": 0.21273687001961958,
+      "renderSeconds": 5.0,
+      "sha256": "5d979e3c007433683ed8a3dcbcbf0c14f6fd4f3eac1f23f17b24d53c1190a5ed"
+    }
+  ]
+}

@@ -171,5 +171,45 @@
     return { usable, reason: usable ? null : 'validation', impulse: usable ? impulse : null,
       trainDb, validationDb, noiseRms: Math.sqrt(quietEnergy / (quietTo - quietFrom)), peakDelayMs: peak / sampleRate * 1000, sampleRate };
   }
-  return Object.freeze({ STAGES, DURATION, TTL, MAX_TAIL_SEC, fit, convolve, noise, reduction, gainObservation, GainFollower, fft });
+  // Compact calibration only. Inspect training excitation, never the holdout.
+  // Signed echo paths are valid: compare absolute normalized correlation.
+  function trainingStability(reference, microphone, sampleRate) {
+    if (![32000, 44100, 48000, 96000].includes(sampleRate)
+      || reference.length !== sampleRate * 10 || microphone.length !== reference.length)
+      return { unstable: false, observations: [] };
+    const length = Math.round(.15 * sampleRate), maxLag = Math.round(.3 * sampleRate);
+    const n = sizeFor(length * 2 + maxLag), observations = [];
+    for (let step = 0; step < 9; step++) {
+      const start = Math.round((3.1 + step * .3) * sampleRate);
+      const x = reference.subarray(start, start + length);
+      const y = microphone.subarray(start, start + length + maxLag);
+      let xx = 0;
+      for (const v of x) xx += v * v;
+      if (xx < 1e-10) continue;
+      const a = spectrum(x, n), b = spectrum(y, n), energy = new Float64Array(y.length + 1);
+      for (let i = 0; i < y.length; i++) energy[i + 1] = energy[i] + y[i] * y[i];
+      for (let i = 0; i < n; i++) {
+        const real = a.re[i] * b.re[i] + a.im[i] * b.im[i];
+        b.im[i] = a.re[i] * b.im[i] - a.im[i] * b.re[i]; b.re[i] = real;
+      }
+      fft(b.re, b.im, true);
+      let best = 0, lag = 0;
+      for (let i = 0; i <= maxLag; i++) {
+        const correlation = Math.abs(b.re[i]) / Math.sqrt(Math.max(1e-30, xx * (energy[i + length] - energy[i])));
+        if (correlation > best) { best = correlation; lag = i; }
+      }
+      if (best >= .2 && lag > 0 && lag < maxLag)
+        observations.push({ timeSec: start / sampleRate, delayMs: lag / sampleRate * 1000, correlation: best });
+    }
+    // Two consecutive observations in each regime prevent one spurious peak
+    // from triggering a new audible measurement. A failed fit still fails.
+    const plateaus = [];
+    for (let i = 1; i < observations.length; i++) {
+      const a = observations[i - 1], b = observations[i];
+      if (b.timeSec - a.timeSec < .31 && Math.abs(a.delayMs - b.delayMs) < .5)
+        plateaus.push((a.delayMs + b.delayMs) / 2);
+    }
+    return { unstable: plateaus.length > 1 && Math.max(...plateaus) - Math.min(...plateaus) > 2, observations };
+  }
+  return Object.freeze({ STAGES, DURATION, TTL, MAX_TAIL_SEC, fit, convolve, noise, reduction, gainObservation, GainFollower, fft, trainingStability });
 });

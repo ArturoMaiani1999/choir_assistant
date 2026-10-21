@@ -2,7 +2,7 @@
 
 **Status:** implementato e verificato; contratto corrente  
 **Owner:** project maintainer  
-**Last reviewed:** 2026-10-20
+**Last reviewed:** 2026-10-21
 
 ## Scopo del documento
 
@@ -21,9 +21,54 @@ estensioni future restano separate dai requisiti dell'MVP corrente.
 
 ## Stato di implementazione
 
-L'ingresso **Allena la voce** è una delle tre modalità del menù principale,
+Il laboratorio vocale non mostra la firma Lissajous nell'angolo inferiore
+destro, in nessuna fase e su nessun viewport. Il precedente sfondo «a respiro»
+è rimosso; il fondo resta inchiostro uniforme.
+Il contratto condiviso è nel [sistema UX/UI](ui-design-system.md).
+
+Le tre illustrazioni dei percorsi sono Lissajous bidimensionali monocromatiche:
+giallo `1:3`, azzurro `2:3`, viola `3:4`, tutte con fase `π/2` e orientamento
+verticale come nella tabella di riferimento. La curva rimane ferma: il tracciato
+completo resta tenue al 16% e un pallino dello stesso colore lo percorre in
+12 secondi. Il pallino lascia una scia di quattro secondi, con opacità e spessore
+crescenti verso la testa, dando l'impressione di disegnare la curva. La scia
+segue il tempo del percorso anche agli incroci e al passaggio fra due giri.
+SVG e colori riusano le dimensioni
+e gli accenti dei percorsi; l'azzurro riprende la palette della firma 3D.
+La fase relativa segue la convenzione della tabella: per il rapporto `a:b`,
+`x = 48 cos(b t + π/(2a))`, `y = −48 cos(a t)` in coordinate SVG. In questo
+modo anche `2:3` mantiene i lobi e gli incroci del riferimento, senza ridursi
+a un arco ripercorso nei due sensi.
+Queste illustrazioni sono un'eccezione intenzionale alle sole animazioni
+funzionali e sono indipendenti dalla firma della Home: restano presenti
+anche su mobile. Non aggiungono controlli né contenuti accessibili ridondanti.
+Con movimento ridotto curva e pallino restano statici, il tracciato completo
+torna pienamente visibile e la scia è nascosta; fuori vista, durante
+preparazione/canto/risultato, con dialoghi aperti e in background il RAF si
+ferma. Il ritorno dalla cache del browser riprende l'animazione.
+Verifica: `python scripts/browser_voice_lab_smoke.py`, compresi movimento del
+pallino e scia sul tracciato fermo, sospensione e movimento ridotto, con screenshot
+`artifacts/voice-lab-home.png` e `artifacts/voice-lab-home-mobile.png`.
+
+L'ingresso **Esercizi vocali** è una delle tre modalità del menù principale,
 visibile senza scroll a 390×844. Non richiede la scelta preventiva di un brano
 o della modalità di ascolto. Il menù esercizi torna al **Menù** dell'app.
+Il ritorno usa il controllo condiviso con Home, catalogo e repertorio,
+con bordo neutro, tipografia utility e target touch di almeno 44 px.
+La testata usa gli stessi margini di `Indietro` in **Scegli brano**: 20 px
+in alto su desktop, 16 px sotto 900 px, più safe area; rientro laterale da
+24 a 64 px e controlli alti 44 px. Su finestre alte al massimo 600 px il
+margine superiore scende a 12 px. La riga del laboratorio include anche il
+divisore inferiore di 1 px e aggiorna lo spazio delle fasi successive.
+Testata, navigazione esercizi e contenuto occupano esplicitamente le righe
+1, 2 e 3 della griglia, nella stessa colonna. Un contenitore aggiunto dal client
+di sessione non deve occupare la prima riga e creare una fascia vuota sopra Menù.
+Questa garanzia vale anche aprendo direttamente gli esercizi su desktop e mobile.
+Lo smoke `python scripts/browser_ambient_smoke.py` verifica anche l'inserimento
+di un contenitore vuoto prima della testata: la barra resta a quota zero e la
+preparazione mantiene navigazione e contenuto nelle rispettive righe.
+Una tolleranza di 4 px nel margine inferiore della scelta evita la scrollbar
+di 1–2 px dovuta alle misure frazionarie del testo nei viewport di verifica.
 Indietro/Avanti del browser attraversano scelta e preparazione; uscire da un
 take ferma audio e microfono. Avanti ripristina la preparazione e non avvia
 una registrazione. BPM e variante scelti restano associati alla preparazione.
@@ -120,6 +165,26 @@ Al termine è disponibile `Rivedi`. Chiusura esplicita, Escape e backdrop ferman
 immediatamente l'audio e restituiscono il focus a `Istruzioni`. Anche uscita
 dalla pagina e passaggio in background fermano la dimostrazione; un download
 tardivo non può riattivarla. Gli errori offrono `Riprova`.
+
+### Continuità della sessione del 21 ottobre 2026
+
+Il laboratorio carica il client di sessione anche quando viene aperto
+direttamente. Frasi vocali, campioni, pad e spartito della dimostrazione usano
+il token rinnovato tramite `ChoirAuthFetch`: il cookie della navigazione può
+scadere mentre la pagina resta aperta. La calibrazione audio non è un requisito
+di avvio degli esercizi.
+
+Un errore di avvio resta visibile accanto a `Comincia`, anche su mobile;
+gli errori di accesso si distinguono dagli errori di connessione. La dimostrazione
+non apre il microfono e un tentativo fallito rilascia quello dell'esercizio.
+Il nuovo tentativo ricarica le risorse fallite senza richiedere un cambio percorso.
+La disposizione ordinaria resta invariata; solo lo stato di errore aggiunge una
+breve riga sotto il riepilogo, preservando il pulsante nel viewport verificato.
+
+Verifica della sessione con asset reali e identità locale sintetica:
+`python scripts/browser_voice_lab_auth_smoke.py --release <artefatto>`.
+La fixture rifiuta i download senza token e riproduce i due blocchi nella
+versione precedente. Non costituisce una verifica autenticata del Samsung.
 
 Eccezione intenzionale di accessibilità: a ingrandimenti del testo o altezze
 inferiori ai viewport di verifica, contenuto e controlli restano raggiungibili

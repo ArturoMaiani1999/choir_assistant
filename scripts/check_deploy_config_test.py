@@ -1,6 +1,10 @@
 import importlib.util
+import json
+import sys
+import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 SCRIPT = Path(__file__).with_name("check_deploy_config.py")
 SPEC = importlib.util.spec_from_file_location("check_deploy_config", SCRIPT)
@@ -33,6 +37,15 @@ def valid_config() -> dict:
 
 
 class DeployConfigTests(unittest.TestCase):
+    def test_cli_validates_the_explicit_config_instead_of_the_default(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            config = Path(directory) / "xynon.jsonc"
+            invalid = valid_config()
+            invalid["workers_dev"] = True
+            config.write_text(json.dumps(invalid), encoding="utf-8")
+            with mock.patch.object(sys, "argv", ["check_deploy_config.py", "--config", str(config)]):
+                self.assertEqual(MODULE.main(), 2)
+
     def test_accepts_complete_fail_closed_configuration(self) -> None:
         self.assertEqual(MODULE.validate(valid_config()), [])
 

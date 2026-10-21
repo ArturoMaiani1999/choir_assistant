@@ -75,11 +75,18 @@ maintainer workstation -> private list digest sync and immutable release build
    email addresses. The key is a Worker secret and is absent from Git.
 8. **Immediate application revocation.** D1 is consulted for every protected
    request. Disabling a row blocks subsequent asset requests regardless of the
-   remaining Clerk session lifetime.
+   remaining Clerk session lifetime. Previously cached application JS/CSS may
+   remain in the browser; it contains no member data or musical materials.
+   APIs, HTML and musical assets remain uncached and require authorization.
 9. **No external return URLs.** Client redirects accept only same-origin paths
    beginning with one `/`; authentication paths cannot be return targets.
-10. **Cache containment.** Protected responses set `private, no-store` and vary
-   on authentication headers. Login and public configuration are `no-store`.
+10. **Cache containment.** APIs, HTML and musical materials set `private,
+    no-store` and vary on authentication headers. Login HTML and public
+    configuration are `no-store`. Root-level JS/CSS with a content hash may be
+    cached privately for a year; login/bootstrap code is publicly cacheable.
+    Unversioned authentication aliases require revalidation. Errors and access
+    denials never acquire the immutable code policy. See the
+    [cache and startup change](releases/2026-10-21-startup-cache-recovery.md).
 11. **Browser hardening.** Protected pages retain the restrictive static CSP.
     Login receives a separate CSP containing only its own origin and the Clerk
     origins required for identity and bot challenges. Frame embedding is

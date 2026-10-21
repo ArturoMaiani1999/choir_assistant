@@ -6,6 +6,38 @@
     return Number.isFinite(numeric) ? Math.max(0, Math.min(1, numeric)) : 0;
   }
 
+  // Android's default Bluetooth input opens SCO and can pull music off A2DP.
+  // Select the phone only when Chrome exposes both named routes; never guess
+  // from device order or change the speaker/AEC path.
+  function phoneMicrophone(devices) {
+    const inputs = devices.filter(device => device.kind === 'audioinput');
+    if (!inputs.some(device => /bluetooth/i.test(device.label))) return null;
+    return inputs.find(device => /^(speakerphone|microfono (del )?(telefono|dispositivo)|built-in mic(?:rophone)?)$/i.test(device.label)) ?? null;
+  }
+
+  async function acquireMicrophone(mediaDevices, constraints, { preferPhone = false, isCurrent = () => true } = {}) {
+    const acquire = device => mediaDevices.getUserMedia(device ? { ...constraints, audio: {
+      ...constraints.audio, deviceId: { exact: device.deviceId },
+      echoCancellation: { exact: false }, noiseSuppression: { exact: false }, autoGainControl: { exact: false },
+    } } : constraints);
+    if (!preferPhone) return acquire(null);
+    const enumerate = async () => {
+      try { return phoneMicrophone(await mediaDevices.enumerateDevices()); } catch (_) { return null; }
+    };
+    let device = await enumerate();
+    if (!isCurrent()) return null;
+    if (device) return acquire(device);
+    // Labels can remain hidden until permission is granted. Retire that first
+    // input before selecting the phone; never keep two captures alive.
+    const initial = await acquire(null);
+    if (!isCurrent()) { initial.getTracks().forEach(track => track.stop()); return null; }
+    device = await enumerate();
+    if (!isCurrent()) { initial.getTracks().forEach(track => track.stop()); return null; }
+    if (!device) return initial;
+    initial.getTracks().forEach(track => track.stop());
+    return acquire(device);
+  }
+
   function buildMediaPlaybackPlan({
     mixFile = null,
     accompanimentFile = null,
@@ -228,7 +260,7 @@
     }
   }
 
-  const api = { MediaElementMixer, clampLevel, buildMediaPlaybackPlan };
+  const api = { MediaElementMixer, clampLevel, buildMediaPlaybackPlan, acquireMicrophone, phoneMicrophone };
   global.ChoirMedia = Object.freeze(api);
   if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

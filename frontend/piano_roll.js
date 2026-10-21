@@ -240,25 +240,14 @@
     const enabled = () => options.enabled?.() !== false;
     const geometry = () => options.geometry();
     const activate = () => { options.activate?.(); return geometry(); };
-    const details = document.createElement('details'); details.className = 'roll-navigation';
-    details.innerHTML = `<summary aria-label="Regola vista piano roll">Vista</summary><div class="roll-navigation-panel">
-      <div><span>Tempo</span><button type="button" data-axis="time" data-factor="0.6666667" aria-label="Riduci zoom tempo">−</button><output data-value="time">100%</output><button type="button" data-axis="time" data-factor="1.5" aria-label="Aumenta zoom tempo">+</button></div>
-      <div><span>Altezza</span><button type="button" data-axis="pitch" data-factor="0.6666667" aria-label="Riduci zoom altezza">−</button><output data-value="pitch">100%</output><button type="button" data-axis="pitch" data-factor="1.5" aria-label="Aumenta zoom altezza">+</button></div>
-      <button type="button" data-reset>Reimposta vista</button>
-      <p>Trascina per spostarti. Pizzica per ingrandire. Tocca una nota per ascoltarla.</p>
-      <p>Rotella: tempo · Maiusc: altezza.<br>Frecce: sposta · + / −: zoom · Maiusc: altezza · 0: reimposta.<br>← / → con Alt: scegli nota · Invio: ascolta.</p></div>`;
     const status = document.createElement('output'); status.className = 'roll-note-status'; status.setAttribute('role', 'status');
     const host = options.controlsHost || canvas.parentElement;
-    host.append(details, status);
+    host.append(status);
     canvas.tabIndex = 0;
     canvas.setAttribute('aria-label', 'Piano roll interattivo: esplora con le frecce, zoom con più e meno, Alt e frecce per scegliere una nota, Invio per ascoltare');
     canvas.title = 'Trascina per esplorare · rotella: zoom tempo · Maiusc + rotella: zoom altezza · tocca una nota per ascoltarla';
     function refresh() {
-      details.hidden = !enabled();
-      if (details.hidden) { details.open = false; cancel(); }
-      const view = options.view();
-      details.querySelector('[data-value="time"]').textContent = `${Math.round(view.zoom * 100)}%`;
-      details.querySelector('[data-value="pitch"]').textContent = `${Math.round(view.pitchZoom * 100)}%`;
+      if (!enabled()) cancel();
     }
     function change(values) { options.change(values); refresh(); }
     function zoom(timeFactor, pitchFactor, clientX, clientY) {
@@ -295,12 +284,6 @@
       const playback = options.notePlayback?.(note) || {};
       Promise.resolve(previewNote(pitch, playback.duration, playback.volume)).catch(() => announce('Audio non disponibile. Riprova.'));
     }
-    details.addEventListener('click', event => {
-      const button = event.target.closest('button'); if (!button) return;
-      if (button.hasAttribute('data-reset')) reset();
-      else zoom(button.dataset.axis === 'time' ? Number(button.dataset.factor) : 1, button.dataset.axis === 'pitch' ? Number(button.dataset.factor) : 1);
-    });
-    details.addEventListener('keydown', event => { if (event.key === 'Escape') { event.stopPropagation(); details.open = false; details.querySelector('summary').focus(); } });
     canvas.addEventListener('wheel', event => {
       if (!enabled()) return;
       event.preventDefault();

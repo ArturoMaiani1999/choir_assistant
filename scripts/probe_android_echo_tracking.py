@@ -20,11 +20,21 @@ import websocket
 from browser_practice_smoke import evaluate
 from probe_android_calibration import INSTALL, SNAPSHOT, export_array, volume_adjustment
 
-BUILD = '20261020-115221-46c4b97f1322-dirty'
+BUILD = '20261020-181027-6811032c1db7-dirty'
+
+# Technical acoustic test: no voice profile is fabricated, verified or saved.
+# Uses the deployed guide's explicit acoustic diagnostic entry point.
+ACOUSTIC_START = r"""(()=>{
+  const p=phoneCalibrationProbe;p.acoustic={done:false,error:null};
+  p.acousticTask=(async()=>{
+    if(!await microphoneCalibrationUI.measureAcoustic())throw Error('Acoustic measurement failed');
+  })().catch(error=>{p.acoustic.error=error.message}).finally(()=>{p.acoustic.done=true});
+  return {started:true,kind:'acoustic-only',voiceProfileVerified:false};
+})()"""
 
 INSTRUMENT = r"""(()=>{
   const Original=window.Worker;
-  phoneCalibrationProbe.workerRtt=[];phoneCalibrationProbe.workerEvents=[];
+  phoneCalibrationProbe.workerRtt=[];phoneCalibrationProbe.workerEvents=[];phoneCalibrationProbe.attempts=[];
   const Observed=class extends Original {
     constructor(...args){super(...args);this.sent=[];this.voice=String(args[0]).includes('microphone_calibration_worker');
       if(this.voice){phoneCalibrationProbe.workerEvents.push({type:'voice-created',at:performance.now()});
@@ -39,6 +49,8 @@ INSTRUMENT = r"""(()=>{
       });
     }
     postMessage(data,...rest){
+      if(data.compact&&data.microphone&&data.reference)
+        phoneCalibrationProbe.attempts.push({microphone:data.microphone.slice(),reference:data.reference.slice(),sampleRate:data.sampleRate});
       if(data.mode==='gain')this.sent.push({at:performance.now()});
       if(this.voice&&data.frames){
         phoneCalibrationProbe.workerEvents.push({type:'voice-post',at:performance.now(),frames:data.frames.length,mode:data.mode});
@@ -111,6 +123,7 @@ def main():
     parser.add_argument('--port', type=int, default=9223)
     parser.add_argument('--volume-index', type=int, default=8)
     parser.add_argument('--output', type=Path)
+    parser.add_argument('--acoustic-only', action='store_true', help='Isolate the deployed echo graph without requiring or changing a verified vocal profile')
     args = parser.parse_args()
     pages = json.load(urllib.request.urlopen(f'http://127.0.0.1:{args.port}/json', timeout=5))
     allowed = [p for p in pages if p.get('type') == 'page' and urlsplit(p.get('url', '')).hostname == 'staging.epistrophe.it']
@@ -137,18 +150,22 @@ def main():
                 install = install.replace('__START_DEADLINE__', str(round(time.time()*1000)+10000))
                 evaluate(socket, 3, install)
                 evaluate(socket, 4, INSTRUMENT)
-                evaluate(socket, 5, "document.querySelector('#calibration-start').click()")
+                evaluate(socket, 5, ACOUSTIC_START if args.acoustic_only else "document.querySelector('#calibration-start').click()")
                 print(json.dumps({'started': True, 'output': str(output)}), flush=True)
                 deadline = time.monotonic()+55
                 failure = None
                 while time.monotonic() < deadline:
                     time.sleep(.2)
                     snapshot = evaluate(socket, 6, SNAPSHOT)
-                    if snapshot['instruction'].startswith('Canta') or not snapshot['busy']:
+                    if args.acoustic_only:
+                        if evaluate(socket, 16, 'phoneCalibrationProbe.acoustic.done'):
+                            failure = evaluate(socket, 17, 'phoneCalibrationProbe.acoustic.error')
+                            break
+                    elif snapshot['instruction'].startswith('Canta') or not snapshot['busy']:
                         break
                 else:
                     failure = 'Guide did not finish within 55 seconds'
-                success = evaluate(socket, 7, "!document.querySelector('#calibration-done').hidden&&echoCancellationUI.ready()")
+                success = evaluate(socket, 7, "echoCancellationUI.ready()" if args.acoustic_only else "!document.querySelector('#calibration-done').hidden&&echoCancellationUI.ready()")
                 if success:
                     print(json.dumps(evaluate(socket, 8, HOLDOUT.replace('__BUILD__', json.dumps(BUILD)))), flush=True)
                     deadline = time.monotonic()+15
@@ -158,7 +175,19 @@ def main():
                     else:
                         failure = 'Holdout capture did not finish within 15 seconds'
                 live = evaluate(socket, 10, "(()=>{const l=phoneCalibrationProbe.live;if(!l)return null;const {pcm,chunks,sources,timers,stop,...meta}=l;return meta})()")
-                report = {'build': BUILD, 'failure': failure, 'systemVolume': volume, 'guide': snapshot,
+                if live and live.get('error'):
+                    failure = f"Live capture interrupted: {live['error']}"
+                    # Preserve the transmitted contiguous prefix; never bridge
+                    # a discontinuity or label a partial recording complete.
+                    evaluate(socket, 18, """(()=>{
+                      const l=phoneCalibrationProbe.live;
+                      if(!l.pcm)l.pcm=Array.from({length:4},(_,c)=>{
+                        const out=new Float32Array(l.frames);let at=0;
+                        for(const chunk of l.chunks){out.set(chunk[c],at);at+=chunk[c].length}
+                        return out;
+                      });
+                    })()""")
+                report = {'build': BUILD, 'failure': failure, 'kind': 'acoustic-only' if args.acoustic_only else 'unified-guide', 'systemVolume': volume, 'guide': snapshot,
                           'live': live, 'workerRtt': evaluate(socket, 11, 'phoneCalibrationProbe.workerRtt'),
                           'workerEvents': evaluate(socket, 14, 'phoneCalibrationProbe.workerEvents'),
                           'lifecycle': evaluate(socket, 12, 'echoCancellationUI.lifecycle()')}
@@ -170,9 +199,15 @@ def main():
                     arrays['impulse'] = export_array(socket, 'phoneCalibrationProbe.impulse')
                     arrays['sample_rate'] = np.array(snapshot['sampleRate'])
                     np.savez_compressed(output/'calibration.npz', **arrays)
-                if live and live.get('frames') and not live.get('error'):
+                attempts = evaluate(socket, 15, 'phoneCalibrationProbe.attempts.length')
+                for index in range(attempts):
+                    arrays = {name: export_array(socket, f'phoneCalibrationProbe.attempts[{index}].{name}') for name in ('microphone','reference')}
+                    arrays['sample_rate'] = np.array(snapshot['sampleRate'])
+                    np.savez_compressed(output/f'attempt-{index+1}.npz', **arrays)
+                if live and live.get('frames'):
                     channels = [export_array(socket, f'phoneCalibrationProbe.live.pcm[{i}]') for i in range(4)]
-                    np.savez_compressed(output/'live.npz', raw=channels[0], reference=channels[1], prediction=channels[2], processed=channels[3], sample_rate=live['sampleRate'])
+                    filename = 'partial-live.npz' if live.get('error') else 'live.npz'
+                    np.savez_compressed(output/filename, raw=channels[0], reference=channels[1], prediction=channels[2], processed=channels[3], sample_rate=live['sampleRate'])
                 print(json.dumps({'output': str(output), 'failure':failure, 'guideResults': snapshot['results'], 'liveFrames': live and live.get('frames'), 'liveError': live and live.get('error')}), flush=True)
             finally:
                 try:

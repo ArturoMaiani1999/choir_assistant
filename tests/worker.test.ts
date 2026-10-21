@@ -244,6 +244,43 @@ describe("edge authorization", () => {
     expect(response.headers.get("Vary")).toBe("Cookie, Authorization");
   });
 
+  it.each(['/app.0123456789ab.js', '/styles.0123456789ab.css', '/session-client.0123456789ab.js'])(
+    'caches versioned application code privately after authorization: %s', async (path) => {
+      const response = await createWorker(authenticated).fetch(new Request(`https://choir.example.org${path}`), fakeEnv());
+      expect(response.headers.get('Cache-Control')).toBe('private, max-age=31536000, immutable');
+      expect(response.headers.get('Vary')).not.toContain('Cookie');
+      const denied = await createWorker(anonymous).fetch(new Request(`https://choir.example.org${path}`), fakeEnv());
+      expect(denied.status).toBe(401);
+      expect(denied.headers.get('Cache-Control')).toBe('no-store');
+      const revoked = await createWorker(authenticated).fetch(new Request(`https://choir.example.org${path}`), fakeEnv({ active: false }));
+      expect(revoked.status).toBe(403);
+      expect(revoked.headers.get('Cache-Control')).toBe('no-store');
+    },
+  );
+
+  it.each(['/auth-client.0123456789ab.js', '/startup.0123456789ab.js', '/startup.0123456789ab.css'])(
+    'makes versioned login/bootstrap code cacheable without a session: %s', async (path) => {
+      const response = await createWorker(anonymous).fetch(new Request(`https://choir.example.org${path}`), fakeEnv({ dbError: true }));
+      expect(response.status).toBe(200);
+      expect(response.headers.get('Cache-Control')).toBe('public, max-age=31536000, immutable');
+    },
+  );
+
+  it.each(['/auth-client.js', '/session-client.js'])(
+    'revalidates legacy filenames instead of caching stale code: %s', async (path) => {
+      const response = await createWorker(authenticated).fetch(new Request(`https://choir.example.org${path}`), fakeEnv());
+      expect(response.headers.get('Cache-Control')).toContain('no-cache');
+      expect(response.headers.get('Cache-Control')).not.toContain('immutable');
+    },
+  );
+
+  it.each(['/library.json', '/library-assets/song/score.json', '/library-assets/song/score.0123456789ab.js', '/voice-lab-assets/manifest.json', '/'])(
+    'keeps personal data, music and HTML out of the code cache: %s', async (path) => {
+      const response = await createWorker(authenticated).fetch(new Request(`https://choir.example.org${path}`), fakeEnv());
+      expect(response.headers.get('Cache-Control')).toBe('private, no-store');
+    },
+  );
+
   it("resolves a stable member context for the private API", async () => {
     const response = await createWorker(authenticated).fetch(
       new Request("https://choir.example.org/api/me"),
@@ -256,6 +293,43 @@ describe("edge authorization", () => {
       roles: ["singer"],
       canViewAllGroups: false,
     });
+  });
+
+  it("loads the read-only repertoire using a session cookie and one member resolution", async () => {
+    const env = fakeEnv();
+    const prepare = env.AUTH_DB.prepare.bind(env.AUTH_DB);
+    let resolutions = 0;
+    env.AUTH_DB.prepare = (query: string) => {
+      if (query.includes("FROM authorized_members m JOIN choirs")) resolutions++;
+      return prepare(query);
+    };
+    env.ASSETS = { async fetch() { return Response.json({ pieces: [] }); } } as unknown as Fetcher;
+    const cookieAuthenticator: RequestAuthenticator = async request =>
+      request.headers.get("Cookie") === "__session=test-session" ? IDENTITY : null;
+    const response = await createWorker(cookieAuthenticator).fetch(new Request(
+      "https://choir.example.org/api/progress/repertoire", { headers: { Cookie: "__session=test-session" } },
+    ), env);
+    expect(response.status).toBe(200);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
+    expect(resolutions).toBe(1);
+    await expect(response.json()).resolves.toEqual({
+      voicePart: "tenore", canDirect: false, assignments: [], pieces: [],
+    });
+  });
+
+  it.each([
+    [anonymous, true, 401],
+    [authenticated, false, 403],
+  ] as const)("protects the repertoire snapshot before reading its catalog (%#)", async (authenticator, active, status) => {
+    const env = fakeEnv({ active });
+    let assetReads = 0;
+    env.ASSETS = { async fetch() { assetReads++; return Response.json({ pieces: [] }); } } as unknown as Fetcher;
+    const response = await createWorker(authenticator).fetch(new Request(
+      "https://choir.example.org/api/progress/repertoire", { headers: { Accept: "application/json" } },
+    ), env);
+    expect(response.status).toBe(status);
+    expect(assetReads).toBe(0);
+    expect(response.headers.get("Cache-Control")).toBe("no-store");
   });
 
   it("rejects cross-origin performance mutations before member resolution", async () => {

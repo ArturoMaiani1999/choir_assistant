@@ -79,6 +79,7 @@ def main():
             """})
             cdp("Page.reload")
             for _ in range(160):
+                js("document.querySelector('#piece-picker-dialog[open] [data-preferred-voice=tenore]:not(:disabled)')?.click()")
                 if js("typeof state!=='undefined' && Boolean(state.runtime && state.gridNavigation)"):
                     break
                 time.sleep(.1)
@@ -149,11 +150,8 @@ def main():
                     touch("touchEnd", [])
                     after_pinch = js("({zoom:state.gridInspect.timeZoom,pitch:state.gridInspect.pitchZoom,sounds:rollSounds.length})")
                     assert after_pinch["zoom"] > before_pinch["zoom"] and after_pinch["pitch"] > before_pinch["pitch"] and after_pinch["sounds"] == before_pinch["sounds"], after_pinch
-                js("state.transpose=0;state.gridNavigation.reset();els.pitchLane.parentElement.querySelector('details').open=true")
-                snapshot(f"practice-controls-{width}x{height}")
-                panel = js("""(()=>{const r=els.pitchLane.parentElement.querySelector('.roll-navigation-panel').getBoundingClientRect();return {top:r.top,left:r.left,right:r.right,bottom:r.bottom};})()""")
-                assert panel["top"] >= 0 and panel["left"] >= 0 and panel["right"] <= width and panel["bottom"] <= height, panel
-                js("els.pitchLane.parentElement.querySelector('details').open=false")
+                js("state.transpose=0;state.gridNavigation.reset()")
+                assert js("els.pitchLane.parentElement.querySelector('.roll-navigation') === null")
                 # Same interactions in the final performance analysis.
                 js("""PerformanceReview.open({title:'O sacrum convivium',totalBeats:24,targetEvents:Array.from({length:24},(_,i)=>({onsetBeat:i,durationBeats:.85,midiPitch:58+i%7,lyric:i%4===0?'O':null})),
                   traces:[{id:'test',samples:Array.from({length:240},(_,i)=>({beat:i/10,displayPitch:58+Math.floor(i/10)%7,confidence:.9,errorCents:0}))}],
@@ -161,13 +159,13 @@ def main():
                 time.sleep(.2)
                 snapshot(f"review-{width}x{height}")
                 review = js("""(()=>{const c=document.querySelector('#performance-review-canvas'),r=c.getBoundingClientRect(),host=c.parentElement;
-                  host.querySelector('details').open=true;
-                  host.querySelector('[data-axis="pitch"][data-factor="1.5"]').click();
+                  c.focus();
+                  c.dispatchEvent(new KeyboardEvent('keydown',{key:'+',shiftKey:true,cancelable:true}));
                   return {x:r.left+r.width*.6,y:r.top+r.height*.5,height:r.height,bottom:r.bottom,sounds:rollSounds.length,
+                    navigationAbsent:host.querySelector('.roll-navigation')===null,
                     overflow:document.documentElement.scrollWidth>innerWidth};})()""")
                 assert review["height"] > 180 and review["bottom"] <= height and not review["overflow"], review
-                snapshot(f"review-controls-{width}x{height}")
-                js("document.querySelector('#performance-review-canvas').parentElement.querySelector('details').open=false")
+                assert review["navigationAbsent"], review
                 mouse("mousePressed", review["x"], review["y"], button="left", clickCount=1)
                 mouse("mouseMoved", review["x"]-40, review["y"]+40, buttons=1, button="left")
                 mouse("mouseReleased", review["x"]-40, review["y"]+40, button="left", clickCount=1)
@@ -200,10 +198,10 @@ def main():
                   const sounds=rollSounds.length,c=els.pitchLane,r=c.getBoundingClientRect();
                   const zoom=state.gridInspect.timeZoom,offset=state.gridInspect.pitchOffset;
                   c.dispatchEvent(new WheelEvent('wheel',{clientX:r.left+100,clientY:r.top+100,deltaY:-100,cancelable:true}));
-                  const hidden=c.parentElement.querySelector('.roll-navigation').hidden;
+                  const navigationAbsent=c.parentElement.querySelector('.roll-navigation')===null;
                   const unchanged=zoom===state.gridInspect.timeZoom&&offset===state.gridInspect.pitchOffset&&sounds===rollSounds.length;
-                  state.clock.pause();render();return {hidden,unchanged};})()""")
-                assert running == {"hidden": True, "unchanged": True}, running
+                  state.clock.pause();render();return {navigationAbsent,unchanged};})()""")
+                assert running == {"navigationAbsent": True, "unchanged": True}, running
                 results.append({"viewport": [width, height], "anchoredZoom": anchored, "pan": after, "audio": audio["sounds"][-1]})
             time.sleep(2.2)
             assert js("rollEnded===rollSounds.length"), js("({ended:rollEnded,sounds:rollSounds.length})")

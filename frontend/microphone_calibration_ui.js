@@ -22,14 +22,25 @@
 
   function create(adapter) {
     let generation = 0, busy = false, timer = null, worker = null, frames = [], result = null, finished = false;
+    let workerDeadline = null, rejectWorkerPreparation = null;
     let chain = null, scope = null, persistable = false, active = null, saved = null, mode = 'full';
     let inputTrack = null, baseline = null, trackerSettings = null, baseSignature = null, activeSignature = null;
     let localSalt = null, anonymousInput = randomId();
+    let restoring = false;
     let levels = [], lastMeterAt = -Infinity, clippedUntil = 0;
     const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)');
     const account = () => adapter.userId() || 'local-only';
     const currentBaseSignature = () => JSON.stringify({ recognition: Core.settings(adapter.baseline()), tracker: adapter.trackerSettings() });
     const key = () => `${prefix}${scope}:${chain}`;
+    function storedProfile() {
+      try {
+        return Object.keys(localStorage).filter(k=>k.startsWith(`${prefix}${account()}:`))
+          .map(read).filter(p=>Core.validProfile(p,account(),p?.chain)&&p.baseSignature===currentBaseSignature()
+            &&(scope!==account()||!chain||p.chain===chain)
+            &&(p.speakers==null||p.speakers===Boolean(adapter.echo()?.enabled())))
+          .sort((a,b)=>b.createdAt-a.createdAt)[0]||null;
+      } catch (_) { return null; }
+    }
     const percent = number => `${Math.round(number * 100)}%`;
     const setText = (id, text) => { if ($(id).textContent !== text) $(id).textContent = text; };
     function drawLevel() {
@@ -80,8 +91,9 @@
       $('status').setAttribute('aria-live', 'polite');
       setText('step', 'Prima di iniziare'); setText('instruction', 'Segui i segnali');
       setText('hint', 'Scegli una nota comoda: non devi imitarne una precisa.');
-      setText('countdown', adapter.echo()?.enabled() ? '35' : '25'); setText('timer-label', 'secondi totali');
+      setText('countdown', adapter.echo()?.enabled() ? adapter.echo().isNative?.() ? '30' : '35' : '25'); setText('timer-label', 'secondi totali');
       setText('next', adapter.echo()?.enabled() ? 'Silenzio durante i fruscii, poi due vocali.' : 'Prima il silenzio, poi due vocali: normale e più piano.');
+      $('volume-note').hidden = !adapter.echo()?.enabled();
       $('progress').value = 0; resetLevel();
     }
     function hideReport() {
@@ -99,31 +111,29 @@
       $('balanced').textContent = percent(report.after.balancedAccuracy);
       const acoustic = adapter.echo()?.diagnostics();
       $('acoustic-result').hidden = !acoustic?.ready;
-      if (acoustic?.ready) $('acoustic-result').textContent = `Rientro ridotto: ${Math.round(acoustic.validationDb)} dB nella verifica.`;
+      if (acoustic?.ready) $('acoustic-result').textContent = acoustic.strategy === 'platform'
+        ? 'Riduzione del rientro del dispositivo attiva.' : `Rientro ridotto: ${Math.round(acoustic.validationDb)} dB nella verifica.`;
     }
     function profileDetails(profile) {
       $('details').textContent = `Soglia ingresso: ${profile.settings.rmsThreshold.toPrecision(3)} RMS · confidence minima: ${percent(profile.settings.minConfidence)}\n`
         + `Controllo del ${new Date(profile.createdAt).toLocaleString('it-IT')}. Le stime si riferiscono alla guida originale.`;
       const acoustic = adapter.echo()?.diagnostics();
-      if (acoustic?.ready) $('details').textContent += `\nRitardo del percorso: ${acoustic.peakDelayMs.toFixed(1)} ms. Riduzione indipendente: ${acoustic.validationDb.toFixed(1)} dB.`;
+      if (acoustic?.ready) $('details').textContent += acoustic.strategy === 'platform'
+        ? '\nAEC del dispositivo attivo. Il controllo verifica il residuo, senza stimare il ritardo o i dB di cancellazione.'
+        : `\nRitardo del percorso: ${acoustic.peakDelayMs.toFixed(1)} ms. Riduzione indipendente: ${acoustic.validationDb.toFixed(1)} dB.`;
     }
     function updateStatus() {
-      let stored = Boolean(saved);
-      if (!stored) {
-        try {
-          stored = Object.keys(localStorage).some(key => {
-            if (!key.startsWith(`${prefix}${account()}:`)) return false;
-            const profile = read(key);
-            return Core.validProfile(profile, account(), profile?.chain) && profile.baseSignature === currentBaseSignature();
-          });
-        } catch (_) {}
-      }
-      const value = activeSettings() ? adapter.echo()?.enabled() && !adapter.echo().ready()
-        ? 'Voce salvata · rientro da verificare' : 'Audio pronto' : stored ? 'Profilo voce salvato' : 'Da calibrare';
+      const stored = Boolean(storedProfile());
+      const value = activeSettings() ? 'Profilo voce attivo' : stored ? 'Profilo voce salvato' : 'Da calibrare';
       document.getElementById('settings-calibration-status').textContent = value;
+      document.getElementById('settings-calibrate').textContent = stored ? 'Rivedi calibrazione' : 'Calibra audio';
+      document.getElementById('settings-calibration-heading').textContent = stored ? 'La tua voce' : 'Prepara la tua voce';
+      if (stored) document.getElementById('settings-calibration-hint').textContent = 'Puoi iniziare il brano. Ricalibra solo se necessario.';
     }
     function activeSettings() {
-      if (active && (account() !== scope || !adapter.running() && Date.now() - active.verifiedAt > Core.SESSION_TTL_MS || currentBaseSignature() !== activeSignature)) {
+      const input = adapter.input();
+      if (active && (input.track !== inputTrack || inputTrack?.readyState !== 'live' || input.context?.state !== 'running'
+        || account() !== scope || currentBaseSignature() !== activeSignature)) {
         active = null; queueMicrotask(() => { adapter.changed(); updateStatus(); });
       }
       return active?.chain === chain ? active.settings : null;
@@ -134,6 +144,9 @@
       if (message && $('dialog').open) $('status').textContent = message;
     }
     async function microphoneReady() {
+      // Restore only after matching the actual acquired device and chain.
+      // A restored voice profile is not evidence of a fresh acoustic check.
+      if (inputTrack !== adapter.input().track) active = null;
       inputTrack = adapter.input().track;
       const currentTrack = inputTrack;
       currentTrack?.addEventListener('ended', () => {
@@ -154,10 +167,16 @@
       chain = nextChain;
       saved = read(key());
       if (!Core.validProfile(saved, scope, chain) || saved.baseSignature !== currentBaseSignature()) saved = null;
+      if (saved && !busy && (!adapter.echo()?.enabled() || adapter.echo().isNative?.())) {
+        active = { ...saved, verifiedAt: Date.now() }; activeSignature = saved.baseSignature;
+      }
       updateStatus();
     }
     function clearWork() {
       clearInterval(timer); timer = null;
+      clearTimeout(workerDeadline); workerDeadline = null;
+      rejectWorkerPreparation?.(new Error('Preparazione annullata.'));
+      rejectWorkerPreparation = null;
       worker?.terminate(); worker = null;
       frames = []; busy = false;
       resetLevel();
@@ -199,6 +218,32 @@
       if (value.selected) applyResult();
       else { void adapter.stopMicrophone(); $('start').focus(); }
     }
+    function prepareVoiceWorker(token) {
+      return new Promise((resolve, reject) => {
+        worker = new Worker('microphone_calibration_worker.js');
+        const pending = worker;
+        rejectWorkerPreparation = reject;
+        const finish = error => {
+          clearTimeout(workerDeadline); workerDeadline = null;
+          rejectWorkerPreparation = null;
+          if (error) reject(error); else resolve();
+        };
+        workerDeadline = setTimeout(() => finish(new Error('Preparazione audio troppo lenta. Controlla la connessione e riprova.')), 12000);
+        pending.onerror = () => {
+          if (token === generation && worker === pending) finish(new Error('Preparazione audio non riuscita. Controlla la connessione e riprova.'));
+        };
+        pending.onmessageerror = pending.onerror;
+        pending.onmessage = ({ data }) => {
+          if (token !== generation || worker !== pending || data.type !== 'ready') return;
+          finish();
+          pending.onerror = () => {
+            if (token === generation && worker === pending) cancel('Analisi non disponibile. Riprova.');
+          };
+          pending.onmessageerror = pending.onerror;
+        };
+        pending.postMessage({ mode: 'ready' });
+      });
+    }
     function analyse(token) {
       clearInterval(timer); timer = null;
       $('dialog').dataset.phase = 'result';
@@ -206,12 +251,17 @@
       resetLevel();
       $('instruction').textContent = 'Verifica del segnale'; $('countdown').textContent = '';
       const copy = frames; frames = [];
-      worker = new Worker('microphone_calibration_worker.js');
+      if (!worker) { cancel('Analisi non disponibile. Riprova.'); return; }
+      workerDeadline = setTimeout(() => {
+        if (token === generation) cancel('Analisi troppo lenta. Riprova lasciando aperta questa pagina.');
+      }, 15000);
       worker.onmessage = event => {
         if (token !== generation) return;
         if (event.data.type === 'progress') { $('status').textContent = `Analisi locale ${Math.round(event.data.value * 100)}%`; return; }
         if (event.data.type === 'error') { cancel(`Analisi non riuscita: ${event.data.error}`); return; }
+        if (event.data.type !== 'result') return;
         const value = event.data.result;
+        clearTimeout(workerDeadline); workerDeadline = null;
         worker.terminate(); worker = null;
         if (mode === 'reuse') {
           busy = false;
@@ -231,6 +281,7 @@
         } else renderResult(value);
       };
       worker.onerror = () => { if (token === generation) cancel('Analisi non disponibile. Riprova.'); };
+      worker.onmessageerror = worker.onerror;
       worker.postMessage({ frames: copy, sampleRate: adapter.input().sampleRate, baseline, trackerSettings, mode, profile: mode === 'reuse' ? saved : null, unified: true }, copy.map(f => f.buffer));
       // Keep the same microphone and contexts alive into rehearsal.
       // Full PCM is transferred to a temporary Worker and never persisted.
@@ -261,25 +312,40 @@
         if (nextMode === 'auto' && saved) mode = 'reuse';
         if (mode === 'reuse' && !saved) throw new Error('Profilo non disponibile per questo microfono.');
         if (mode === 'reuse') setText('next', 'Profilo vocale trovato: basta una verifica in silenzio.');
+        if (mode !== 'acoustic' && mode !== 'acoustic-test') {
+          setText('instruction', 'Preparazione audio');
+          setText('status', 'Il controllo sta per iniziare.');
+          await prepareVoiceWorker(token);
+          if (token !== generation) return;
+        }
         if (adapter.echo()?.enabled()) {
           await adapter.echo().measure((elapsed, analysing, phase) => {
-            if (phase === 'loading') {
+            if (phase === 'native-check') {
+              const input=adapter.input(),pcm=new Float32Array(2048);input.analyser.getFloatTimeDomainData(pcm);updateLevel(pcm,elapsed);
+              setText('step','Altoparlanti · non cantare');setText('instruction',elapsed<2?'Resta in silenzio':'Ascolta senza cantare');
+              setText('hint','Mantieni fermi dispositivo e volume. Sentirai due brevi fruscii.');
+              const end=elapsed<2?2:elapsed<5?5:8;
+              setText('countdown',String(Math.max(1,Math.ceil(end-elapsed))));setText('timer-label','secondi rimasti');
+              setText('next',mode==='acoustic'||mode==='acoustic-test'?'Poi: controllo completato.':'Poi: controllo della voce.');
+              setText('status','Verifica della riduzione del rientro del dispositivo.');$('progress').value=elapsed/30;return;
+            }
+            if (phase === 'loading' || phase === 'retry') {
               setText('step', 'Preparazione'); setText('instruction', 'Preparazione audio');
               setText('hint', 'Mantieni aperta questa pagina.');
               setText('countdown', '…'); setText('timer-label', 'preparazione in corso');
               setText('next', 'Poi: resta in silenzio e ascolta i due segnali.');
-              setText('status', 'Il controllo sta per iniziare.');
+              setText('status', phase === 'retry' ? 'Il ritardo è cambiato. Ripetiamo una volta la misura: resta in silenzio.' : 'Il controllo sta per iniziare.');
               return;
             }
             const input = adapter.input(), pcm = new Float32Array(2048);
             input.analyser.getFloatTimeDomainData(pcm); updateLevel(pcm, elapsed);
-            setText('step', 'Altoparlanti · non cantare');
+            setText('step', phase === 'retry-capture' ? 'Ripetizione · non cantare' : 'Altoparlanti · non cantare');
             setText('instruction', analysing ? 'Verifica del rientro' : elapsed < 3 ? 'Resta in silenzio' : 'Ascolta senza cantare');
             setText('hint', analysing ? 'Analisi locale. Rimani in silenzio.' : 'Mantieni fermi dispositivo e volume. Sentirai due fruscii.');
             const end = elapsed < 3 ? 3 : elapsed < 7 ? 7 : 10;
             setText('countdown', analysing ? '…' : String(Math.max(1, Math.ceil(end - elapsed))));
             setText('timer-label', analysing ? 'analisi in corso' : 'secondi rimasti');
-            setText('next', mode === 'acoustic' ? 'La voce è già calibrata. Poi riprende la prova.' : mode === 'reuse' ? 'Poi: verifica del profilo in silenzio.' : 'Poi: controllo della voce.');
+            setText('next', mode === 'acoustic-test' ? 'Poi: verifica tecnica del rientro.' : mode === 'acoustic' ? 'La voce è già calibrata. Poi riprende la prova.' : mode === 'reuse' ? 'Poi: verifica del profilo in silenzio.' : 'Poi: controllo della voce.');
             $('progress').value = elapsed / (mode === 'acoustic' ? 10 : mode === 'reuse' ? 18 : 32);
             setText('status', analysing ? 'Controllo su un secondo segnale indipendente.' : 'Stiamo misurando ritardo e risposta degli altoparlanti.');
           });
@@ -300,6 +366,14 @@
           }
         }
         if (token !== generation) return;
+        if (mode === 'acoustic-test') {
+          busy = false;
+          $('instruction').textContent = 'Altoparlanti verificati';
+          $('countdown').textContent = ''; $('progress').value = 1;
+          $('status').textContent = 'Misura tecnica del rientro. Il profilo vocale non è stato verificato.';
+          $('start').hidden = true; $('done').hidden = false;
+          return Boolean(adapter.echo()?.ready());
+        }
         if (mode === 'acoustic') {
           if (!activeSettings()) throw new Error('Il profilo vocale è cambiato. Ripeti Calibra audio.');
           busy = false; finished = true;
@@ -336,7 +410,7 @@
           setText('instruction', stage.instruction); setText('hint', stage.hint);
           setText('countdown', String(Math.max(1, Math.ceil(stage.end - elapsed)))); setText('timer-label', 'secondi rimasti');
           setText('next', next ? `Poi: ${next.instruction} · ${next.end - next.start} s` : 'Poi: risultati del controllo.');
-          const offset = adapter.echo()?.enabled() ? 10 : 3;
+          const offset = adapter.echo()?.enabled() ? adapter.echo().isNative?.() ? 8 : 10 : 3;
           $('progress').value = (offset + elapsed) / (offset + duration);
           // Countdown is a timer, not a live region: announce the instruction
           // once per phase instead of reading every second over the singer.
@@ -358,10 +432,17 @@
       $('start').hidden = false; $('start').disabled = false; $('start').textContent = 'Avvia controllo';
       readyGuide();
       $('status').textContent = 'Il microfono si attiva premendo «Avvia controllo».';
-      $('intro').textContent = adapter.echo()?.enabled() ? 'Circa 35 secondi: altoparlanti e voce in una sola guida.' : 'Circa 25 secondi: silenzio, voce normale e più piano.';
+      $('intro').textContent = adapter.echo()?.enabled()
+        ? `Circa ${adapter.echo().isNative?.() ? 30 : 35} secondi: altoparlanti e voce in una sola guida.` : 'Circa 25 secondi: silenzio, voce normale e più piano.';
       $('details').textContent = Core.AUDIO_STAGES.map(s => `${s.end - s.start} s · ${s.instruction}`).join('\n');
       $('progress').value = 0; $('dialog').showModal(); $('start').focus();
-      if (activeSettings()) {
+      const remembered = activeSettings() ? active : storedProfile();
+      if (remembered && (!adapter.echo()?.enabled() || adapter.echo().isNative?.())) {
+        finished = true; showReport(remembered.report); profileDetails(remembered);
+        $('instruction').textContent = 'Profilo voce salvato';
+        $('status').textContent = 'Si riutilizza automaticamente su questo dispositivo. Puoi tornare al brano.';
+        $('start').textContent = 'Ricalibra'; $('done').hidden = false; $('done').focus();
+      } else if (activeSettings()) {
         finished = true; showReport(active.report); profileDetails(active);
         const check = adapter.echo()?.enabled() && !adapter.echo().ready();
         $('instruction').textContent = check ? 'Voce già calibrata' : 'Calibrazione attiva'; $('countdown').textContent = '';
@@ -371,13 +452,15 @@
     }
     $('start').addEventListener('click', () => {
       if (busy) cancel('Controllo interrotto. Puoi ripartire.');
-      else void start(activeSettings() ? adapter.echo()?.enabled() && !adapter.echo().ready() ? 'acoustic' : 'full' : 'auto');
+      else void start(adapter.echo()?.isNative?.() || !adapter.echo()?.enabled() ? 'full'
+        : activeSettings() ? !adapter.echo().ready() ? 'acoustic' : 'full' : 'auto');
     });
     $('done').addEventListener('click', () => $('dialog').close());
     function applyResult() {
       if (!result?.selected || account() !== scope || currentBaseSignature() !== baseSignature) { cancel('Dispositivo o impostazioni cambiati. Riprova.'); return; }
       const profile = { version: Core.VERSION, detectorVersion: Core.DETECTOR_VERSION, scope, chain,
-        settings: result.selected, quality: result.quality, baseSignature, createdAt: Date.now(),
+        settings: result.selected, quality: result.quality, baseSignature, createdAt: Date.now(), speakers: Boolean(adapter.echo()?.enabled()),
+        speakerProbeId: adapter.echo()?.enabled() && adapter.echo().isNative?.() ? window.ChoirCalibrationProbe?.id ?? null : null,
         reference: 'guided-weak-labels', validation: result.evaluations[result.selectedIndex].validation,
         report: { before: result.evaluations[0].validation, after: result.evaluations[result.selectedIndex].validation } };
       active = { ...profile, verifiedAt: Date.now() }; activeSignature = baseSignature;
@@ -415,6 +498,28 @@
       adapter.returnFocus();
     });
     async function verifyPlayback() {
+      if (adapter.echo()?.isNative?.()) {
+        if (busy || restoring || !adapter.canOpen()) return false;
+        if (activeSettings() && adapter.echo().operational()) return true;
+        if (storedProfile()) {
+          restoring = true;
+          try {
+            adapter.echo().prepare();
+            await adapter.startMicrophone();
+            if (activeSettings() && adapter.echo().operational()) {
+              adapter.changed();
+              // startMicrophone prepares calibration by stopping live analysis.
+              // A restored native profile skips the guide and its close handler,
+              // so it must explicitly resume the live detector before Play.
+              adapter.resumeAnalysis();
+              updateStatus(); return true;
+            }
+            await adapter.stopMicrophone();
+          } catch (_) { await adapter.stopMicrophone(); }
+          finally { restoring = false; }
+        }
+        await open(); return false;
+      }
       if (!activeSettings()) { await open(); return false; }
       if (busy || !adapter.canOpen()) return false;
       await open();
@@ -422,7 +527,12 @@
       if (verified && $('dialog').open) $('dialog').close();
       return Boolean(verified);
     }
-    return Object.freeze({ open, verifyPlayback, cancel, microphoneReady, activeSettings, disable, inputChanged, refresh: updateStatus, isBusy: () => busy });
+    async function measureAcoustic() {
+      if (busy || !adapter.canOpen() || !adapter.echo()?.enabled()) return false;
+      await open();
+      return Boolean(await start('acoustic-test'));
+    }
+    return Object.freeze({ open, verifyPlayback, measureAcoustic, cancel, microphoneReady, activeSettings, disable, inputChanged, refresh: updateStatus, isBusy: () => busy, isRestoring: () => restoring });
   }
   window.ChoirMicrophoneCalibrationUI = Object.freeze({ create });
 })();

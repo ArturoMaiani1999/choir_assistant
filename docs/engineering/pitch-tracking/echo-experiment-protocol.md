@@ -2,7 +2,7 @@
 
 **Status:** causal candidate tested; two fresh device attempts reveal voice-analysis stall and 40 ms training jump; live holdout incomplete
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-20
+**Last reviewed:** 2026-10-21
 
 ## Scopo e criterio di priorità
 
@@ -32,6 +32,20 @@ annullare tutta la cancellazione; un piccolo errore di soglia non li risolve.
 E6 non è rinviato alla fine: i controlli vocali sintetici accompagnano ogni
 modifica. Viene rinviato soltanto il costo di chiedere un nuovo canto reale
 finché il candidato non supera i test acustici e controllati.
+
+### Aggiornamento di priorità, 21 ottobre
+
+Anticipare il confronto E7 con l'AEC Chrome/Android prima di ulteriori
+estensioni del DSP proprietario. La [ricerca sulle catene delle chiamate](aec-platform-research-2026-10-21.md)
+documenta filtri adattivi, soppressione residua e API di piattaforma.
+L'attuale acquisizione richiede esplicitamente AEC disabilitato: manca un
+confronto controllato sullo stesso dispositivo con quel trattamento attivo.
+
+Confrontare baseline, AEC della piattaforma da solo e trattamento proprietario
+da solo, iniziando dai segnali senza canto. Verificare capacità reali e
+inclusione della base/metronomo nel riferimento; tenere separati NS e AGC.
+La conservazione del canto rimane il gate E6. Nessun risultato di questa
+ricerca dimostra già la superiorità di una delle tre condizioni sul S25+.
 
 ## E0 — Audit degli archivi, risultato acquisito
 

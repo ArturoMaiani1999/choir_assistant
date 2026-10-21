@@ -1,0 +1,58 @@
+/* Shared viewport anchor for menu and return controls. */
+:root {
+  --navigation-gutter: clamp(24px, 4vw, 64px);
+  --navigation-top: calc(20px + env(safe-area-inset-top));
+  --navigation-bottom: 12px;
+  --navigation-toolbar-height: calc(var(--navigation-top) + 44px + var(--navigation-bottom) + 1px);
+}
+@media (max-width: 899px) { :root { --navigation-top: calc(16px + env(safe-area-inset-top)); } }
+@media (max-height: 600px) {
+  :root { --navigation-top: calc(12px + env(safe-area-inset-top)); --navigation-bottom: 8px; }
+}
+.home-utilities,
+.warmup-toolbar {
+  padding: var(--navigation-top) max(var(--navigation-gutter), env(safe-area-inset-right)) var(--navigation-bottom) max(var(--navigation-gutter), env(safe-area-inset-left));
+}
+.warmup-body {
+  grid-template-rows: var(--navigation-toolbar-height) auto minmax(0, 1fr);
+}
+.warmup-toolbar {
+  /* Session UI roots inserted into body must not displace the toolbar. */
+  grid-area: 1 / 1;
+  height: var(--navigation-toolbar-height);
+  min-height: var(--navigation-toolbar-height);
+}
+.warmup-navigation { grid-area: 2 / 1; }
+.warmup-shell { grid-area: 3 / 1; }
+/* Leave room for fractional text metrics without a 1–2 px scrollbar. */
+.warmup-body[data-screen="choose"] .warmup-choose { padding-bottom: 44px; }
+@media (max-width: 700px) {
+  .warmup-body[data-screen="choose"] .warmup-choose { padding-bottom: 32px; }
+  .warmup-body[data-screen="review"] .warmup-workspace {
+    min-height: calc(100dvh - var(--navigation-toolbar-height) - 48px);
+  }
+}
+
+/* Shared return to the main menu, including touch and keyboard states. */
+.menu-link,
+.warmup-toolbar .menu-link {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  min-width: 44px;
+  min-height: 44px;
+  box-sizing: border-box;
+  padding: 10px 16px;
+  border: 1px solid var(--line, #ffffff17);
+  border-radius: 8px;
+  background: #ffffff04;
+  color: var(--text, #f3f1e9);
+  font: 500 14px/1.2 ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  text-decoration: none;
+  cursor: pointer;
+  transition: background-color 160ms, border-color 160ms;
+}
+.menu-link:hover { background: #ffffff0b; border-color: #ffffff40; }
+.menu-link:focus-visible { outline: 2px solid var(--cyan, #86d6ca); outline-offset: 3px; }
+@media (prefers-reduced-motion: reduce) { .menu-link { transition: none; } }

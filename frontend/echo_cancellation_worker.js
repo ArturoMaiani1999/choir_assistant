@@ -19,8 +19,14 @@ self.onmessage = ({data}) => {
     return;
   }
   try {
+    const stability = data.compact === true
+      ? self.ChoirEchoCancellation.trainingStability(data.reference, data.microphone, data.sampleRate) : null;
+    if (stability?.unstable) {
+      self.postMessage({ usable: false, reason: 'unstable-delay', stability }); return;
+    }
     const fitted = self.ChoirEchoCancellation.fit(data.reference, data.microphone, data.sampleRate, data.compact === true);
     const result = self.ChoirEchoDelay.prepareProfile(data.reference,data.microphone,fitted,data.sampleRate,data.compact === true);
+    result.stability = stability;
     self.postMessage(result, result.impulse ? [result.impulse.buffer] : []);
   } catch (_) { self.postMessage({usable:false, reason:'capture'}); }
 };

@@ -2,6 +2,7 @@ import { Clerk } from "@clerk/clerk-js";
 import { itIT } from "@clerk/localizations";
 import { ClerkUI } from "@clerk/ui/entry";
 import { safeReturnPath } from "./auth-url";
+import { withTimeout } from './auth-timeout';
 
 interface PublicConfig {
   publishableKey: string;
@@ -16,14 +17,16 @@ async function main(): Promise<void> {
   const response = await fetch("/auth/config", {
     credentials: "same-origin",
     headers: { Accept: "application/json" },
+    cache: 'no-store',
+    signal: AbortSignal.timeout(15_000),
   });
   if (!response.ok) throw new Error("Unable to load authentication configuration");
-  const config = (await response.json()) as PublicConfig;
+  const config = (await withTimeout(response.json())) as PublicConfig;
   const clerk = new Clerk(config.publishableKey);
-  await clerk.load({
+  await withTimeout(clerk.load({
     localization: itIT,
     ui: { ClerkUI },
-  });
+  }));
   const returnPath = safeReturnPath(
     new URLSearchParams(location.search).get("return_url"),
     location.origin,
@@ -52,10 +55,11 @@ async function main(): Promise<void> {
     logout.textContent = "Esci";
     logout.addEventListener("click", async () => {
       logout.disabled = true;
-      try { await clerk.signOut({ redirectUrl: `/sign-in?return_url=${encodeURIComponent(returnPath)}` }); }
+      try { await withTimeout(clerk.signOut({ redirectUrl: `/sign-in?return_url=${encodeURIComponent(returnPath)}` })); }
       catch (_) { logout.disabled = false; status.textContent = 'Uscita non riuscita. Riprova.'; }
     });
     actions.appendChild(logout);
+    window.ChoirStartup?.ready();
     return;
   }
 
@@ -65,6 +69,12 @@ async function main(): Promise<void> {
   }
 
   status.textContent = "";
+  const mounted = new MutationObserver(() => {
+    if (mount.querySelector('input, button, [role="alert"]')) {
+      mounted.disconnect(); window.ChoirStartup?.ready();
+    }
+  });
+  mounted.observe(mount, { subtree: true, childList: true });
   if (document.body.dataset.authMode === "sign-up") {
     clerk.mountSignUp(mount, {
       fallbackRedirectUrl: returnPath,
@@ -91,4 +101,5 @@ main().catch((error: unknown) => {
       : "Accesso temporaneamente non disponibile. Riprova più tardi.";
   }
   console.error(error instanceof Error ? error.message : "Authentication initialization failed");
+  window.ChoirStartup?.fail();
 });

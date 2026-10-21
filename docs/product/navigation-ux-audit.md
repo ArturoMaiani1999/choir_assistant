@@ -35,8 +35,8 @@ migrazione della preferenza SATB. Versione, rollback e verifiche sono nel
 | N08 | Sfondo inerte, focus nell'analisi e restituito al comando di apertura |
 | N09 | Mixer chiudibile con backdrop, Escape o controllo esplicito |
 
-Il menù segue **Canta brani → Brani assegnati / Brani custom**, oppure
-**Vedi partitura**, oppure **Allena la voce**. La parte vocale viene chiesta
+Il menù segue **Scegli brano → Brani assegnati / Tutti i brani**, oppure
+**Mostra partiture**, oppure **Esercizi vocali**. La parte vocale viene chiesta
 al primo ingresso nella prova e rimane nel profilo; il catalogo esistente
 costituisce l'ingresso custom. Il menù non mostra mai la superficie musicale
 sottostante. **Il mio profilo** è la prima impostazione e contiene SATB e

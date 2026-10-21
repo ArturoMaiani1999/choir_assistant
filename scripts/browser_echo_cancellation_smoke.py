@@ -14,6 +14,12 @@ from browser_practice_smoke import CHROME, command, evaluate
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'artifacts' / 'echo-cancellation'
 FIXTURE = r"""
+// Legacy custom-route tests opt out explicitly. Native-route tests set their
+// flag before installing this local fixture; production defaults stay native.
+Object.defineProperty(window,'ChoirRuntimeConfig',{configurable:true,set(value){
+  Object.defineProperty(window,'ChoirRuntimeConfig',{configurable:true,writable:true,
+    value:{...value,features:{...value.features,platformAEC:Boolean(window.testNativeRoute)}}});
+}});
 window.echoErrors=[];
 addEventListener('error',e=>echoErrors.push(e.message));
 addEventListener('unhandledrejection',e=>echoErrors.push(String(e.reason)));
@@ -34,7 +40,8 @@ navigator.mediaDevices.getUserMedia=async constraints=>{
   const ir=ctx.createBuffer(1,4000,ctx.sampleRate),samples=ir.getChannelData(0);
   samples[0]=.45;samples[256]=-.12;samples[3000]=.08;room.buffer=ir;
   const sum=ctx.createGain(),out=ctx.createMediaStreamDestination(),roomLevel=ctx.createGain();sum.connect(out);
-  state.playbackMixer.referenceOutput.connect(delay);delay.connect(room);room.connect(roomLevel);roomLevel.connect(sum);
+  state.playbackMixer.referenceOutput.connect(delay);delay.connect(room);room.connect(roomLevel);
+  if(!window.testNativeRoute)roomLevel.connect(sum);
   const voice=ctx.createOscillator(),voiceGain=ctx.createGain();voice.frequency.value=220;voiceGain.gain.value=0;
   voice.connect(voiceGain);voiceGain.connect(sum);voice.start();
   const stream=out.stream,track=stream.getAudioTracks()[0],stop=track.stop.bind(track);
@@ -60,7 +67,7 @@ LIVE_CHECK = r"""
               echoFixture.voiceGain.gain.value=.03;
               await new Promise(r=>setTimeout(r,500));const sameF0=read();
               assert(sameF0.rms>.018&&sameF0.rms<.025,'Singer amplitude changed: '+JSON.stringify(sameF0));
-              assert(Math.abs(1200*Math.log2(sameF0.hz/220))<10,'Singer F0 changed');
+              assert(Math.abs(1200*Math.log2(sameF0.hz/220))<10,'Singer F0 changed: '+JSON.stringify(sameF0));
               state.microphoneAnalyser.getFloatTimeDomainData(p);
               assert(ChoirPitch.detectPitch(p,state.microphoneContext.sampleRate,activeRecognitionSettings()).hz>0,'Gate rejected same-frequency voice');
               gain.gain.value=0;await new Promise(r=>setTimeout(r,900));const voiceOnly=read();

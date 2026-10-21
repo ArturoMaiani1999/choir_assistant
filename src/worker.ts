@@ -19,9 +19,22 @@ const PUBLIC_PATHS = new Set([
   "/sign-out.html",
 ]);
 const PUBLIC_AUTH_STYLE = /^\/auth\.[a-f0-9]{12}\.css$/;
+const PUBLIC_STARTUP_CODE = /^\/(?:auth-client\.[a-f0-9]{12}\.js|startup\.[a-f0-9]{12}\.(?:js|css))$/;
+const VERSIONED_CODE = /^\/[a-zA-Z0-9_-]+\.[a-f0-9]{12}\.(?:js|css)$/;
+
+function codeCache(pathname: string, response: Response, isPublic = false): string | null {
+  if (![200, 304].includes(response.status)) return null;
+  if (VERSIONED_CODE.test(pathname)) {
+    return `${isPublic ? 'public' : 'private'}, max-age=31536000, immutable`;
+  }
+  if (pathname === '/auth-client.js' || pathname === '/session-client.js') {
+    return `${isPublic ? 'public' : 'private'}, no-cache`;
+  }
+  return null;
+}
 
 function isPublicPath(pathname: string): boolean {
-  return PUBLIC_PATHS.has(pathname) || PUBLIC_AUTH_STYLE.test(pathname);
+  return PUBLIC_PATHS.has(pathname) || PUBLIC_AUTH_STYLE.test(pathname) || PUBLIC_STARTUP_CODE.test(pathname);
 }
 
 const SECURITY_HEADERS: Record<string, string> = {
@@ -132,6 +145,8 @@ async function servePublic(request: Request, env: Env): Promise<Response> {
   // explicit /sign-in.html request redirects to /sign-in. The same applies to
   // the local first-access page at /sign-up.
   let response = await env.ASSETS.fetch(request);
+  const cache = codeCache(url.pathname, response, true);
+  if (cache) response = withHeaders(response, { 'Cache-Control': cache });
   if ([
     "/sign-in",
     "/sign-in.html",
@@ -219,10 +234,11 @@ export function createWorker(authenticate: RequestAuthenticator = authenticateCl
       }
 
       const asset = await env.ASSETS.fetch(request);
+      const cache = codeCache(url.pathname, asset);
       return withHeaders(asset, {
         ...SECURITY_HEADERS,
-        "Cache-Control": "private, no-store",
-        "Vary": "Cookie, Authorization",
+        "Cache-Control": cache ?? "private, no-store",
+        "Vary": cache ? (asset.headers.get('Vary') ?? 'Accept-Encoding') : "Cookie, Authorization",
       });
     },
     async scheduled(_controller: ScheduledController, env: Env, ctx: ExecutionContext): Promise<void> {
