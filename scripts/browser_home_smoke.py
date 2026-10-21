@@ -5,7 +5,9 @@ Uses the existing navigation fixture; never contacts Clerk or the deployed site.
 from __future__ import annotations
 
 import base64
+import html
 import json
+import re
 import subprocess
 import sys
 import tempfile
@@ -27,6 +29,10 @@ VIEWPORTS = [(1440,900),(1920,1080),(1366,768),(1024,768),(900,700),
 
 def main():
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
+    # Compare the shipped mission with the latest editorial text in the source.
+    mission_source=(ROOT/'frontend/about.html').read_text(encoding='utf-8')
+    mission_article=re.search(r'<article\b[^>]*>(.*?)</article>',mission_source,re.S).group(1)
+    expected_mission=' '.join(html.unescape(re.sub(r'<[^>]+>','',mission_article)).split())
     use_dist='--dist' in sys.argv
     directory=Path(sys.argv[sys.argv.index('--directory')+1]) if '--directory' in sys.argv else ROOT/'dist'
     server = ThreadingHTTPServer(('127.0.0.1',0), partial(RelaxHandler if use_dist else Handler,
@@ -238,7 +244,8 @@ def main():
                         heading:document.querySelector('h1').textContent,paragraphs:document.querySelectorAll('article p').length,
                         touch:button.width>=44&&button.height>=44,lit};})()""")
                 assert not layout['horizontal'] and layout['left']>=0 and layout['right']<=width,layout
-                assert layout['wordmark']=='Xynon' and layout['heading']=='Perché Xynon' and layout['paragraphs']==8 and layout['touch'] and layout['lit']>100,layout
+                assert layout['wordmark']=='Xynon' and layout['heading']=='Perché Xynon' and layout['touch'] and layout['lit']>100,layout
+                assert js("document.querySelector('article').textContent.replace(/\\s+/g,' ').trim()") == expected_mission
                 still=js("document.querySelector('#about-canvas').dataset.time")
                 delay(180);assert js("document.querySelector('#about-canvas').dataset.time")==still
                 capture(f'about-top-{width}x{height}')
@@ -257,9 +264,12 @@ def main():
                 def about_frame():return js("document.querySelector('#about-canvas').dataset.time")
                 before=about_frame();delay(180);assert about_frame()!=before
                 js('scrollTo(0,document.documentElement.scrollHeight)')
+                # A short editorial text may leave the mark visible even at
+                # the end; move it offscreen to exercise the same observer.
+                js("if(document.querySelector('#about-canvas').getBoundingClientRect().bottom>0)document.querySelector('.about-wordmark').style.transform='translateX(-5000px)'")
                 delay(120);before=about_frame();delay(180)
                 assert about_frame()==before,js("({scrollY,canvas:document.querySelector('#about-canvas').getBoundingClientRect().toJSON(),height:innerHeight,scrollHeight:document.documentElement.scrollHeight})")
-                js('scrollTo(0,0)');delay(180);assert about_frame()!=before
+                js("document.querySelector('.about-wordmark').style.transform='';scrollTo(0,0)");delay(180);assert about_frame()!=before
                 js("dispatchEvent(new PageTransitionEvent('pagehide',{persisted:true}))")
                 before=about_frame();delay(180);assert about_frame()==before
                 js("dispatchEvent(new PageTransitionEvent('pageshow',{persisted:true}))")

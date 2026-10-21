@@ -28,7 +28,7 @@ Le 11 migrazioni da `0001` a `0011` sono applicate al nuovo D1. Il database
 contiene 29 membri attivi dopo l'aggiornamento della lista privata. La publishable
 key Production fornita dal maintainer è salvata nella configurazione pubblica.
 I tre Worker secret sono installati. Il Worker è pubblicato nella versione
-`30e7f65e-d3ff-48da-b6a6-2812f490209a`, con
+`0287d25b-3ffe-4bf3-92ec-7b178b52dde2`, con
 [cache del codice e recupero dell'avvio](releases/2026-10-21-startup-cache-recovery.md), il marchio Xynon, la
 [calibrazione audio per la demo](releases/2026-10-21-xynon-audio-mvp.md) e la
 [Lissajous in supersampling](releases/2026-10-21-xynon-lissajous-smooth.md),
@@ -47,7 +47,9 @@ Gli esercizi sono ora [senza firma nell'angolo e senza fascia vuota sopra il men
 Il [riuso del profilo riavvia l'analisi vocale](releases/2026-10-21-xynon-live-voice-restore.md),
 con fruscii ripristinati per la guida iniziale.
 Il [Worker pitch bloccato recupera automaticamente](releases/2026-10-21-xynon-pitch-worker-recovery.md).
-L'artefatto corrente congelato è `artifacts/voice-lab-top-fix/release`;
+L'[aggiornamento completo con About](releases/2026-10-21-xynon-complete-update.md)
+include tutte le modifiche locali correnti, verificate prima della pubblicazione.
+L'artefatto corrente congelato è `artifacts/latest-update-release/release`;
 `artifacts/xynon-dist` resta l'uscita predefinita per le build future.
 
 Il cambio nameserver OVH verso `augustus.ns.cloudflare.com` e

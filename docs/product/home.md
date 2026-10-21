@@ -87,8 +87,8 @@ Home. In alto il marchio unisce la Lissajous 3D ciano/ocra alla scritta
 Movimento ridotto, sospensione fuori vista/in background e ritorno da BFCache
 seguono il comportamento della firma principale.
 
-Sotto il marchio compaiono **Perché Xynon**, il motto e il testo integrale
-fornito dal maintainer, con enfasi originali e colonna larga al massimo 640 px.
+Sotto il marchio compaiono **Perché Xynon** e il testo della missione
+rivisto dal maintainer, in sei paragrafi e colonna larga al massimo 640 px.
 La lettura scorre naturalmente su desktop e mobile. Testo esteso sempre
 visibile e marchio animato sono eccezioni intenzionali alle regole di copy
 breve e movimento solo funzionale: questa superficie è dedicata alla missione.
@@ -101,6 +101,9 @@ movimento ridotto, sospensione fuori vista e BFCache a 1366×768 e 390×844;
 controlla inoltre che il pulsante non si sovrapponga alle azioni sugli undici
 viewport della Home. Screenshot `about-top-*` e `about-full-*` in
 `artifacts/home-redesign`.
+
+La pagina e l'ultima revisione del testo sono pubblicate su staging Xynon nel
+[rilascio completo del 21 ottobre](../operations/releases/2026-10-21-xynon-complete-update.md).
 
 ## Firma e movimento
 
