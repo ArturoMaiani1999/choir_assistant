@@ -66,6 +66,7 @@ def main():
             cdp("Page.enable")
             cdp("Page.addScriptToEvaluateOnNewDocument", {"source": """
               window.rollErrors=[]; window.rollSounds=[]; window.rollEnded=0;
+              localStorage.setItem('choir-audio-output:v2',JSON.stringify({type:'bluetooth',confirmedAt:Date.now()}));
               addEventListener('error', e=>rollErrors.push(e.message));
               addEventListener('unhandledrejection', e=>rollErrors.push(String(e.reason?.stack||e.reason)));
               const setValue=AudioParam.prototype.setValueAtTime;

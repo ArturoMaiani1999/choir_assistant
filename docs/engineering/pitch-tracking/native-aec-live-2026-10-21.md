@@ -6,6 +6,14 @@
 
 ## Catena
 
+Aggiornamento 22 ottobre: la [perdita su note tenute](s25-held-voice-loss-2026-10-22.md)
+è riprodotta prima del detector. Un URL con `aec=all` richiede esplicitamente
+`echoCancellation:{exact:'all'}`; il percorso nativo accetta solo il modo
+richiesto e lo registra in diagnostica. Senza il flag resta il booleano true.
+Il profilo di calibrazione mantiene il valore effettivo nella firma, quindi
+`all` non riusa né sovrascrive il profilo della catena normale. Nessun cambio
+in-place: il S25+ ha rifiutato tale riconfigurazione nel confronto controllato.
+
 Con Uso gli altoparlanti, getUserMedia richiede `echoCancellation:{exact:true}`,
 `noiseSuppression:{exact:false}` e `autoGainControl:{exact:false}`. L'attach
 controlla i settings effettivi; valori mancanti, diversi o AEC all non sono

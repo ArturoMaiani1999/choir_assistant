@@ -59,7 +59,7 @@ def main():
                   scrollHeight: document.documentElement.scrollHeight,
                 }))()""")
                 assert result["volume"] == "30" and result["active"] == "true", result
-                assert result["label"] == "Disattiva metronomo" and result["offset"] == 160, result
+                assert result["label"] == "Disattiva metronomo" and result["offset"] == 0, result
                 assert result["scrollWidth"] == width and result["scrollHeight"] == height, result
                 shot = command(socket, 6, "Page.captureScreenshot", {"format": "png", "fromSurface": True})
                 (ARTIFACTS / f"default-{width}x{height}.png").write_bytes(base64.b64decode(shot["data"]))
@@ -96,9 +96,9 @@ def main():
                   const endMs = Math.ceil(pulseSeconds / speed * 1000 + 180);
                   for (wallMs = 0; wallMs <= endMs; wallMs += 1)
                     renderMetronome({running: true, performanceTime: wallMs / 1000 * speed, speed});
-                  assert(Math.abs(clicks[0].wallMs - 160) <= 1, 'first click waits for the 160 ms offset');
-                  assert(Math.abs(clicks[1].wallMs - (pulseSeconds / speed * 1000 + 160)) <= 1,
-                    'later clicks retain the wall-clock offset at every offered speed');
+                  assert(Math.abs(clicks[0].wallMs) <= 1, 'first click follows the music origin');
+                  assert(Math.abs(clicks[1].wallMs - pulseSeconds / speed * 1000) <= 1,
+                    'later clicks follow the media pulse at every offered speed');
                   timings.push({speed, clicks});
                 }
               } finally { playMetronomeClick = originalClick; state.lastMetronomeBeat = null; }

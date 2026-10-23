@@ -1,6 +1,6 @@
 const {test}=require('node:test'),assert=require('node:assert/strict'),fs=require('node:fs'),vm=require('node:vm');
 const Core=require('../frontend/echo_cancellation.js');
-function fixture(probeLoader=async()=>[{duration:2},{duration:2}]){
+function fixture(probeLoader=async()=>[{duration:2},{duration:2}],nativeMode=true){
   const elements=new Map(),nodes=[],listeners=new Set();let user='singer-a',now=1000;
   const el=id=>{if(!elements.has(id))elements.set(id,{checked:true,dataset:{},handlers:{},addEventListener(t,f){this.handlers[t]=f;},setAttribute(){}});return elements.get(id);};
   const node=()=>({connect(){},disconnect(){}});
@@ -9,7 +9,7 @@ function fixture(probeLoader=async()=>[{duration:2},{duration:2}]){
     createBuffer:(_,length)=>({length,copyToChannel(){}}),createBufferSource:()=>({...node(),start(){},stop(){}}),
     createConvolver(){throw Error('Native AEC must never create a custom convolver');},
     addEventListener(t,f){listeners.add(f);},removeEventListener(t,f){listeners.delete(f);}};
-  const config={echoCancellation:true,noiseSuppression:false,autoGainControl:false};
+  const config={echoCancellation:nativeMode==='all'?'all':true,noiseSuppression:false,autoGainControl:false};
   const track={readyState:'live',getSettings:()=>({...config})},stream={getAudioTracks:()=>[track]};
   const mixer={context,referenceOutput:node(),resume:async()=>{},setReferenceOutput:async()=>{}};
   const sandbox={window:{ChoirEchoCancellation:Core,ChoirCalibrationProbe:{id:'test-music',load:probeLoader}},document:{getElementById:el,hidden:false},localStorage:{getItem:()=> 'true'},
@@ -17,7 +17,7 @@ function fixture(probeLoader=async()=>[{duration:2},{duration:2}]){
     AudioWorkletNode:class{constructor(){this.port={close(){}};nodes.push(this);}connect(){}disconnect(){}},
     Worker:class{constructor(){throw Error('Native AEC must not start a custom filter worker');}}};
   vm.runInNewContext(fs.readFileSync(require.resolve('../frontend/echo_cancellation_ui.js'),'utf8'),sandbox);
-  const ui=sandbox.window.ChoirEchoCancellationUI.create({nativeAEC:true,userId:()=>user,mixer:()=>mixer,volume:()=>.62,running:()=>false});
+  const ui=sandbox.window.ChoirEchoCancellationUI.create({nativeAEC:true,nativeMode,userId:()=>user,mixer:()=>mixer,volume:()=>.62,running:()=>false});
   const begin=async()=>{ui.prepare();await ui.attach(stream);const p=ui.measure(()=>{});await new Promise(r=>setImmediate(r));return {p,node:nodes.at(-1)};};
   const packet=(value=.0001)=>({microphone:new Float32Array(64000).fill(value),reference:new Float32Array(64000).fill(.02)});
   return {ui,context,stream,config,listeners,nodes,begin,packet,setUser:u=>user=u,advance:ms=>now+=ms};
@@ -95,6 +95,28 @@ test('effective capture settings are required; unknown/disabled AEC never silent
     const f=fixture();Object.assign(f.config,changed);f.ui.prepare();await assert.rejects(f.ui.attach(f.stream),/cuffie/);
     assert.equal(f.ui.ready(),false);
   }
+});
+
+test('explicit all trial verifies the actual mode, keeps subtraction off and reports provenance',async()=>{
+  const f=fixture(undefined,'all'),{p,node}=await f.begin();node.port.onmessage({data:f.packet()});await p;
+  assert.equal(f.ui.ready(),true);assert.equal(f.ui.operational(),true);
+  const d=f.ui.diagnostics();assert.equal(d.requestedMode,'all');assert.equal(d.captureMode,'all');assert.equal(d.experimental,true);
+  assert.equal(d.appliedGain,0);assert.equal(f.ui.captureGraph().profile.calibrationVerified,true);
+  assert.ok(f.ui.lifecycle().events.every(e=>e.requestedMode==='all'));
+  f.config.echoCancellation=true;assert.equal(f.ui.operational(),false);assert.equal(f.ui.ready(),false);
+});
+
+test('all trial never silently accepts normal, absent, or disabled AEC or enabled NS/AGC',async()=>{
+  for(const changed of [{echoCancellation:true},{echoCancellation:false},{echoCancellation:undefined},{noiseSuppression:true},{autoGainControl:true}]){
+    const f=fixture(undefined,'all');Object.assign(f.config,changed);f.ui.prepare();
+    await assert.rejects(f.ui.attach(f.stream),/cuffie/);assert.equal(f.ui.operational(),false);
+  }
+});
+
+test('all measurement rejects a capture mode change during the acoustic check',async()=>{
+  const f=fixture(undefined,'all'),{p,node}=await f.begin();const rejected=assert.rejects(p,/Impostazioni audio cambiate/);
+  f.config.echoCancellation=true;node.port.onmessage({data:f.packet()});await rejected;
+  assert.equal(f.ui.ready(),false);
 });
 test('incomplete, nonfinite, strong echo and missing reference cannot verify platform capture',async()=>{
   for(const bad of ['short','nan','echo','reference']){

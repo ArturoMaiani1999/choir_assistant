@@ -71,6 +71,8 @@ def main():
             command(socket,1,'Page.enable')
             command(socket,2,'Page.addScriptToEvaluateOnNewDocument',{'source':"""
               window.__micStreams=[];window.__micCalls=0;
+              // Device expiry is covered by browser_settings_smoke.py.
+              localStorage.setItem('choir-audio-output:v2',JSON.stringify({type:'bluetooth',confirmedAt:Date.now()}));
               const get=navigator.mediaDevices?.getUserMedia.bind(navigator.mediaDevices);
               if(get)navigator.mediaDevices.getUserMedia=async(...args)=>{window.__micCalls++;const stream=await get(...args);window.__micStreams.push(stream);return stream};
             """})
@@ -101,6 +103,9 @@ def main():
 
             def practice_ready():
                 wait_for(socket,"typeof state!=='undefined'&&Boolean(state.runtime)&&document.body.dataset.view==='practice'&&!document.querySelector('#piece-picker-dialog').open")
+
+            def open_profile():
+                click('#piece-picker');click('#home-settings summary');click('#library-profile')
 
             for width,height in [(1366,768),(390,844)]:
                 command(socket,8,'Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':width==390})
@@ -135,22 +140,23 @@ def main():
                 click('#library-sing');click('#library-custom');click('#library-open');practice_ready()
                 assert evaluate(socket,14,"state.runtime.selectedPartId==='P3'")
 
-                # Profile is first and contains both the saved SATB and logout.
+                # Settings contains only rehearsal tools; the profile lives on Home.
                 click('#settings')
-                assert evaluate(socket,15,"document.querySelector('#settings-menu [role=menuitem]').id==='settings-menu-profile'")
-                click('#settings-menu-profile');capture(f'profile-{width}','#member-profile-dialog')
+                assert evaluate(socket,15,"document.querySelector('#settings-menu [role=menuitem]').id==='settings-menu-mixer'&&!document.querySelector('#settings-menu-profile,#settings-menu-repertoire')")
+                open_profile();capture(f'profile-{width}','#member-profile-dialog')
                 assert evaluate(socket,16,"document.querySelector('#member-profile-voice').value==='tenore'")
                 click('#member-profile-cancel')
-                assert evaluate(socket,160,"document.activeElement.id==='settings'")
-                click('#settings');click('#settings-menu-profile')
+                assert evaluate(socket,160,"document.activeElement.matches('#home-settings summary')")
+                click('#library-close');open_profile()
                 command(socket,1601,'Input.dispatchKeyEvent',{'type':'keyDown','key':'Escape','code':'Escape','windowsVirtualKeyCode':27})
                 settle(socket)
-                assert evaluate(socket,1602,"!document.querySelector('#member-profile-dialog').open&&document.activeElement.id==='settings'")
-                click('#settings');click('#settings-menu-profile')
+                assert evaluate(socket,1602,"!document.querySelector('#member-profile-dialog').open&&document.activeElement.matches('#home-settings summary')")
+                click('#library-close');open_profile()
                 for kind in ['mousePressed','mouseReleased']:
                     command(socket,1603,'Input.dispatchMouseEvent',{'type':kind,'x':1,'y':1,'button':'left','clickCount':1})
                 settle(socket)
-                assert evaluate(socket,1604,"!document.querySelector('#member-profile-dialog').open&&document.activeElement.id==='settings'")
+                assert evaluate(socket,1604,"!document.querySelector('#member-profile-dialog').open&&document.activeElement.matches('#home-settings summary')")
+                click('#library-close')
 
                 # First assigned piece asks once, and that choice wins over the old section link.
                 ME['preferredVoicePart']=None
@@ -158,7 +164,7 @@ def main():
                 go('/index.html?piece=ave-verum&part=P3&from=repertorio',"document.querySelector('#piece-picker-dialog')?.dataset.step==='part'&&document.querySelector('#library-part').options.length>0")
                 click('[data-preferred-voice=basso]');practice_ready()
                 assert evaluate(socket,162,"state.runtime.selectedPartId==='P4'")
-                click('#settings');click('#settings-menu-profile')
+                open_profile()
                 evaluate(socket,163,"document.querySelector('#member-profile-voice').value='tenore'")
                 click('#member-profile-save');wait_for(socket,"!document.querySelector('#member-profile-dialog').open")
                 assert ME['preferredVoicePart']=='tenore'
@@ -188,8 +194,11 @@ def main():
 
                 for _ in range(4):click('#next-measure')
                 before=evaluate(socket,17,'playbackSnapshot().beat')
-                click('#score-viewer-link')
-                wait_for(socket,"document.querySelector('#viewer-pages')?.getAttribute('aria-busy')==='false'")
+                assert evaluate(socket,170,"!document.querySelector('#score-viewer-link')")
+                # Previously shared reader URLs still preserve the rehearsal;
+                # the toolbar now keeps only the score/piano-roll workspace.
+                viewer_query=evaluate(socket,171,'practiceReturnQuery().toString()')
+                go('/score-viewer.html?'+viewer_query,"document.querySelector('#viewer-pages')?.getAttribute('aria-busy')==='false'")
                 click('#viewer-mixer-open')
                 assert evaluate(socket,18,"document.querySelector('#viewer-mixer').open")
                 bounds=evaluate(socket,19,"document.querySelector('#viewer-mixer').getBoundingClientRect().toJSON()")
@@ -218,12 +227,14 @@ def main():
                 click('#piece-picker');click('#library-sing');click('#library-custom');click('#library-open');practice_ready()
                 assert evaluate(socket,261,"document.querySelector('#exit-practice').textContent==='Menù'&&!new URLSearchParams(location.search).has('from')")
 
-                click('#settings');click('#settings-menu-profile');click('#settings-menu-account')
+                open_profile();click('#settings-menu-account')
                 wait_for(socket,"document.body.dataset.authMode==='sign-out'&&!document.querySelector('#signed-in-actions').hidden")
                 capture(f'logout-{width}')
                 assert evaluate(socket,27,"document.querySelector('#signed-in-actions a').textContent==='Annulla'&&!document.body.textContent.includes('Primo accesso')&&!document.body.textContent.includes('Accedi a')")
-                click('#signed-in-actions a');practice_ready()
-                click('#settings');click('#settings-menu-profile');click('#settings-menu-account')
+                click('#signed-in-actions a')
+                wait_for(socket,"document.querySelector('#piece-picker-dialog')?.open")
+                click('#library-sing');click('#library-custom');click('#library-open');practice_ready()
+                open_profile();click('#settings-menu-account')
                 wait_for(socket,"document.body.dataset.authMode==='sign-out'&&!document.querySelector('#signed-in-actions').hidden")
                 click('#signed-in-actions button')
                 assert evaluate(socket,28,"window.__authRedirect.startsWith('/sign-in?return_url=')")

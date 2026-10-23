@@ -41,8 +41,8 @@ take precedence over anything under `archive/`.
   work.
 - [Audit dei flussi di navigazione](product/navigation-ux-audit.md) — passaggi,
   ritorni e conservazione del contesto verificati su desktop e mobile.
-- [Relax mode](product/relax-mode.md) — curva di Lissajous 3D sul nero,
-  scia luminosa e controlli discreti.
+- [Relax mode](product/relax-mode.md) — riferimento storico della superficie
+  rimossa; il renderer 3D resta in Home e About.
 - [Performance monitoring privacy notice](product/performance-monitoring-privacy-notice.md) —
   draft copy shown before the first derived-metrics upload.
 

@@ -2,7 +2,7 @@
 
 **Status:** canonical  
 **Owner:** project maintainer  
-**Last reviewed:** 2026-10-21
+**Last reviewed:** 2026-10-22
 
 ## Direzione
 
@@ -79,7 +79,8 @@ contenitori si usano solo quando chiariscono un confine o un'interazione.
 Il precedente sfondo luminoso «a respiro» è eliminato da Repertorio, Direzione
 e laboratorio vocale: il fondo rimane inchiostro uniforme. La Lissajous bicolore
 della [Home](home.md) è l'unica firma animata condivisa; la Home conserva la
-composizione grande e Relax mantiene la sua superficie contemplativa dedicata.
+composizione grande. Relax mode è rimosso dalla webapp dal 22 ottobre 2026;
+il renderer condiviso resta necessario per Home e About.
 
 - Nel Repertorio la firma è esclusa: brani e avanzamento restano l'unico
   contenuto, senza area decorativa riservata in fondo alla pagina.
@@ -88,11 +89,12 @@ composizione grande e Relax mantiene la sua superficie contemplativa dedicata.
 - Direzione, prova, registrazione, partitura, risultati, analisi e impostazioni
   restano privi della firma piccola.
 
-La pagina [About](home.md#about-e-missione) riusa la firma 3D compatta al posto
+Le pagine [About Xynon e About the logo](home.md#about-e-missione) riusano la firma 3D compatta al posto
 della X nel marchio Xynon. È un'eccezione intenzionale dedicata all'identità;
-il testo della missione resta integralmente visibile con lettura a scorrimento.
+il testo della missione e la spiegazione del logo restano integralmente
+visibili con lettura a scorrimento.
 
-La firma della Home, il marchio About e la superficie di Relax rispettano movimento ridotto,
+La firma della Home e il marchio About rispettano movimento ridotto,
 sospensione in background e ritorno da BFCache. La loro animazione è
 un'eccezione intenzionale alla regola generale delle sole animazioni funzionali.
 

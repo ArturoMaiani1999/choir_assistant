@@ -1125,14 +1125,6 @@
   });
   for (let midi = 36; midi <= 84; midi += 1) { els.lab_low.add(new Option(Core.midiToName(midi), midi)); els.lab_high.add(new Option(Core.midiToName(midi), midi)); }
   els.lab_settings.addEventListener('click', () => openSettings(false));
-  document.getElementById('lab-relax').addEventListener('click', event => {
-    if (event.button || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    pendingStart = false;
-    els.lab_settings_dialog.close();
-    const returnPath = location.pathname + location.search + location.hash;
-    location.assign(`relax.html?return=${encodeURIComponent(returnPath)}`);
-  });
   els.lab_settings_close.addEventListener('click', () => { pendingStart = false; els.lab_settings_dialog.close(); });
   els.lab_settings_dialog.addEventListener('cancel', () => { pendingStart = false; });
   els.lab_settings_dialog.addEventListener('click', event => {

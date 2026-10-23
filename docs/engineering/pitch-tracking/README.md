@@ -2,7 +2,7 @@
 
 **Status:** canonical index
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-20
+**Last reviewed:** 2026-10-22
 
 ## Current contract
 
@@ -12,6 +12,9 @@ baseline remains selectable and regression-tested. CREPE/ONNX is an optional
 local diagnostic and is not shipped to singers.
 
 ## Active documents
+
+- [S25+: nota tenuta azzerata durante la base](s25-held-voice-loss-2026-10-22.md)
+  — catture reali AEC normale/raw/all, perdita prima del detector e limiti del confronto.
 
 - [S25+: prima misura controllata della calibrazione](s25-calibration-probe-2026-10-20.md)
   — tre probe reali, confronto dei livelli, salto di ritardo di 6 ms e ablation temporale.

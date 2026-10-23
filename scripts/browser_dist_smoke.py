@@ -137,7 +137,9 @@ def main() -> int:
                     + json.dumps(diagnostics, ensure_ascii=False)
                 )
 
-            visual_delay = evaluate(socket, call_id, """(() => {
+            visual_delay = evaluate(socket, call_id, """(async () => {
+              await applyAudioOutputChoice('standard');
+              document.querySelector('#audio-output-dialog').close();
               const advance = state.plumeSettings.timeAdvanceMs;
               const snapshot = { performanceTime: 3, speed: .75 };
               const actualBeat = state.runtime.beatAtSeconds(snapshot.performanceTime);
@@ -146,18 +148,16 @@ def main() -> int:
               const initial = { value: slider.value, label: els.settingsPianoRollDelayValue.textContent,
                 ms: state.pianoRollDelayMs, beat: delayed };
               const firstSettingId = els.settingsDialog.querySelector('.detector-setting')?.querySelector('h3')?.id;
-              els.settingsAudioOutputBluetooth.checked = true;
-              els.settingsAudioOutputBluetooth.dispatchEvent(new Event('change'));
+              await applyAudioOutputChoice('bluetooth');
               const bluetooth = { type: state.audioOutputType, delay: state.pianoRollDelayMs,
                 advance: state.plumeSettings.timeAdvanceMs,
-                stored: JSON.parse(sessionStorage.getItem(AUDIO_OUTPUT_SESSION_KEY))?.type,
+                stored: JSON.parse(localStorage.getItem(AUDIO_OUTPUT_STORAGE_KEY))?.type,
                 max: slider.max, firstSettingId };
-              sessionStorage.setItem(AUDIO_OUTPUT_SESSION_KEY, JSON.stringify({
+              localStorage.setItem(AUDIO_OUTPUT_STORAGE_KEY, JSON.stringify({
                 type: 'bluetooth', confirmedAt: Date.now() - 3600000,
               }));
               const connectionRetained = restoreAudioOutputPreference() && state.audioOutputType === 'bluetooth';
-              els.settingsAudioOutputStandard.checked = true;
-              els.settingsAudioOutputStandard.dispatchEvent(new Event('change'));
+              await applyAudioOutputChoice('standard');
               slider.value = '270'; slider.dispatchEvent(new Event('input'));
               slider.value = '410'; slider.dispatchEvent(new Event('input'));
               slider.dispatchEvent(new Event('change'));
@@ -172,8 +172,8 @@ def main() -> int:
             assert visual_delay["initial"]["ms"] == 270 and visual_delay["initial"]["label"] == "270 ms", visual_delay
             assert visual_delay["initial"]["beat"] < visual_delay["actualBeat"], visual_delay
             assert visual_delay["bluetooth"] == {
-                "type": "bluetooth", "delay": 270, "advance": 320, "stored": "bluetooth", "max": "600",
-                "firstSettingId": "settings-listening-heading",
+                "type": "bluetooth", "delay": 270, "advance": 190, "stored": "bluetooth", "max": "600",
+                "firstSettingId": "settings-audio-output-heading",
             }, visual_delay
             assert visual_delay["connectionRetained"] is True, visual_delay
             assert visual_delay["changed"]["ms"] == visual_delay["changed"]["stored"] == 410, visual_delay
@@ -586,7 +586,7 @@ def main() -> int:
             assert result["transposeLabel"] == "Transp" and result["transposeValue"] == "±0", result
             assert result["phraseUiRemoved"] and result["advancedUiRemoved"], result
             assert result["mixerChannels"] == 5, result
-            assert result["metronomeOffset"] == 160 and result["metronomeOffsetControlPresent"] is False, result
+            assert result["metronomeOffset"] == 0 and result["metronomeOffsetControlPresent"] is False, result
             assert result["scoreReady"] and f"/library-assets/{expected_piece}/" in result["audioSource"], result
             if voice_mix["available"]:
                 assert all(level > .0001 for level in audio_assets.values()), audio_assets

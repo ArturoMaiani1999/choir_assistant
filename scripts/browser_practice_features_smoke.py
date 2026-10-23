@@ -52,14 +52,14 @@ def main():
               assert(state.detectorSettings.medianWindowFrames === 3, 'global default median window');
               assert(state.plumeSettings.timeAdvanceMs === 270, 'global default visual advance');
               assert(state.plumeSettings.width === 2.5, 'global default plume width is 250%');
-              assert(state.plumeSettings.intensity === 1.75, 'global default plume intensity is 175%');
+              assert(state.plumeSettings.intensity === 1.6, 'global default trace intensity is 160%');
               assert(state.pianoRollDelayMs === 270, 'global default piano roll delay');
               assert(getComputedStyle(els.intonationReadout).display === 'none', 'intonation readout is hidden on desktop');
               assert(els.transpose.options.length === 25, 'semitone and octave options');
               // Approval is stubbed in this isolated test profile, never persisted.
               state.bundleApproved = true;
-              els.settingsAudioOutputStandard.checked = true;
-              els.settingsAudioOutputStandard.dispatchEvent(new Event('change'));
+              await applyAudioOutputChoice('standard');
+              document.querySelector('#audio-output-dialog').close();
               const ready = new Promise((resolve, reject) => {
                 const timer = setTimeout(() => reject(Error('transposed audio timeout')), 12000);
                 els.backingAudio.addEventListener('loadedmetadata', () => {clearTimeout(timer); resolve();}, {once:true});
@@ -100,16 +100,14 @@ def main():
               els.settingsMenuAdvanced.click();
               assert(els.settingsDialog.open, 'settings dialog opens');
               assert(els.settingsBasicPanel.hidden && !els.settingsAdvancedPanel.hidden, 'advanced settings selected');
-              assert(!document.querySelector('#settings-close'), 'settings dialog has no close button');
+              assert(document.querySelector('#settings-close'), 'settings dialog has an explicit close button');
               assert(els.settingsPianoRollDelay.max === '600', 'piano roll delay supports up to 600 ms latency');
               assert(els.settingsV1PlumeAdvance.max === '600', 'visual pitch advance supports Bluetooth latency');
-              els.settingsAudioOutputBluetooth.checked = true;
-              els.settingsAudioOutputBluetooth.dispatchEvent(new Event('change'));
+              await applyAudioOutputChoice('bluetooth');
               assert(state.audioOutputType === 'bluetooth' && state.pianoRollDelayMs === 270
-                && state.plumeSettings.timeAdvanceMs === 320,
-                'Bluetooth applies 320 ms only to the vocal trace advance');
-              els.settingsAudioOutputStandard.checked = true;
-              els.settingsAudioOutputStandard.dispatchEvent(new Event('change'));
+                && state.plumeSettings.timeAdvanceMs === 190,
+                'Bluetooth applies 190 ms only to the vocal trace advance');
+              await applyAudioOutputChoice('standard');
               assert(state.pianoRollDelayMs === 270 && state.plumeSettings.timeAdvanceMs === 270,
                 'standard output applies 270 ms to the vocal trace advance');
               els.settingsPianoRollDelay.value = '150';

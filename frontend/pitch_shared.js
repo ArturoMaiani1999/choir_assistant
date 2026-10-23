@@ -19,7 +19,8 @@
   });
   const PLUME_ADVANCE_MAX_MS = 600;
   const PLUME_WIDTH_PREFERENCE_VERSION = 2;
-  const PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1.75, color: '#72e0d2', timeAdvanceMs: 270 });
+  const PLUME_INTENSITY_PREFERENCE_VERSION = 1;
+  const PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1.6, color: '#72e0d2', timeAdvanceMs: 270 });
   const LEGACY_PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1, timeAdvanceMs: 200 });
   const VERSION_1_PLUME_DEFAULTS = Object.freeze({ width: 2.05, intensity: 1.75, timeAdvanceMs: 310 });
   const VERSION_2_3_PLUME_DEFAULTS = Object.freeze({ width: 2.5, intensity: 1.75, timeAdvanceMs: 280 });
@@ -45,6 +46,8 @@
     const savedPlumeWidth = Number(saved.v1PlumeWidth);
     const legacyInitialPlumeWidth = saved.plumeWidthPreferenceVersion !== PLUME_WIDTH_PREFERENCE_VERSION
       && Math.abs(savedPlumeWidth - 1) < 1e-9;
+    const legacyDefaultPlumeIntensity = saved.plumeIntensityPreferenceVersion !== PLUME_INTENSITY_PREFERENCE_VERSION
+      && Math.abs(Number(saved.v1PlumeIntensity) - 1.75) < 1e-9;
     return {
       detector: {
         rmsThreshold: migratedNumber('v1RmsThreshold', previousDetectorDefaults.rmsThreshold, DETECTOR_DEFAULTS.rmsThreshold),
@@ -56,7 +59,8 @@
       plume: {
         width: legacyInitialPlumeWidth ? PLUME_DEFAULTS.width
           : migratedNumber('v1PlumeWidth', previousPlumeDefaults.width, PLUME_DEFAULTS.width),
-        intensity: migratedNumber('v1PlumeIntensity', previousPlumeDefaults.intensity, PLUME_DEFAULTS.intensity),
+        intensity: legacyDefaultPlumeIntensity ? PLUME_DEFAULTS.intensity
+          : migratedNumber('v1PlumeIntensity', previousPlumeDefaults.intensity, PLUME_DEFAULTS.intensity),
         color: '#72e0d2',
         timeAdvanceMs: Math.max(0, Math.min(PLUME_ADVANCE_MAX_MS,
           migratedNumber('v1PlumeAdvanceMs', previousPlumeDefaults.timeAdvanceMs, PLUME_DEFAULTS.timeAdvanceMs))),
@@ -174,7 +178,7 @@
     context.save(); context.globalCompositeOperation = 'source-over';
     context.drawImage(surface.canvas, left, top, width/ratio, height/ratio); context.restore();
   }
-  return { PREFERENCE_KEY, SETTINGS_DEFAULTS_VERSION, DETECTOR_DEFAULTS, RECOGNITION_MODES, PLUME_ADVANCE_MAX_MS, PLUME_WIDTH_PREFERENCE_VERSION,
+  return { PREFERENCE_KEY, SETTINGS_DEFAULTS_VERSION, DETECTOR_DEFAULTS, RECOGNITION_MODES, PLUME_ADVANCE_MAX_MS, PLUME_WIDTH_PREFERENCE_VERSION, PLUME_INTENSITY_PREFERENCE_VERSION,
     PLUME_DEFAULTS, AURORA, readPreferences, recognitionSettings,
     plumeSegments, auroraStyle, visitPlumeColumns, drawConfidencePlume };
 });

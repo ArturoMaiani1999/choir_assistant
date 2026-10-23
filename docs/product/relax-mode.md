@@ -1,8 +1,13 @@
 # Relax mode
 
-**Status:** pubblicato e verificato su staging; superficie contemplativa  
+**Status:** storico; funzionalità rimossa dalla webapp
 **Owner:** project maintainer  
-**Last reviewed:** 2026-10-21
+**Last reviewed:** 2026-10-22
+
+Dal 22 ottobre 2026 la pagina, gli asset e tutti i collegamenti Relax mode
+sono rimossi dal codice della webapp. Il documento conserva il comportamento
+precedente come riferimento storico. Il renderer Lissajous condiviso rimane
+in uso nella [Home e in About](home.md).
 
 ## Esperienza
 

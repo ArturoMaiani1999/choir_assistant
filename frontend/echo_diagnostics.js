@@ -141,7 +141,7 @@
       if(preparing){token++;preparing=false;cleanup();void adapter.pause();}
       $('dialog').close();adapter.focus();
     }
-    $('open').addEventListener('click',()=>void open());
+    $('open')?.addEventListener('click',()=>void open());
     $('consent').addEventListener('change',()=>{$('start').disabled=!$('consent').checked;});
     $('start').addEventListener('click',()=>void start());$('stop').addEventListener('click',()=>void stop());
     $('close').addEventListener('click',requestClose);$('dialog').addEventListener('cancel',requestClose);

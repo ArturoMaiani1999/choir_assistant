@@ -105,13 +105,13 @@ def main():
             };})()""")
             assert not reported["microphoneOpened"], reported
 
-            timing = js("""(()=>{
+            timing = js("""(async()=>{
               const context=state.playbackMixer.context,rows=[];
               const original=Object.getOwnPropertyDescriptor(context,'outputLatency');
               try {
                 for(const speed of [1,.8])for(const type of ['standard','bluetooth']) {
                   const control=type==='bluetooth'?els.settingsAudioOutputBluetooth:els.settingsAudioOutputStandard;
-                  control.click();els.playbackSpeed.value=String(speed);
+                  await applyAudioOutputChoice(type);els.playbackSpeed.value=String(speed);
                   for(const injectedOutputMs of [0,150,300]) {
                     Object.defineProperty(context,'outputLatency',{configurable:true,get:()=>injectedOutputMs/1000});
                     const snapshot={performanceTime:10,speed,running:true};
@@ -127,7 +127,7 @@ def main():
               } finally {
                 if(original)Object.defineProperty(context,'outputLatency',original);
                 else delete context.outputLatency;
-                els.playbackSpeed.value='1';els.settingsAudioOutputStandard.click();
+                els.playbackSpeed.value='1';await applyAudioOutputChoice('bluetooth');
               }
               return rows;
             })()""")
@@ -135,14 +135,14 @@ def main():
             # permanent requirement: a future compensation should change it.
             for row in timing:
                 assert abs(row["effectiveRollDelayMs"] - 270) < 1e-6, row
-                expected = 320 if row["type"] == "bluetooth" else 270
+                expected = 190 if row["type"] == "bluetooth" else 270
                 assert abs(row["effectiveVoiceAdvanceMs"] - expected) < 1e-6, row
                 assert row["reportedOutputMs"] == row["injectedOutputMs"], row
 
             levels_before = js("({master:Number(els.volume.value),accompaniment:state.accompanimentLevel,channels:[...state.playbackMixer.channels].map(([media])=>({source:media.currentSrc,requestedGain:state.playbackMixer.levels.get(media)}))})")
             if args.live_input:
                 js("""(async()=>{
-                  if(echoCancellationUI.enabled())document.getElementById('echo-enabled').click();
+                  if(echoCancellationUI.enabled())await echoCancellationUI.setEnabled(false);
                   await toggleMicrophone();
                   if(state.microphoneStatus!=='active')throw Error('Synthetic microphone did not start');
                   await new Promise(r=>setTimeout(r,500));
@@ -177,7 +177,7 @@ def main():
                 for route in ["standard", "bluetooth"]:
                     result = js("""(async()=>{
                       const type=ROUTE,sleep=ms=>new Promise(r=>setTimeout(r,ms));
-                      (type==='bluetooth'?els.settingsAudioOutputBluetooth:els.settingsAudioOutputStandard).click();
+                      await applyAudioOutputChoice(type);
                       state.clock.pause();state.clock.setSpeed(1);queueAudioSeek(5);
                       await waitForMediaSeek(els.backingAudio);
                       await state.clock.play();render();
@@ -190,6 +190,7 @@ def main():
                           const s=playbackSnapshot();
                           samples.push({wallMs:now,mediaSeconds:s.performanceTime,
                             rollSeconds:Math.max(0,(state.lastPianoRollTime??s.performanceTime)-state.pianoRollDelayMs/1000*s.speed),
+                            scoreSeconds:state.runtime.secondsAtBeat(state.lastScoreEvent?.beat??s.beat),
                             renderedSeconds:state.lastSnapshot?.performanceTime});
                           if(now-start>=1800)resolve();else requestAnimationFrame(tick);
                         };requestAnimationFrame(tick);
@@ -198,11 +199,14 @@ def main():
                       const gaps=samples.slice(1).map((s,i)=>s.wallMs-samples[i].wallMs).sort((a,b)=>a-b);
                       const backwardSteps=samples.slice(1).filter((s,i)=>s.rollSeconds+1e-6<samples[i].rollSeconds).length;
                       const moves=samples.slice(1).map((s,i)=>s.rollSeconds-samples[i].rollSeconds);
+                      const scoreMoves=samples.slice(1).map((s,i)=>s.scoreSeconds-samples[i].scoreSeconds);
                       const duration=(samples.at(-1).wallMs-samples[0].wallMs)/1000;
                       const distribution=values=>{const a=values.filter(Number.isFinite).sort((a,b)=>a-b);return {
                         count:a.length,median:a[Math.floor(a.length/2)]??null,p95:a[Math.min(a.length-1,Math.floor(a.length*.95))]??null,max:a.at(-1)??null};};
                       return {viewport:[innerWidth,innerHeight],type,samples,
                         drawFps:(samples.length-1)/duration,movementFps:moves.filter(d=>d>1e-6).length/duration,
+                        scoreMovementFps:scoreMoves.filter(d=>d>1e-6).length/duration,
+                        repeatedScorePositions:scoreMoves.filter(d=>Math.abs(d)<=1e-6).length,
                         repeatedPositions:moves.filter(d=>Math.abs(d)<=1e-6).length,maxMovementStepMs:Math.max(...moves)*1000,
                         renderCostMs:distribution(probeRenderCosts),pitchCostMs:distribution(probePitchCosts),pitchResultAgeMs:distribution(probePitchAges),
                         workerDisabled:state.pitchWorkerDisabled,voicedSamples:state.pitchSamples.filter(p=>p.trackedPitch!=null).length,
@@ -217,6 +221,7 @@ def main():
                     assert result["backwardSteps"] == 0, result
                     assert result["maxVisualDelayErrorMs"] < 150, result
                     assert result["movementFps"] > result["drawFps"] * .9, result
+                    assert result["scoreMovementFps"] > result["drawFps"] * .9, result
                     assert result["maxMovementStepMs"] < 120, result
                     assert not result["overflow"] and result["microphoneOpened"] == args.live_input, result
                     assert result["levels"] == levels_before, result["levels"]
@@ -230,7 +235,7 @@ def main():
                 "syntheticInput": args.live_input,"forcedFallback":args.force_pitch_fallback,
                 "cpuSlowdown":args.cpu_slowdown,"injectedClockStepMs":args.clock_step_ms,
                 "trackSettings":js("state.microphoneStream?.getAudioTracks()[0]?.getSettings()??null"),
-                "finding": "Output latency reports do not affect the 270 ms roll delay or fixed 270/320 ms voice correction",
+                "finding": "Output latency reports do not affect the 270 ms roll delay or fixed 270/190 ms voice correction",
             }
             if args.live_input:
                 js("(async()=>{await stopMicrophone();return state.microphoneStatus})()")

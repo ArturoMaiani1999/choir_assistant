@@ -5,7 +5,17 @@ assert.equal(shared.PREFERENCE_KEY, 'choir-detector-settings:v1');
 assert.equal(shared.SETTINGS_DEFAULTS_VERSION, 4, 'advanced-setting defaults carry an explicit version');
 assert.deepEqual(shared.DETECTOR_DEFAULTS,
   { rmsThreshold: .000002, weakVoiceMode: false, fastAlpha: .65, slowAlpha: .65, medianWindowFrames: 3 });
-assert.deepEqual(shared.PLUME_DEFAULTS, { width: 2.5, intensity: 1.75, color: '#72e0d2', timeAdvanceMs: 270 });
+assert.deepEqual(shared.PLUME_DEFAULTS, { width: 2.5, intensity: 1.6, color: '#72e0d2', timeAdvanceMs: 270 });
+assert.equal(shared.readPreferences({ getItem: () => JSON.stringify({
+  settingsDefaultsVersion: 4, v1PlumeIntensity: 1.75,
+}) }).plume.intensity, 1.6, 'the previously saved 175% default becomes 160%');
+assert.equal(shared.readPreferences({ getItem: () => JSON.stringify({
+  settingsDefaultsVersion: 4, v1PlumeIntensity: 1.4,
+}) }).plume.intensity, 1.4, 'a custom intensity survives the default change');
+assert.equal(shared.readPreferences({ getItem: () => JSON.stringify({
+  settingsDefaultsVersion: shared.SETTINGS_DEFAULTS_VERSION,
+  plumeIntensityPreferenceVersion: shared.PLUME_INTENSITY_PREFERENCE_VERSION, v1PlumeIntensity: 1.75,
+}) }).plume.intensity, 1.75, 'a new explicit 175% choice is preserved after migration');
 assert.equal(shared.PLUME_WIDTH_PREFERENCE_VERSION, 2, 'plume width preferences carry an explicit default version');
 assert.equal(shared.PLUME_ADVANCE_MAX_MS, 600, 'visual advance supports Bluetooth latency');
 const preferences = shared.readPreferences({ getItem: () => JSON.stringify({

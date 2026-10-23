@@ -29,7 +29,7 @@ CORE_ASSETS = (
     "performance_client.js", "performance_review.js", "recording_client.js", "progress_client.js", "aggregate_pitch.js",
     "cockpit.css", "cockpit.js", "pitch_lab.css", "pitch_lab_core.js", "pitch_lab_worker.js", "pitch_lab.js",
     "repertorio.css", "repertorio.js", "auth.css", "app.js", "voice_lab_core.js",
-    "voice_lab.js", "voice_lab_curves.js", "score_viewer.js", "relax.css", "relax.js", "lissajous.js", "home.css", "home.js", "about.css", "about.js",
+    "voice_lab.js", "voice_lab_curves.js", "score_viewer.js", "audio_output.js", "lissajous.js", "home.css", "home.js", "about.css", "about.js",
 )
 FORBIDDEN_TEXT = ("__pitchTestHooks", "/api/", "cdn.jsdelivr", "unpkg", "localhost")
 API_CLIENT_ROUTES = {
@@ -357,10 +357,10 @@ def write_headers(destination: Path, *, worker_config: Path = ROOT / "wrangler.j
 /repertorio.html
   Cache-Control: no-cache
 
-/relax.html
+/about.html
   Cache-Control: no-cache
 
-/about.html
+/about-logo.html
   Cache-Control: no-cache
 
 /sign-in.html
@@ -485,14 +485,11 @@ def main() -> int:
         viewer_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, viewer_index)
     viewer_index = viewer_index.replace("runtime-config.js", runtime_name)
     (destination / "score-viewer.html").write_text(viewer_index, encoding="utf-8")
-    relax_index = (FRONTEND / "relax.html").read_text(encoding="utf-8")
-    for original, fingerprinted in names.items():
-        relax_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, relax_index)
-    (destination / "relax.html").write_text(relax_index, encoding="utf-8")
-    about_index = (FRONTEND / "about.html").read_text(encoding="utf-8")
-    for original, fingerprinted in names.items():
-        about_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, about_index)
-    (destination / "about.html").write_text(about_index, encoding="utf-8")
+    for about_page in ("about.html", "about-logo.html"):
+        about_index = (FRONTEND / about_page).read_text(encoding="utf-8")
+        for original, fingerprinted in names.items():
+            about_index = re.sub(rf'{re.escape(original)}(?:\?v=[^"\']+)?', fingerprinted, about_index)
+        (destination / about_page).write_text(about_index, encoding="utf-8")
     for auth_page in ("sign-in.html", "sign-up.html", "sign-out.html", "not-authorized.html"):
         auth_index = (FRONTEND / auth_page).read_text(encoding="utf-8")
         for original, fingerprinted in names.items():

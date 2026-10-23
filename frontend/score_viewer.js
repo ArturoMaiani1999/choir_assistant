@@ -16,6 +16,8 @@
   let runtime = null, audioManifest = null, bundle = null, activeElements = [], voiceElements = new Map(), raf = 0, playbackPosition = 0;
   let selections = { accompaniment: true, voices: new Set() }, pageCount = 0, lastCursorPage = -1, lastCursorSystem = null, fullScoreSlots = [];
   let transportStartedAt = null, transportStartedPosition = 0;
+  const presentationTime = new window.PracticeMath.VisualPlaybackTime();
+  let waiting = false;
   const seekableAudioUrls = new Map();
   const paperPreferenceKey = 'choir-score-paper:v1';
   const paperColors = new Set(['#c3c0b6', '#e3e8e6', '#ffffff']);
@@ -90,8 +92,9 @@
   }
   function transportSeconds() {
     if (transportStartedAt == null || els.audio.paused) return Math.max(0, els.audio.currentTime || playbackPosition);
-    const elapsed = Math.max(0, (performance.now()-transportStartedAt)/1000);
-    return Math.max(els.audio.currentTime || 0, transportStartedPosition+elapsed);
+    return presentationTime.update({performanceTime:els.audio.currentTime || transportStartedPosition,
+      running:!els.audio.ended,speed:els.audio.playbackRate},performance.now(),
+      waiting||els.audio.seeking||els.audio.readyState<3||(mixer.context&&mixer.context.state!=='running'));
   }
   async function applyMix({ resume = !els.audio.paused, time = activeElements.length ? transportSeconds() : playbackPosition } = {}) {
     if (!audioManifest) return;
@@ -314,11 +317,13 @@
     // playbackPosition remains authoritative while a freshly loaded media
     // element is still reporting zero for a seek it has already accepted.
     const requestedTime = Math.max(0, playbackPosition);
-    await Promise.all(activeElements.map((audio) => { audio.currentTime = requestedTime; return audio.play(); }));
+    for(const audio of activeElements)audio.currentTime=requestedTime;
+    await mixer.playTogether(activeElements);
     transportStartedPosition=requestedTime;transportStartedAt=performance.now();
     els.play.textContent = 'Ⅱ Pausa'; els.play.setAttribute('aria-pressed','true'); cancelAnimationFrame(raf); raf = requestAnimationFrame(updateCursor);
   }
   function pausePlayback() {
+    mixer.cancelGroupStart();presentationTime.reset();
     playbackPosition=transportSeconds();transportStartedAt=null;
     activeElements.forEach((audio) => audio.pause());
     els.play.textContent = '▶ Play'; els.play.setAttribute('aria-pressed','false'); cancelAnimationFrame(raf); updateCursor();
@@ -332,10 +337,7 @@
     console.warn('Riproduzione non avviata', error);
   }
   function synchronizeStems() {
-    if (els.audio.paused) return;
-    for (const audio of activeElements.slice(1)) {
-      if (Math.abs(audio.currentTime - els.audio.currentTime) > .08) audio.currentTime = els.audio.currentTime;
-    }
+    mixer.synchronize(els.audio,activeElements.slice(1));
   }
   async function openPiece(pieceId, { updateHistory = true } = {}) {
     const generation = ++loadGeneration; pausePlayback(); stopActive(); clearSeekableAudioUrls();
@@ -419,6 +421,15 @@
     });
     els.audio.addEventListener('ended',pausePlayback);
     els.audio.addEventListener('timeupdate',synchronizeStems);
+    for(const event of ['play','pause','seeking','seeked','ratechange','emptied','ended'])
+      els.audio.addEventListener(event,()=>{presentationTime.reset();if(['play','emptied','ended'].includes(event))waiting=false;});
+    els.audio.addEventListener('waiting',()=>{waiting=true;presentationTime.reset();activeElements.slice(1).forEach(audio=>audio.pause());});
+    els.audio.addEventListener('playing',()=>{
+      waiting=false;presentationTime.reset();
+      if(!mixer.startingGroup)for(const audio of activeElements.slice(1)){
+        audio.currentTime=els.audio.currentTime;void audio.play().catch(handlePlaybackError);
+      }
+    });
     window.addEventListener('pagehide',clearSeekableAudioUrls);
     document.addEventListener('keydown',(event)=>{
       if (els.mixer.open || ['INPUT','SELECT','TEXTAREA','BUTTON','A'].includes(document.activeElement?.tagName)) return;

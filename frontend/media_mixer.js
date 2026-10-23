@@ -103,6 +103,9 @@
       this.workletPromise = null;
       this.referenceOutput = null;
       this.calibrationMuted = false;
+      this.startingGroup = false;
+      this.groupGeneration = 0;
+      this.driftObservations = new WeakMap();
     }
 
     async _ensureContext() {
@@ -202,6 +205,63 @@
       // their default value for the first render quantum. Reapply on resume.
       this.setTranspose(this.transposeSemitones);
       return this.context.state !== 'suspended';
+    }
+
+    async playTogether(mediaElements) {
+      const media = [...new Set(mediaElements)].filter(Boolean);
+      if (!media.length) return;
+      const generation = ++this.groupGeneration;
+      const position = media[0].currentTime || 0;
+      this.startingGroup = true;
+      try {
+        await this.resume(media);
+        // A play event can precede actual decoder readiness. Do not let the
+        // ready SATB files run while the accompaniment is still buffering.
+        await Promise.all(media.map(audio => new Promise((resolve, reject) => {
+          if (audio.readyState >= 3) { resolve(); return; }
+          let timeout;
+          const cleanup = () => { clearTimeout(timeout); audio.removeEventListener('canplay', ready); audio.removeEventListener('error', failed); };
+          const ready = () => { cleanup(); resolve(); };
+          const failed = () => { cleanup(); reject(new Error('Una traccia audio non è disponibile.')); };
+          audio.addEventListener('canplay', ready, { once: true });
+          audio.addEventListener('error', failed, { once: true });
+          timeout = setTimeout(failed, 8000);
+          audio.preload = 'auto';
+          if (audio.readyState === 0) audio.load();
+        })));
+        if (generation !== this.groupGeneration) return;
+        for (const audio of media) {
+          if (Math.abs(audio.currentTime - position) > .005) audio.currentTime = position;
+          this.driftObservations.delete(audio);
+        }
+        await Promise.all(media.map(audio => audio.play()));
+      } catch (error) {
+        if (generation === this.groupGeneration) media.forEach(audio => audio.pause());
+        throw error;
+      } finally {
+        if (generation === this.groupGeneration) this.startingGroup = false;
+      }
+    }
+
+    cancelGroupStart() { this.groupGeneration++; this.startingGroup = false; }
+
+    synchronize(master, followers, nowMs = performance.now()) {
+      if (master.paused || master.seeking || master.readyState < 3) return;
+      for (const audio of followers) {
+        if (audio.paused || audio.seeking || audio.readyState < 3) { this.driftObservations.delete(audio); continue; }
+        const drift = audio.currentTime - master.currentTime;
+        const previous = this.driftObservations.get(audio);
+        // A single coarse Bluetooth clock reading is not evidence of drift.
+        if (Math.abs(drift) <= .04) { this.driftObservations.delete(audio); continue; }
+        if (!previous || Math.sign(drift) !== Math.sign(previous.drift)) {
+          this.driftObservations.set(audio, { drift, since: nowMs, count: 1 }); continue;
+        }
+        previous.count++;
+        if (previous.count >= 3 && nowMs - previous.since >= 300) {
+          audio.currentTime = master.currentTime;
+          this.driftObservations.delete(audio);
+        }
+      }
     }
 
     muteForCalibration(muted) {

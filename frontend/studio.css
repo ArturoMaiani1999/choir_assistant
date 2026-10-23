@@ -46,42 +46,66 @@ button:disabled{cursor:not-allowed}
 .practice-dialog{padding:32px;border-radius:20px;background:#172327;box-shadow:0 24px 100px #0008;max-height:88dvh;border:1px solid #ffffff1c}
 .practice-dialog::backdrop{background:#071013ba;backdrop-filter:blur(9px)}
 .calibration-dialog{width:min(480px,calc(100vw - 28px));box-sizing:border-box;max-width:480px}
-.audio-listening-setting{padding-bottom:16px;border-bottom:1px solid var(--line);margin-bottom:16px}
-.audio-listening-setting .echo-enable-control{display:grid;margin:0;padding:8px 0;background:none;border:0;min-height:56px}
-.audio-listening-setting .echo-enable-control:has(input:checked){background:none}
-.audio-echo-status{display:block;color:var(--muted);font-size:12px;margin:0 0 8px 52px}
-.audio-listening-setting .echo-test-details{border-top:1px solid var(--line);margin-top:12px;padding-top:4px}
-.audio-listening-setting summary{min-height:44px;display:flex;align-items:center;cursor:pointer;color:var(--muted);font-size:13px}
-.audio-listening-setting .echo-test-details p{font-size:12px;line-height:1.5;color:var(--muted)}
 .calibration-entry #settings-calibrate{background:var(--amber);color:var(--ink);border-color:transparent;white-space:nowrap}
 #settings-basic-panel .detector-setting{padding:16px 0;margin:0;border:0;border-bottom:1px solid var(--line);border-radius:0;background:none;box-shadow:none}
 #settings-basic-panel .calibration-entry{display:flex;align-items:center;justify-content:space-between;gap:12px}
 #settings-basic-panel .calibration-entry>div:first-child{display:grid;gap:7px}
-#settings-basic-panel :is(.listening-mode-setting,.calibration-entry) h3{margin:0;font-size:15px;font-weight:600}
-#settings-basic-panel :is(#settings-listening-hint,#settings-calibration-hint){margin:8px 0 0;color:var(--muted);font-size:12px;line-height:1.45}
+#settings-basic-panel .calibration-entry h3{margin:0;font-size:15px;font-weight:600}
+#settings-basic-panel #settings-calibration-hint{margin:8px 0 0;color:var(--muted);font-size:12px;line-height:1.45}
 #settings-basic-panel #settings-calibration-hint{margin:0;max-width:30ch}
 #settings-basic-panel .calibration-entry{padding-block:20px}
-.settings-connection>summary{display:flex;align-items:center;gap:12px;min-height:48px;cursor:pointer;color:var(--muted);font-size:13px;list-style:none}
-.settings-connection>summary::-webkit-details-marker{display:none}
-.settings-connection>summary span{margin-left:auto;font-size:12px}
-.settings-connection>summary::after{content:'+';color:var(--amber);font-size:17px}
-.settings-connection[open]>summary::after{content:'−'}
-#settings-basic-panel .settings-connection .audio-output-setting{padding-top:4px}
 #settings-basic-panel .audio-output-choice{min-height:48px}
-#settings-basic-panel .listening-mode-setting .audio-output-choices{grid-template-columns:repeat(2,minmax(0,1fr));margin-top:12px}
-#settings-basic-panel .audio-listening-setting .audio-echo-status{margin:0 0 8px}
-@media(max-width:520px){#settings-basic-panel .calibration-entry{align-items:stretch;flex-direction:column;gap:14px}#settings-basic-panel .calibration-entry #settings-calibrate{width:100%}}
 .detector-settings-dialog .audio-output-choice{display:flex;margin:0;box-sizing:border-box}
 .detector-settings-dialog .audio-output-choices{margin-top:12px}
 .detector-settings-dialog .audio-output-setting{margin-bottom:8px!important}
-#settings-basic-panel .audio-listening-setting{margin-bottom:0;padding-bottom:4px}
-#settings-basic-panel .audio-listening-setting summary{margin:0}
 .settings-appearance>summary{display:flex;align-items:center;min-height:44px;cursor:pointer;color:var(--muted);font-size:13px}
 .settings-appearance>summary::after{content:'+';margin-left:auto;color:var(--amber);font-size:17px}
 .settings-appearance[open]>summary::after{content:'−'}
 .calibration-header{display:flex;justify-content:space-between;align-items:center;gap:16px}
 .calibration-header h2{margin:0}
 .calibration-header button{min-width:44px;min-height:44px;background:transparent;color:var(--text);border:1px solid var(--line);border-radius:8px;font-size:24px;cursor:pointer}
+.audio-device-dialog{width:min(440px,calc(100vw - 32px));max-width:440px;padding:24px}
+.audio-device-dialog .calibration-header h2{font:500 23px/1.25 Georgia,serif}
+.audio-device-options{display:grid;gap:12px;margin:0;padding:0;border:0;min-width:0}
+.audio-device-options .audio-output-choice{min-height:56px;margin:0;padding:14px;display:flex;align-items:center;gap:12px;border:1px solid var(--line);border-radius:var(--radius);background:transparent;cursor:pointer}
+.audio-device-options .audio-output-choice:has(:checked){border-color:var(--cyan);background:#86d6ca0a}
+.audio-output-choice input{flex:none;accent-color:var(--cyan)}
+.audio-output-choice strong{font-size:14px;font-weight:500;line-height:1.4}
+.audio-device-dialog .dialog-actions{margin-top:24px}
+.audio-device-dialog #audio-output-confirm{min-height:44px;background:var(--amber);color:var(--ink);border:0;border-radius:8px;padding:10px 22px}
+.audio-device-dialog #audio-output-confirm:disabled{opacity:.4}
+.audio-output-heading{position:relative;display:flex;align-items:center;gap:8px}
+#settings-basic-panel .audio-output-heading{justify-content:flex-start}
+.audio-output-heading h3{margin:0;font-size:15px;font-weight:600}
+.audio-device-info{margin:12px 0;color:var(--muted);font-size:13px}
+.setting-info.audio-output-info{display:inline-flex;align-items:center;justify-content:center;flex:none;min-width:44px;min-height:44px;width:44px;height:44px;margin:0;border:0;border-radius:8px;background:none;color:var(--muted);font-size:14px}
+.setting-info.audio-output-info::after{display:none}
+.audio-output-info::before{content:' ';position:absolute;width:18px;height:18px;border:1px solid currentColor;border-radius:50%}
+.audio-output-help{position:absolute;z-index:5;top:calc(100% + 4px);left:0;width:min(300px,100%);margin:0!important;padding:12px;border:1px solid var(--line);border-radius:8px;background:var(--ink);color:var(--text)!important;font-size:12px!important;font-weight:400;line-height:1.5;visibility:hidden;opacity:0;transition:opacity .16s}
+.audio-output-info:is(:hover,:focus-visible,[aria-expanded=true])+.audio-output-help,.audio-output-help:hover{visibility:visible;opacity:1}
+.audio-output-info[data-dismissed=true]+.audio-output-help{visibility:hidden;opacity:0}
+.audio-output-status{display:block;margin-top:10px;color:var(--muted);font-size:12px}
+#settings-basic-panel .audio-output-choices{display:grid;grid-template-columns:1fr;gap:8px}
+#settings-basic-panel .audio-output-choice{min-height:44px;padding:10px 12px;gap:10px}
+.audio-output-setting .audio-output-choice input{width:18px;height:18px;margin:0}
+.settings-appearance>summary::-webkit-details-marker{display:none}
+.settings-appearance>summary{list-style:none}
+@media(prefers-reduced-motion:reduce){.audio-output-help{transition:none}}
+#settings-dialog{padding:24px;max-height:calc(100dvh - 32px)}
+#settings-basic-panel .detector-setting{padding-block:10px}
+#settings-basic-panel .calibration-entry{flex-direction:row;align-items:center;gap:12px;padding-block:14px}
+#settings-basic-panel .calibration-entry>div:first-child{min-width:0;gap:4px}
+#settings-basic-panel .calibration-entry #settings-calibrate{flex:none;width:auto;min-height:44px;padding:10px 12px}
+#settings-basic-panel .setting-info:not(.audio-output-info){min-width:44px;min-height:44px;width:44px;height:44px;margin:0;vertical-align:middle;background:none;border:0}
+#settings-basic-panel .detector-setting{position:relative}
+#settings-basic-panel .setting-info:not(.audio-output-info){position:static}
+#settings-basic-panel .setting-info:not(.audio-output-info)::after{left:0;right:auto;top:48px;bottom:auto;width:min(280px,100%);transform:none;box-sizing:border-box}
+#settings-basic-panel .detector-setting h3{font-size:14px}
+#settings-basic-panel .detector-setting input[type=range]{min-height:44px;margin:0}
+#settings-basic-panel .score-paper-presets{gap:8px;flex-wrap:wrap;margin-top:8px}
+#settings-basic-panel .score-paper-presets button{min-height:44px;min-width:44px;padding:8px 12px}
+#settings-basic-panel .score-paper-color-row{min-height:44px}
+@media(min-width:560px){#settings-basic-panel .audio-output-choices{grid-template-columns:repeat(2,minmax(0,1fr))}}
 .calibration-cue{display:flex;align-items:center;justify-content:space-between;gap:16px;min-height:164px;border-block:1px solid var(--line);margin:16px 0 10px;padding:14px 0;box-sizing:border-box}
 .calibration-cue-copy{min-width:0}
 .calibration-cue #calibration-step{margin:0 0 8px;font-size:12px;color:var(--muted)}
@@ -250,9 +274,6 @@ button:disabled{cursor:not-allowed}
 #lab-settings-save{background:var(--amber);color:#182124;border:0;font-weight:650}
 .lab-range-dialog{width:min(880px,calc(100vw - 40px));max-width:880px;box-sizing:border-box;padding:30px 32px 26px;overflow:auto}
 .lab-range-dialog-heading{margin-bottom:24px}.lab-range-dialog-heading>span{display:block;margin-bottom:7px;color:var(--amber);font-size:10px;font-weight:800;letter-spacing:.14em}.lab-range-dialog-heading h2{margin:0;font-size:28px}
-.lab-range-dialog-heading:has(.lab-relax-link){position:relative;padding-right:106px;min-height:52px}
-.lab-relax-link{position:absolute;right:0;top:4px;display:inline-flex;align-items:center;min-height:44px;padding:8px 12px;border:1px solid var(--line);border-radius:9px;color:var(--muted);text-decoration:none;font-size:12px}
-.lab-relax-link:hover{color:var(--text);border-color:var(--cyan)}
 .lab-range-dialog-body{display:grid;grid-template-columns:220px minmax(0,1fr);gap:32px;align-items:start}
 .lab-range-fields{display:grid;gap:19px}.lab-range-dialog .lab-range-field{display:grid;gap:8px;margin:0;color:#aebfc2;font-size:12px;font-weight:650}.lab-range-dialog .lab-range-field select{width:100%;margin:0;color:#edf4f2;font-size:14px}
 .lab-audio-setting{display:grid;gap:9px;padding-top:17px;border-top:1px solid #ffffff14;color:#aebfc2;font-size:12px;font-weight:650}.lab-switch-row{display:flex!important;gap:11px!important;align-items:flex-start;padding:11px 12px;border:1px solid #ffffff16;border-radius:10px;background:#0e1b20}.lab-switch-row input{width:17px;height:17px;margin:2px 0 0;accent-color:#d9b46e}.lab-switch-row span{display:grid;gap:3px}.lab-switch-row strong{color:#edf4f2;font-size:13px}.lab-switch-row small{color:#84999b;font-size:10px;font-weight:500;line-height:1.35}
@@ -539,7 +560,6 @@ button:disabled{cursor:not-allowed}
   .practice-toolbar .toolbar-actions .speed-control{display:inline-flex!important;flex:0 0 auto}
   .practice-toolbar .speed-control select{width:58px;min-height:32px;padding:4px 18px 4px 7px;border-radius:8px;font-size:10.5px}
   .practice-toolbar .toolbar-actions .mode-button{min-width:0;min-height:32px;padding:5px 6px;border-color:#ffffff12;border-radius:8px;font-size:10.5px;white-space:nowrap}
-  .practice-toolbar .toolbar-actions .score-viewer-link{font-size:10px}
   .practice-toolbar .toolbar-actions #settings{display:grid;width:32px;min-width:32px;min-height:32px;padding:0;place-items:center;font-size:10.5px}
   .practice-toolbar .settings-label{display:none}
   .practice-toolbar .settings-icon{display:block}

@@ -255,10 +255,12 @@
   }
 
   class MediaPlaybackClock {
-    constructor({ mediaElement, scoreRuntime }) {
+    constructor({ mediaElement, scoreRuntime, startPlayback = null, cancelPlayback = null }) {
       this.media = mediaElement;
       this.scoreRuntime = scoreRuntime;
       this.preRenderedSpeed = null;
+      this.startPlayback = startPlayback;
+      this.cancelPlayback = cancelPlayback;
     }
 
     get running() {
@@ -271,11 +273,13 @@
 
     async play() {
       if (this.running) return this.snapshot();
-      await this.media.play();
+      if (this.startPlayback) await this.startPlayback();
+      else await this.media.play();
       return this.snapshot();
     }
 
     pause() {
+      this.cancelPlayback?.();
       this.finishWarmup();
       this.media.pause();
       return this.snapshot();

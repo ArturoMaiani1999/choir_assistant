@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-21
+**Last reviewed:** 2026-10-22
 
 Status: stable frontend decisions, 9 September 2026.
 
@@ -12,9 +12,9 @@ Il metronomo dei brani parte attivo al 30% quando non esiste una preferenza
 salvata per il brano e la parte. Volume personalizzato e disattivazione restano
 memorizzati; il comando on/off ripristina l'ultimo livello positivo della prova,
 oppure il 30% se il metronomo è stato riaperto spento.
-Il click ha una compensazione fissa di 160 ms: con il ritardo predefinito del
-piano roll di 270 ms precede le note di circa 110 ms, metà dei precedenti
-220 ms. Le regolazioni personalizzate del piano roll restano indipendenti.
+Il click usa lo stesso contesto e percorso d'uscita della base, anche con
+Bluetooth. La precedente compensazione fissa di 160 ms è rimossa: il metronomo
+segue i beat della traccia, indipendentemente dal ritardo visivo del piano roll.
 Verifica locale: `python scripts/browser_metronome_smoke.py`, con il server
 frontend sulla porta 5173; copre valori iniziali, preferenze salvate, on/off e
 tempi alle velocità 80%, 90% e 100%. Screenshot a 1366×768 e 390×844 in
@@ -27,7 +27,7 @@ Practice is one non-scrolling rehearsal instrument inside `100dvh`, ordered as:
 3. live pitch lane with a fixed `NOW` line and more future than history;
 4. compact transport: previous measure, play/pause, next measure, measure, volume.
 
-Practice always shows one selected vocal part. The full score belongs to the separate, vertically scrolling `score-viewer.html` reading mode and never replaces or reduces the active rehearsal view.
+Practice always shows one selected vocal part. The full score belongs to the separate, vertically scrolling `score-viewer.html` reading mode and never replaces or reduces the active rehearsal view. La toolbar della prova con spartito e piano roll non mostra **Mostra partitura**; la lettura completa resta raggiungibile da **Mostra partiture** nel menù iniziale.
 
 ## Ingresso e navigazione
 
@@ -86,8 +86,9 @@ fotogrammi intermedi di spartito o piano roll. Non è un dialogo accessorio:
 senza una prova caricata non può essere chiuso su una superficie vuota;
 con una prova caricata offre **Torna alla prova**, Escape e backdrop.
 
-La partitura aperta dalla prova conserva brano, parte, beat e inizio della
-valutazione nel collegamento **Torna alla prova**. Il ritorno resta in pausa
+I precedenti collegamenti diretti alla partitura dalla prova conservano brano,
+parte, beat e inizio della valutazione nel collegamento **Torna alla prova**.
+Il ritorno resta in pausa
 senza richiedere il microfono. La partitura aperta dal menù torna al **Menù**.
 Il comando **Analisi** è visibile anche nella prova mobile in pausa; l'analisi
 offre **Prova questo brano** o **Prova da qui** per passare esplicitamente al
@@ -99,8 +100,9 @@ nei campi e nei dialoghi la scorciatoia globale non avvia l'audio.
 
 ## Profilo e uscita
 
-**Il mio profilo** è la prima voce di Impostazioni ed è raggiungibile anche
-dal menù iniziale. Contiene, in ordine, parte SATB, nome, cognome e
+**Il mio profilo** è raggiungibile dal menù iniziale. Le impostazioni della
+prova contengono solo Mixer, La mia registrazione, Base e Avanzate. Il profilo
+contiene, in ordine, parte SATB, nome, cognome e
 **Esci dall’account**. La preferenza vocale personale non modifica sezione
 ufficiale, gruppi o autorizzazioni.
 
@@ -119,21 +121,27 @@ Il nome tecnico locale `epistrophe-pitch-lab` è conservato come chiave IndexedD
 di compatibilità per non perdere registrazioni presenti nel browser; non è
 un'etichetta mostrata all'utente.
 
-**Impostazioni → Relax mode** apre la [scena contemplativa](relax-mode.md)
-con curva di Lissajous 3D e ritorno al punto della prova in pausa.
+Relax mode è rimosso dalla webapp: non esistono più la pagina, gli asset
+dedicati o collegamenti nelle impostazioni della prova, della Home e del laboratorio.
 
 ## Temporal model
 
 During real accompaniment, `MediaPlaybackClock` reads `HTMLAudioElement.currentTime`; this audio-derived score time is authoritative for score cursor, pitch timeline, transport and mock voice samples. RAF only redraws. The selected-part score is one horizontal continuous system: its cursor follows score time and the sheet translates only enough to keep that cursor visible. In the pitch lane, `NOW_X_RATIO = 0.375` stays fixed and events move right-to-left. These positions are intentionally not geometrically aligned.
 
-Il piano roll interpola la sola posizione di presentazione fra le letture
-audio, così le posizioni ripetute di Chrome con Bluetooth non fermano le note
+Spartito e piano roll interpolano la sola posizione di presentazione fra le letture
+audio, così le posizioni ripetute di Chrome con Bluetooth non fermano il cursore e le note
 per più frame. Conserva il ritardo visivo impostato e riancora su pausa,
 ricerca, buffering e cambio velocità; dopo 120 ms senza avanzamento audio
 interrompe la previsione. La valutazione e i campioni vocali usano ancora il
 tempo media. L'interpolazione è parte del movimento funzionale della prova,
 senza transizioni decorative o nuovi controlli. Vedi la
 [verifica sul Samsung](../engineering/pitch-tracking/bluetooth-playback-fix-2026-10-21.md).
+Il cursore dello spartito usa il tempo interpolato senza il ritardo aggiuntivo
+del piano roll. Anche Mostra partitura usa l'interpolazione limitata: pausa,
+seek e buffering interrompono o riancorano il movimento. SATB e accompagnamento
+attendono i decoder prima dell'avvio coordinato; una singola lettura irregolare
+non provoca più una ricerca nelle tracce vocali. Verifiche e limiti nel
+[controllo di sincronizzazione](../engineering/pitch-tracking/shared-playback-sync-2026-10-22.md).
 
 Measure selection stores two positions: playback begins at the preceding performance occurrence and evaluation begins at the selected occurrence. The frontend represents the distinction; scoring remains mocked.
 
@@ -141,29 +149,11 @@ Measure selection stores two positions: playback begins at the preceding perform
 
 ### Diagnostica del rientro
 
-Il test è disponibile anche se la calibrazione non è verificata: non può
-essere bloccato proprio dalla condizione da diagnosticare. Servono un brano
-aperto, Uso gli altoparlanti attivo e il consenso esplicito. Senza modello
-verificato non si sottrae nulla; lo stato e i metadati dichiarano che il
-trattamento è escluso. Non si chiede di ripetere la guida per registrare.
-
-In **Base → Assistenza e test audio**, il best audio automatico è dichiarato
-sospeso: la preferenza può restare attiva, ma si salva solo il grafico.
-**Registra test rientro** offre invece un consenso esplicito al salvataggio e una
-registrazione fino a 60 secondi. Il dialogo usa il pattern della calibrazione:
-istruzione, consenso, Avvia test e Play, dettagli espandibili. Durante la prova
-lo spartito resta dominante con una barra compatta di tempo residuo e stop.
-Al termine il test si salva automaticamente nel profilo, condiviso per la
-diagnosi con direttori e assistenza autorizzata per sette giorni. Non richiede
-download o allegati. Il nuovo test sostituisce quello precedente dello stesso
-brano; l'utente può eliminarlo riaprendo il dialogo. Se l'invio fallisce,
-Riprova salvataggio usa gli stessi dati; Scarta li abbandona. La chiusura X,
-Escape e backdrop resta bloccata durante il salvataggio o con dati pendenti,
-con una breve spiegazione. Dopo il successo chiude normalmente. Vedi il
-[contratto di salvataggio](../architecture/echo-diagnostic-storage.md).
-I quattro canali audio sono sincronizzati; i dettagli tecnici restano dietro
-disclosure. Vedi il [contratto diagnostico](../engineering/pitch-tracking/santo-echo-study-2026-10-19.md)
-e i [criteri di qualità musicale](musical-performance-quality.md).
+La sezione Assistenza e test audio e il suo comando di registrazione sono
+rimossi dalle impostazioni. La calibrazione resta l'unico percorso audio
+visibile. Le API e i dati diagnostici salvati conservano il proprio
+[contratto di salvataggio](../architecture/echo-diagnostic-storage.md);
+non vengono cancellati da questa semplificazione.
 
 ### Calibrazione e pitch
 
@@ -182,34 +172,65 @@ automaticamente nella pagina con lo stesso detector e le stesse soglie.
 Non apre una nuova guida e non modifica il profilo. Le risposte tardive del
 Worker abbandonato non aggiornano la voce corrente.
 
-**Impostazioni → Base → Calibra audio** avvia una sola routine per microfono,
-voce e, se selezionati, altoparlanti. Base presenta questa come unica azione
-primaria. Prima si sceglie **Cuffie / Altoparlanti** sotto **Come ascolti la base?**;
-il suggerimento e la durata della guida cambiano con la scelta. **Altoparlanti**
-attiva la riduzione del rientro, ricordata per account su questo browser.
-Non esiste una seconda calibrazione né una conferma dell'uscita prima di Play.
-**Connessione audio** è espandibile: cavo/dispositivo è il valore predefinito;
-chi usa cuffie o casse Bluetooth seleziona Bluetooth per l'allineamento visivo.
-La connessione si ricorda per la durata della scheda, senza scadenza a 30 minuti;
-un cambio di dispositivo invita a controllarla. Un microfono o catena
-incompatibili richiedono una nuova preparazione, senza riusare profili diversi.
-Questa preferenza non rileva né seleziona l'uscita del sistema operativo.
-Su Android con Cuffie, se Chrome espone un ingresso Bluetooth e quello del
-telefono, l'app preferisce automaticamente il microfono del telefono per
-conservare l'ascolto musicale nelle cuffie. La regola vale anche se Connessione
-audio è ancora su cavo/dispositivo; non richiede una seconda conferma.
-Il testo sotto Connessione audio rende esplicita la scelta. Alla prima
-autorizzazione può essere necessario chiudere l'ingresso iniziale e aprire
-quello del telefono. Il profilo si confronta con l'ingresso realmente acquisito.
-Assistenza e test sono espandibili; dimensione testo e colore carta sono sotto **Aspetto dello
-spartito**. Il dialogo ha chiusura esplicita, Escape e backdrop.
+Per la diagnosi delle note tenute esiste una prova esplicita con `?aec=all`:
+usa AEC `all` solo nella pagina aperta e mostra **Rientro · prova all**.
+L'URL conserva il flag quando cambia il brano. Senza il flag rimane AEC
+normale; la scelta non viene salvata come preferenza del dispositivo.
+Settings effettivi diversi da quelli richiesti non sono accettati. Il profilo
+vocale di `all` ha una catena distinta: il primo utilizzo richiede la guida
+unica, conservando il profilo normale. Non è una garanzia di preservazione
+del canto; è il percorso per verificarla nel grafo reale dell'app.
 
-La prima guida completa dura circa 30 secondi con altoparlanti e 25 con cuffie.
+**Impostazioni → Base** presenta una sola domanda, **Come ascolti la base?**:
+**Cuffie Bluetooth** oppure **Altoparlanti o cuffie con cavo**. Nessuna opzione
+è selezionata senza una conferma valida. Il pulsante **(i)** spiega ritardo,
+allineamento e rientro; è accessibile con hover, focus e tocco e si chiude con
+Escape. La prima opzione usa il percorso cuffie e imposta **Anticipo della
+traccia vocale** nelle impostazioni avanzate a **190 ms**, anche al ripristino
+del brano e dei valori predefiniti;
+la seconda usa il percorso standard con AEC del dispositivo, che copre anche
+gli altoparlanti. Questa scelta non seleziona l'uscita del sistema operativo.
+
+La conferma è conservata nel browser per **24 ore esatte**, anche dopo una
+ricarica o chiusura della scheda. La lettura non prolunga la scadenza. Alla
+scadenza lo stato diventa **Da scegliere** senza interrompere la prova in
+corso; alla successiva apertura di un brano viene mostrata la domanda.
+Un link diretto al brano segue la stessa regola. Anche Play e Calibra audio
+richiedono una scelta valida, senza aprire il microfono prima della conferma.
+Chiudere la domanda con ×, Escape o backdrop lascia il brano in pausa e non
+conferma nessun dispositivo. La scelta precedente di sessione non viene
+trasformata automaticamente in una conferma giornaliera. Se lo storage non
+è disponibile, la scelta vale nella pagina aperta e viene comunque fatta scadere.
+
+**Calibra audio** è l'unica azione primaria delle impostazioni. Il profilo
+vocale salvato resta separato dalla scelta giornaliera: confermare di nuovo
+lo stesso dispositivo non forza una nuova calibrazione. Cambiando catena o
+microfono si verifica nuovamente la compatibilità. Su Android, con cuffie
+Bluetooth, viene preferito il microfono del telefono quando disponibile.
+
+**Aspetto dello spartito** è aperto per impostazione predefinita; contiene
+la dimensione del testo e il colore della carta. Le impostazioni Base e la
+domanda d'ingresso entrano nel primo viewport a 1366×768 e 390×844, con target
+utili di almeno 44 px. I dialoghi supportano ×, Escape e backdrop.
+Verifica: `python scripts/browser_settings_smoke.py`, anche con
+`--directory artifacts/settings-redesign/release`, e
+`node --test scripts/audio_output.test.cjs`. Screenshot e report in
+`artifacts/settings-redesign`.
+
+Nelle impostazioni avanzate, **Aspetto scia** sostituisce il nome tecnico
+«Aspetto plume v1». L'intensità predefinita è **160%**, anche con Ripristina
+predefinito. Il precedente valore predefinito salvato del 175% migra al 160%;
+le altre intensità personalizzate restano salvate. Una scelta esplicita del
+175% dopo questa migrazione viene conservata. Il laboratorio vocale riusa
+le stesse preferenze della scia.
+
+La prima guida completa dura circa 30 secondi con altoparlanti o cuffie con cavo
+e 25 con cuffie Bluetooth.
 Con altoparlanti, prima di avviarla si legge **Imposta il volume del dispositivo
 al 50%**, con l'indicazione di usare i tasti del telefono o del computer.
 Il promemoria **Volume dispositivo consigliato: 50%** è rimosso dal trasporto
-della prova, sia con altoparlanti sia con cuffie. Il riferimento rimane nelle
-impostazioni di ascolto e nella guida iniziale; non rappresenta una misura del
+della prova, sia con altoparlanti sia con cuffie. Il riferimento rimane nella
+guida iniziale; non rappresenta una misura del
 volume fisico e non richiede ricalibrazione al cambio volume. I livelli di mixer
 e metronomo restano regolabili. Un eventuale avviso prima dell'apertura del brano,
 da confermare con **OK**, è una collocazione futura ancora da definire.

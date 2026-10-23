@@ -433,7 +433,7 @@
       readyGuide();
       $('status').textContent = 'Il microfono si attiva premendo «Avvia controllo».';
       $('intro').textContent = adapter.echo()?.enabled()
-        ? `Circa ${adapter.echo().isNative?.() ? 30 : 35} secondi: altoparlanti e voce in una sola guida.` : 'Circa 25 secondi: silenzio, voce normale e più piano.';
+        ? `Circa ${adapter.echo().isNative?.() ? 30 : 35} secondi: ascolto e voce in una sola guida.` : 'Circa 25 secondi: silenzio, voce normale e più piano.';
       $('details').textContent = Core.AUDIO_STAGES.map(s => `${s.end - s.start} s · ${s.instruction}`).join('\n');
       $('progress').value = 0; $('dialog').showModal(); $('start').focus();
       const remembered = activeSettings() ? active : storedProfile();
