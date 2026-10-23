@@ -75,7 +75,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def translate_path(self, path):
         original = Path(super().translate_path(path))
-        if original.is_file() or original.is_dir():
+        if original.is_file() or original.is_dir() or original.suffix == '.html':
             return str(original)
         relative = original.relative_to(ROOT / 'frontend')
         return str(ROOT / 'dist' / relative)
@@ -131,6 +131,17 @@ class Handler(SimpleHTTPRequestHandler):
         }
         if path in responses:
             return self.send_body(responses[path])
+        return super().do_GET()
+
+
+class ReleaseHandler(Handler):
+    """Serve an exact built directory with the local account/session fixture."""
+    def translate_path(self, path):
+        return SimpleHTTPRequestHandler.translate_path(self, path)
+
+    def do_GET(self):
+        if Path(urlsplit(self.path).path).name.startswith('session-client.'):
+            return self.send_body(b'window.ChoirAuthReady=Promise.resolve();window.ChoirAuthFetch=window.fetch.bind(window);', 'text/javascript')
         return super().do_GET()
 
 

@@ -1,0 +1,46 @@
+<!doctype html>
+<html lang="it">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#000000" />
+    <title>Il logo · Xynon</title>
+    <link rel="stylesheet" href="styles.css" />
+    <link rel="stylesheet" href="studio.css" />
+    <link rel="stylesheet" href="navigation.css" />
+    <link rel="stylesheet" href="about.css" />
+    <script src="lissajous.js" defer></script>
+    <script src="about.js" defer></script>
+  </head>
+  <body class="about-body">
+    <header class="about-navigation"><a class="menu-link" href="index.html">Menù</a></header>
+    <main class="about-main">
+      <div class="about-wordmark" role="img" aria-label="Xynon">
+        <span class="about-mark" aria-hidden="true"><canvas id="about-glow"></canvas><canvas id="about-canvas"></canvas></span>
+        <span aria-hidden="true">ynon</span>
+      </div>
+      <article class="about-mission" aria-labelledby="about-heading">
+      <h2>Dare forma all'armonia</h2>
+      <p>
+        Nel logo la curva è <strong>tridimensionale</strong>.
+        Le tre coordinate oscillano con frequenze nel rapporto
+        <strong>1:2:3</strong>, lo stesso delle prime tre armoniche
+        di una nota musicale: la fondamentale, la sua ottava e
+        la quinta sopra l'ottava.
+        Sono frequenze naturalmente presenti nella voce umana
+        e in molti strumenti musicali.
+        Tre oscillazioni differenti che, insieme, disegnano
+        un'unica figura.
+      </p>
+        <div class="about-equations" aria-label="Equazioni della curva del logo">
+          <code>x(t) = sin(t)</code>
+          <code>y(t) = sin(2t)</code>
+          <code>z(t) = sin(3t)</code>
+        </div>
+        <p>La rotazione ci permette di osservare la stessa forma da prospettive diverse. Come nella musica, oscillazioni differenti si incontrano in un disegno comune.</p>
+        <h2>Negli esercizi, due dimensioni</h2>
+        <p>Le figure dei percorsi vocali sono invece <strong>curve di Lissajous piane</strong>: combinano due oscillazioni, una orizzontale e una verticale. I rapporti 1:3, 2:3 e 3:4 danno a ciascun percorso la propria figura.</p>
+      </article>
+    </main>
+  </body>
+</html>

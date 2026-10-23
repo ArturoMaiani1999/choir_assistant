@@ -15,6 +15,7 @@
     <link rel="stylesheet" href="navigation.css" />
     <script src="lissajous.js" defer></script>
     <script src="home.js" defer></script>
+    <script src="audio_output.js" defer></script>
     <script src="score_appearance.js?v=3-settings-groups"></script>
     <script src="runtime-config.js" defer></script>
     <script src="session-client.js" defer></script>
@@ -56,16 +57,12 @@
           <label class="compact-select transpose-control"><span>Transp</span><select id="transpose" aria-label="Trasposizione"></select><output id="transpose-value" aria-live="polite">±0</output></label>
           <label class="compact-select speed-control"><span class="sr-only">Velocità</span><select id="playback-speed" aria-label="Velocità del brano"><option value="1" selected>100%</option><option value="0.9">90%</option><option value="0.8">80%</option></select></label>
           <button class="mode-button accompaniment-select" id="accompaniment-mode" type="button">Voci</button>
-          <a class="mode-button score-viewer-link" id="score-viewer-link" href="score-viewer.html">Mostra partitura</a>
           <button class="mode-button" id="benchmark" type="button" hidden>Le mie registrazioni</button>
           <div class="settings-menu-wrap" id="settings-menu-wrap">
             <button class="mode-button settings-button" id="settings" type="button" aria-label="Impostazioni" aria-haspopup="menu" aria-expanded="false" aria-controls="settings-menu"><span class="settings-label">Impostazioni</span><svg class="settings-icon" viewBox="0 0 24 24" aria-hidden="true"><path d="M9.7 2h4.6l.6 2.3c.5.2 1 .5 1.5.9l2.3-.7 2.3 4-1.7 1.6a8 8 0 0 1 0 1.8l1.7 1.6-2.3 4-2.3-.7c-.5.4-1 .7-1.5.9l-.6 2.3H9.7l-.6-2.3c-.5-.2-1-.5-1.5-.9l-2.3.7-2.3-4 1.7-1.6a8 8 0 0 1 0-1.8L3 8.5l2.3-4 2.3.7c.5-.4 1-.7 1.5-.9L9.7 2Z"/><circle cx="12" cy="11" r="3"/></svg></button>
             <div class="settings-menu" id="settings-menu" role="menu" hidden>
-              <button id="settings-menu-profile" type="button" role="menuitem"><strong>Il mio profilo</strong><small>Parte vocale, nome e uscita</small></button>
-              <button id="settings-menu-repertoire" type="button" role="menuitem"><strong>Brani assegnati</strong><small>Programma e avanzamento</small></button>
               <button class="settings-menu-mixer" id="settings-menu-mixer" type="button" role="menuitem"><strong>Mixer</strong><small>Voci e accompagnamento</small></button>
               <button id="settings-menu-recording" type="button" role="menuitem"><strong>La mia registrazione</strong><small>Registra, riascolta e analizza</small></button>
-              <button id="settings-menu-relax" type="button" role="menuitem"><strong>Relax mode</strong><small>Una pausa di luce e colore</small></button>
               <button id="settings-menu-basic" type="button" role="menuitem"><strong>Base</strong><small>Audio, testo e colore carta</small></button>
               <button id="settings-menu-advanced" type="button" role="menuitem"><strong>Avanzate</strong><small>Microfono e sincronizzazione</small></button>
             </div>
@@ -137,47 +134,36 @@
       </div>
       <div class="dialog-actions"><button id="voice-mixer-own" type="button">Solo la mia parte</button><button id="voice-mixer-all" type="button">Tutte le voci</button><button id="voice-mixer-close" type="button">Chiudi</button></div>
     </dialog>
+    <dialog id="audio-output-dialog" class="practice-dialog audio-device-dialog" aria-labelledby="audio-output-heading">
+      <header class="calibration-header"><h2 id="audio-output-heading">Come ascolti la base?</h2><button id="audio-output-close" type="button" aria-label="Chiudi scelta audio">×</button></header>
+      <div class="audio-output-heading audio-device-info"><span>Scegli il dispositivo</span><button class="setting-info audio-output-info" type="button" aria-label="Perché chiediamo come ascolti la base" aria-describedby="audio-output-help" aria-expanded="false" aria-controls="audio-output-help">i</button><p id="audio-output-help" class="audio-output-help" role="tooltip">Il Bluetooth può ritardare l’ascolto. Questa scelta ci aiuta ad allineare voce e base e a gestire il rientro dagli altoparlanti. La riconfermi ogni 24 ore.</p></div>
+      <form id="audio-output-form">
+        <fieldset class="audio-device-options"><legend class="sr-only">Dispositivo di ascolto</legend>
+          <label class="audio-output-choice"><input name="entry-audio-output" type="radio" value="bluetooth" required /><span><strong>Cuffie Bluetooth</strong></span></label>
+          <label class="audio-output-choice"><input name="entry-audio-output" type="radio" value="standard" required /><span><strong>Altoparlanti o cuffie con cavo</strong></span></label>
+        </fieldset>
+        <p id="audio-output-error" role="status" hidden></p>
+        <div class="dialog-actions"><button id="audio-output-confirm" type="submit" disabled>Conferma</button></div>
+      </form>
+    </dialog>
     <dialog id="settings-dialog" class="practice-dialog detector-settings-dialog" aria-labelledby="settings-heading">
       <header class="calibration-header"><h2 id="settings-heading">Impostazioni</h2><button id="settings-close" type="button" aria-label="Chiudi impostazioni">×</button></header>
       <section id="settings-basic-panel" class="settings-panel" data-settings-panel="basic">
-      <section class="detector-setting listening-mode-setting" aria-labelledby="settings-listening-heading">
-        <h3 id="settings-listening-heading">Come ascolti la base?</h3>
-        <div class="audio-output-choices" role="radiogroup" aria-labelledby="settings-listening-heading">
-          <label class="audio-output-choice" for="settings-listening-headphones"><input id="settings-listening-headphones" name="settings-listening" type="radio" value="headphones" checked /><span><strong>Cuffie</strong></span></label>
-          <label class="audio-output-choice" for="settings-listening-speakers"><input id="settings-listening-speakers" name="settings-listening" type="radio" value="speakers" /><span><strong>Altoparlanti</strong></span></label>
+      <section class="detector-setting audio-output-setting" aria-labelledby="settings-audio-output-heading">
+        <div class="audio-output-heading"><h3 id="settings-audio-output-heading">Come ascolti la base?</h3><button class="setting-info audio-output-info" type="button" aria-label="Perché chiediamo come ascolti la base" aria-describedby="settings-audio-output-help" aria-expanded="false" aria-controls="settings-audio-output-help">i</button><p id="settings-audio-output-help" class="audio-output-help" role="tooltip">Il Bluetooth può ritardare l’ascolto. Questa scelta ci aiuta ad allineare voce e base e a gestire il rientro dagli altoparlanti. La riconfermi ogni 24 ore.</p></div>
+        <div class="audio-output-choices" role="radiogroup" aria-labelledby="settings-audio-output-heading">
+          <label class="audio-output-choice" for="settings-audio-output-bluetooth"><input id="settings-audio-output-bluetooth" name="settings-audio-output" type="radio" value="bluetooth" /><span><strong>Cuffie Bluetooth</strong></span></label>
+          <label class="audio-output-choice" for="settings-audio-output-standard"><input id="settings-audio-output-standard" name="settings-audio-output" type="radio" value="standard" /><span><strong>Altoparlanti o cuffie con cavo</strong></span></label>
         </div>
-        <p id="settings-listening-hint">Indossa le cuffie prima di calibrare.</p>
+        <output id="settings-audio-output-status" class="audio-output-status" aria-live="polite">Da scegliere</output>
         <input id="echo-enabled" type="checkbox" hidden aria-hidden="true" tabindex="-1" />
+        <output id="echo-entry-status" hidden></output>
       </section>
       <section class="detector-setting calibration-entry" aria-labelledby="settings-calibration-heading">
         <div><h3 id="settings-calibration-heading">Prepara la tua voce</h3><p id="settings-calibration-hint">Una guida di circa 25 secondi, poi puoi cantare.</p><output id="settings-calibration-status" aria-live="polite">Da calibrare</output></div>
         <button id="settings-calibrate" type="button">Calibra audio</button>
       </section>
-      <details class="settings-connection"><summary>Connessione audio <span id="settings-audio-output-status">Cavo o dispositivo</span></summary>
-      <section class="detector-setting audio-output-setting" aria-labelledby="settings-audio-output-heading">
-        <h3 id="settings-audio-output-heading">Come è collegato l’audio?</h3>
-        <div class="audio-output-choices" role="radiogroup" aria-label="Uscita audio in uso">
-          <label class="audio-output-choice" for="settings-audio-output-standard">
-            <input id="settings-audio-output-standard" name="settings-audio-output" type="radio" value="standard" />
-            <span><strong>Cavo o dispositivo</strong></span>
-          </label>
-          <label class="audio-output-choice" for="settings-audio-output-bluetooth">
-            <input id="settings-audio-output-bluetooth" name="settings-audio-output" type="radio" value="bluetooth" />
-            <span><strong>Bluetooth</strong></span>
-          </label>
-        </div>
-        <p id="settings-audio-output-description">Bluetooth regola l’allineamento della voce. Su Android, con cuffie Bluetooth viene preferito il microfono del telefono.</p>
-      </section>
-      </details>
-      <section class="audio-listening-setting" aria-label="Modalità di ascolto">
-        <details class="echo-test-details"><summary>Assistenza e test audio</summary>
-          <output id="echo-entry-status" class="audio-echo-status" aria-live="polite">Non attiva</output>
-          <p>Con gli altoparlanti la riduzione del rientro è sperimentale. Mantieni fermi dispositivo e volume.</p>
-          <p class="echo-recording-note"><strong>Con gli altoparlanti il best audio automatico è sospeso.</strong> Il test diagnostico si salva separatamente.</p>
-          <button id="echo-test-open" type="button">Registra test rientro</button>
-        </details>
-      </section>
-      <details id="settings-appearance" class="settings-appearance"><summary>Aspetto dello spartito</summary>
+      <details id="settings-appearance" class="settings-appearance" open><summary>Aspetto dello spartito</summary>
       <section class="detector-setting" aria-labelledby="settings-text-scale-heading">
         <div><h3 id="settings-text-scale-heading">Dimensione testo sul piano roll <button class="setting-info" type="button" aria-label="Informazioni sulla dimensione del testo" data-tooltip="Regola la dimensione delle sillabe sopra le note. Il valore predefinito è 150%.">i</button></h3><output id="settings-text-scale-value">150%</output></div>
         <input id="settings-text-scale" type="range" min="100" max="200" step="10" value="150" />
@@ -218,12 +204,12 @@
         <div class="detector-setting-scale"><span>1 · reattiva</span><span>7 · robusta</span></div>
       </section>
       <section class="detector-setting" aria-labelledby="settings-v1-plume-heading">
-        <div><h3 id="settings-v1-plume-heading">Aspetto plume v1 <button class="setting-info" type="button" aria-label="Informazioni sulla plume" data-tooltip="L’anticipo della traccia vocale compensa il ritardo del microfono; il ritardo piano roll compensa l’uscita audio. Queste regolazioni non cambiano il punteggio.">i</button></h3><output id="settings-v1-plume-width-value">250%</output></div>
+        <div><h3 id="settings-v1-plume-heading">Aspetto scia <button class="setting-info" type="button" aria-label="Informazioni sulla scia" data-tooltip="L’anticipo della traccia vocale compensa il ritardo del microfono; il ritardo piano roll compensa l’uscita audio. Queste regolazioni non cambiano il punteggio.">i</button></h3><output id="settings-v1-plume-width-value">250%</output></div>
         <label class="detector-setting-label" for="settings-v1-plume-width">Larghezza</label>
         <input id="settings-v1-plume-width" type="range" min="35" max="250" step="5" value="250" />
         <div class="detector-setting-scale"><span>Più stretta</span><span>Più ampia</span></div>
-        <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-intensity">Intensità <output id="settings-v1-plume-intensity-value">175%</output></label>
-        <input id="settings-v1-plume-intensity" type="range" min="15" max="200" step="5" value="175" />
+        <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-intensity">Intensità <output id="settings-v1-plume-intensity-value">160%</output></label>
+        <input id="settings-v1-plume-intensity" type="range" min="15" max="200" step="5" value="160" />
         <label class="detector-setting-label tracker-setting-label" for="settings-v1-plume-advance">Anticipo della traccia vocale <output id="settings-v1-plume-advance-value">270 ms</output></label>
         <input id="settings-v1-plume-advance" type="range" min="0" max="600" step="10" value="270" />
         <div class="detector-setting-scale"><span>0 ms · timestamp reale</span><span>600 ms · più anticipata</span></div>
@@ -375,7 +361,6 @@
             <div class="home-settings-section" role="group" aria-labelledby="home-settings-label">
             <p id="home-settings-label">Impostazioni</p>
             <button id="home-pause" type="button" aria-pressed="false">Pausa animazione</button>
-            <a href="relax.html?return=%2Findex.html">Relax mode</a>
             <button id="home-basic" type="button">Base</button>
             <button id="home-advanced" type="button">Avanzate</button>
             </div>
@@ -417,7 +402,7 @@
         <button class="studio-return" id="library-close" type="button" hidden>Torna alla prova</button>
       </div>
       </div>
-      <footer class="home-footer"><a id="home-about" href="about.html">about</a></footer>
+      <footer class="home-footer"><a id="home-about" href="about.html">About Xynon</a><a id="home-about-logo" href="about-logo.html">About the logo</a></footer>
     </dialog>
     <dialog id="ground-truth-dialog" class="practice-dialog" aria-labelledby="ground-truth-heading">
       <h2 id="ground-truth-heading">Campione di riferimento</h2>

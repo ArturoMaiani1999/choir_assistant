@@ -19,8 +19,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import websocket
-from browser_navigation_audit import Handler, ROOT, CHROME, command, evaluate, wait_for, settle
-from browser_relax_smoke import RelaxHandler
+from browser_navigation_audit import Handler, ReleaseHandler, ROOT, CHROME, command, evaluate, wait_for, settle
 
 ARTIFACTS = ROOT / 'artifacts/home-redesign'
 VIEWPORTS = [(1440,900),(1920,1080),(1366,768),(1024,768),(900,700),
@@ -35,7 +34,7 @@ def main():
     expected_mission=' '.join(html.unescape(re.sub(r'<[^>]+>','',mission_article)).split())
     use_dist='--dist' in sys.argv
     directory=Path(sys.argv[sys.argv.index('--directory')+1]) if '--directory' in sys.argv else ROOT/'dist'
-    server = ThreadingHTTPServer(('127.0.0.1',0), partial(RelaxHandler if use_dist else Handler,
+    server = ThreadingHTTPServer(('127.0.0.1',0), partial(ReleaseHandler if use_dist else Handler,
         directory=str(directory if use_dist else ROOT/'frontend')))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     origin = f'http://127.0.0.1:{server.server_port}'
@@ -139,7 +138,7 @@ def main():
                 layout = js("""(()=>{
                     const d=document.querySelector('#piece-picker-dialog'),c=document.querySelector('#home-canvas');
                     const curve=c.getBoundingClientRect(),actions=document.querySelector('#library-mode-step').getBoundingClientRect();
-                    const about=document.querySelector('#home-about').getBoundingClientRect();
+                    const about=document.querySelector('.home-footer').getBoundingClientRect();
                     const controls=[...d.querySelectorAll('button,a,summary')].filter(e=>e.checkVisibility());
                     const pixels=c.getContext('2d').getImageData(0,0,c.width,c.height).data;
                     let lit=0,edge=0;
@@ -224,11 +223,12 @@ def main():
             for width,height in [(1366,768),(390,844)]:
                 command(socket,9,'Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':width<600})
                 go('/index.html',"document.querySelector('#piece-picker-dialog')?.open")
-                footer=js("""(()=>{const a=document.querySelector('#home-about').getBoundingClientRect(),
+                footer=js("""(()=>{const a=document.querySelector('.home-footer').getBoundingClientRect(),
                     buttons=document.querySelector('#library-mode-step').getBoundingClientRect();
                     return {center:(a.left+a.right)/2,bottom:a.bottom,top:a.top,
                         overlaps:a.left<buttons.right&&a.right>buttons.left&&a.top<buttons.bottom&&a.bottom>buttons.top};})()""")
                 assert abs(footer['center']-width/2)<1 and height-70<footer['bottom']<=height and not footer['overlaps'],footer
+                assert js("[...document.querySelectorAll('.home-footer a')].map(a=>a.textContent).join('|')==='About Xynon|About the logo'")
                 key('Tab',9)
                 js("document.querySelector('#home-about').focus()")
                 assert js("document.activeElement.matches(':focus-visible')")
@@ -279,6 +279,30 @@ def main():
                 before=about_frame();delay(180);assert about_frame()==before
                 assert js('homeErrors.length===0&&micCalls===0'),js('homeErrors')
                 about_results.append(layout)
+
+            # The separate logo explanation reuses the actual animated mark.
+            logo_results=[]
+            for width,height in [(1366,768),(390,844)]:
+                command(socket,9,'Emulation.setDeviceMetricsOverride',{'width':width,'height':height,'deviceScaleFactor':1,'mobile':width<600})
+                go('/index.html',"document.querySelector('#piece-picker-dialog')?.open")
+                key('Tab',9)
+                js("document.querySelector('#home-about-logo').focus()")
+                assert js("document.activeElement.matches(':focus-visible')")
+                key('Enter',13)
+                wait_for(socket,"location.pathname==='/about-logo.html'&&Boolean(document.querySelector('#about-canvas')?.dataset.time)")
+                assert js("document.querySelector('h1').textContent==='Il logo di Xynon'&&document.querySelector('.about-wordmark').getAttribute('aria-label')==='Xynon'")
+                assert js("[...document.querySelectorAll('.about-equations code')].map(e=>e.textContent).join('|')==='x(t) = sin(t)|y(t) = sin(2t)|z(t) = sin(3t)'")
+                assert js("document.querySelector('article').textContent.includes('curve di Lissajous piane')&&document.querySelector('article').textContent.includes('1:3, 2:3 e 3:4')")
+                assert js('document.documentElement.scrollWidth<=innerWidth&&micCalls===0&&homeErrors.length===0')
+                still=js("document.querySelector('#about-canvas').dataset.time")
+                delay(180);assert js("document.querySelector('#about-canvas').dataset.time")==still
+                capture(f'about-logo-top-{width}x{height}')
+                full_height=js('document.documentElement.scrollHeight')
+                shot=command(socket,7,'Page.captureScreenshot',{'format':'png','captureBeyondViewport':True,
+                    'clip':{'x':0,'y':0,'width':width,'height':full_height,'scale':1}})
+                (ARTIFACTS/f'about-logo-full-{width}x{height}.png').write_bytes(base64.b64decode(shot['data']))
+                click('.menu-link');wait_for(socket,"document.querySelector('#piece-picker-dialog')?.open")
+                logo_results.append({'viewport':[width,height],'keyboardEntry':True,'equations':True,'reducedMotion':True,'returnToMenu':True})
 
             # Running scene: pause, overlay suspension, hidden/offscreen suspension, resume.
             command(socket,8,'Emulation.setEmulatedMedia',{'features':[]})
@@ -388,7 +412,7 @@ def main():
             assert js("homeScene.state.duet.phase==='ROTATING'&&homeScene.state.duet.count===2")
             js('homeScene.destroy()');before=frame();delay(120);assert frame()==before
             assert js('homeErrors.length===0&&micCalls===0'),js('homeErrors')
-            report={'viewports':results,'about':about_results,'keyboard':'passed','profileAndSettings':'passed','voiceLab':'passed',
+            report={'viewports':results,'about':about_results,'logo':logo_results,'keyboard':'passed','profileAndSettings':'passed','voiceLab':'passed',
                 'motionAndVisibility':'passed','visibleMotion':motion_results,'twoColorPalette':'passed',
                 'duets':duets,'duetLifecycle':'passed','errors':[],'microphoneCalls':0}
             (ARTIFACTS/'report.json').write_text(json.dumps(report,indent=2),encoding='utf-8')

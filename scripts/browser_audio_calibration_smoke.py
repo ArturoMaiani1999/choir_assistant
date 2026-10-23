@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import time
 import urllib.request
+from urllib.parse import urlsplit,urlunsplit,parse_qsl,urlencode
 from pathlib import Path
 
 import websocket
@@ -30,8 +31,10 @@ AudioContext.prototype.createBufferSource=function(...args){
   return source;
 };
 const NativeWorker=window.Worker;
+window.cancelledCalibrationWorkerErrors=[];
 window.Worker=class extends NativeWorker {
-  constructor(...args){super(...args);this.voice=String(args[0]).includes('microphone_calibration_worker');if(this.voice)this.addEventListener('message',e=>{if(e.data.type==='result')calibrationResults.push(e.data.result)});}
+  constructor(...args){super(...args);this.voice=String(args[0]).includes('microphone_calibration_worker');if(this.voice)this.addEventListener('message',e=>{if(e.data.type==='result')calibrationResults.push(e.data.result)});this.addEventListener('error',e=>{if(this.cancelledByTestedLifecycle){cancelledCalibrationWorkerErrors.push({message:e.message,voice:this.voice});e.preventDefault();}});}
+  terminate(){this.cancelledByTestedLifecycle=true;return super.terminate();}
   postMessage(data,...rest){
     if(data?.mode==='ready'&&(this.voice?window.holdVoiceWorkerReady:window.holdEchoWorkerReady))return;
     if(this.voice&&data?.frames&&window.holdVoiceAnalysis)return;
@@ -71,10 +74,15 @@ def main():
     parser.add_argument('--training-jump-check',action='store_true',help='Inject one real 40 ms acoustic-path change during initial training')
     parser.add_argument('--graph-churn-check',action='store_true',help='Exercise the production monitor through deliberate graph contention')
     parser.add_argument('--native-aec',action='store_true',help='Test platform capture and the unified guide with a processed synthetic input')
+    parser.add_argument('--aec-all',action='store_true',help='Test the explicit URL-scoped all trial with a synthetic extended capture mode')
     parser.add_argument('--live-voice-check',action='store_true',help='Verify admitted live pitch after calibration enters Santo, then stop')
     parser.add_argument('--pitch-worker-timeout-check',action='store_true',help='Verify saved-profile live pitch recovers when the pitch Worker never replies')
     parser.add_argument('--probe-loading-check','--music-loading-check',dest='probe_loading_check',action='store_true',help='Reject unavailable calibration probes before acoustic capture')
     args=parser.parse_args()
+    if args.aec_all:
+        if not args.native_aec:parser.error('--aec-all requires --native-aec')
+        u=urlsplit(args.url);query=dict(parse_qsl(u.query));query['aec']='all'
+        args.url=urlunsplit((u.scheme,u.netloc,u.path,urlencode(query),u.fragment))
     OUT=args.output or (OUT/'headphones' if args.headphones else OUT)
     OUT.mkdir(parents=True,exist_ok=True)
     with tempfile.TemporaryDirectory(prefix='audio-calibration-') as profile:
@@ -94,7 +102,7 @@ def main():
             page=next(p for p in json.load(urllib.request.urlopen(f'http://127.0.0.1:{port}/json')) if p.get('type')=='page')
             ws=websocket.create_connection(page['webSocketDebuggerUrl'],timeout=50)
             command(ws,1,'Page.enable')
-            command(ws,2,'Page.addScriptToEvaluateOnNewDocument',{'source':('window.testNativeRoute=true;' if args.native_aec else '')+FIXTURE+VOICE})
+            command(ws,2,'Page.addScriptToEvaluateOnNewDocument',{'source':('window.testNativeRoute=true;' if args.native_aec else '')+"localStorage.setItem('choir-audio-output:v2',JSON.stringify({type:"+json.dumps('bluetooth' if args.headphones else 'standard')+",confirmedAt:Date.now()}));"+FIXTURE+VOICE})
             command(ws,3,'Page.navigate',{'url':args.url})
             for i in range(10,310):
                 try:
@@ -118,23 +126,16 @@ def main():
               openDetectorSettings('basic');
             })()""")
             if args.member_id:js('state.performanceMe={member:{id:'+json.dumps(args.member_id)+'}}')
-            js("""(()=>{
-              sessionStorage.removeItem(AUDIO_OUTPUT_SESSION_KEY);restoreAudioOutputPreference();updateDetectorSettingsUi();
-              const connection=document.querySelector('.settings-connection');
-              if(state.audioOutputType!=='standard'||connection.open)throw Error('Default requires a technical choice');
-              document.querySelector('#settings-listening-speakers').click();
-              if(!echoCancellationUI.enabled())throw Error('Speakers did not enable the capture route');
-              document.querySelector('#settings-listening-headphones').click();
-              if(echoCancellationUI.enabled())throw Error('Headphones retained speaker cancellation');
-              connection.open=true;document.querySelector('#settings-audio-output-bluetooth').click();
-              if(state.plumeSettings.timeAdvanceMs!==320||!document.querySelector('#settings-dialog').open)throw Error('Bluetooth choice failed');
-              sessionStorage.setItem(AUDIO_OUTPUT_SESSION_KEY,JSON.stringify({type:'bluetooth',confirmedAt:Date.now()-3600000}));
-              restoreAudioOutputPreference();
-              if(state.audioOutputType!=='bluetooth')throw Error('Connection choice expired during rehearsal');
-              document.querySelector('#settings-audio-output-standard').click();connection.open=false;
+            js("""(async()=>{
+              localStorage.removeItem(AUDIO_OUTPUT_STORAGE_KEY);restoreAudioOutputPreference();updateDetectorSettingsUi();
+              if(state.audioOutputType!==null)throw Error('Missing choice silently selected a device');
+              await applyAudioOutputChoice('bluetooth');
+              if(echoCancellationUI.enabled()||state.plumeSettings.timeAdvanceMs!==190)throw Error('Bluetooth route failed');
+              localStorage.setItem(AUDIO_OUTPUT_STORAGE_KEY,JSON.stringify({type:'bluetooth',confirmedAt:Date.now()-3600000}));
+              if(!restoreAudioOutputPreference())throw Error('Valid daily choice expired');
             })()""")
             if not args.headphones:
-                js("""(async()=>{document.querySelector('#settings-listening-speakers').click();for(let i=0;i<100&&!state.playbackMixer.referenceOutput;i++)await new Promise(r=>setTimeout(r,20));})()""")
+                js("applyAudioOutputChoice('standard')")
             time.sleep(.25)
             if args.diagnostic_only:
                 result=diagnostic_checks(ws,OUT,verified=False)
@@ -214,6 +215,8 @@ def main():
               assert(window.calibrationTiming?.nonIncreasing===0,'Duplicate calibration window');
               return {echo:echoCancellationUI.diagnostics(),report:document.querySelector('#calibration-report').innerText};
             })()""")
+            if args.aec_all:
+                result['allTrial']=js("""(()=>{const d=echoCancellationUI.diagnostics(),s=state.microphoneStream.getAudioTracks()[0].getSettings();if(d.requestedMode!=='all'||d.captureMode!=='all'||s.echoCancellation!=='all'||!d.experimental)throw Error('All trial not activated');if(!document.getElementById('echo-live-status').textContent.includes('prova all'))throw Error('Missing trial label');return {requested:d.requestedMode,effective:d.captureMode,experimental:d.experimental,separateChain:ChoirMicrophoneCalibration.chainSettings(s,state.microphoneContext.sampleRate).echoCancellation==='all'}})()""")
             if args.native_aec and not args.headphones:
                 result['probe']=js("""(()=>{
                   const p=calibrationProbeStarts;
@@ -459,7 +462,7 @@ def main():
                     time.sleep(.1)
                 js("if(document.querySelector('#calibration-done').hidden)throw Error('Reuse failed');document.querySelector('#calibration-done').click()")
             # A native user gesture releases the warm media into rehearsal.
-            js("sessionStorage.removeItem(AUDIO_OUTPUT_SESSION_KEY)")
+            js("localStorage.removeItem(AUDIO_OUTPUT_STORAGE_KEY)")
             js("window.playStream=state.microphoneStream;window.playContext=state.microphoneContext;if(!state.clock.running)void togglePlayback()")
             time.sleep(.6)
             js("""(()=>{if(!state.clock.running||state.playbackMixer.calibrationMuted)throw Error('Play did not release warmup');

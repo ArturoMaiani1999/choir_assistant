@@ -2,7 +2,7 @@
 
 **Status:** canonical
 **Owner:** project maintainer
-**Last reviewed:** 2026-10-21
+**Last reviewed:** 2026-10-22
 
 ## Contract
 
@@ -13,15 +13,18 @@ transport. The piano roll and plotted pitch use a separate, user-adjustable
 visual delay (270 ms by default); detector timestamps and scoring keep the
 undelayed media time. The plume advance is applied relative to that delayed
 visual timeline. `requestAnimationFrame` redraws state but is not a musical
-clock. `VisualPlaybackTime` interpolates the piano-roll presentation using
+clock. `VisualPlaybackTime` interpolates score and piano-roll presentation using
 monotonic elapsed time between media observations, with bounded phase
 correction. It never replaces the canonical snapshot used by samples or scoring.
 Unreported stalls stop prediction after 120 ms; waiting/seeking, pause, rate
 changes and long frame gaps reanchor to media time. Media events explicitly
 reset the presentation epoch even for short seeks and loop restarts.
+The practice score uses that presentation time before the piano-roll delay;
+the full-score viewer uses the same bounded interpolation instead of an
+unbounded wall-clock extrapolation. Detector timestamps remain unchanged.
 
 The connection preference applies a fixed vocal-trace timestamp correction:
-270 ms for cable/device, 320 ms for Bluetooth. It does not change the piano-roll
+270 ms for cable/device, 190 ms for Bluetooth. It does not change the piano-roll
 delay. These are presets, not measured input/output latency. The visual timeline
 does not consume `AudioContext.outputLatency` or `getOutputTimestamp()`; latency
 values in echo diagnostics do not compensate playback or detector timestamps.
@@ -40,10 +43,22 @@ speed variants. The browser refuses playback for an inconsistent bundle.
 Bundles using the voice mixer additionally expose one instrumental
 `accompaniment_file` and a `voice_stems` map. The instrumental file remains the
 authoritative media clock; selected vocal stems follow its play, pause, seek
-and playback-rate state. Drift beyond 80 ms is corrected against the master.
+and playback-rate state. Start waits for all selected decoders, then invokes
+play for every channel together. Buffering the master pauses vocal stems;
+`playing` resumes them at the master position. Drift beyond 40 ms is corrected
+only after three observations of the same sign spanning at least 300 ms,
+so one coarse Bluetooth timestamp cannot trigger a seek.
 Each SATB stem and the accompaniment have independent mute and gain controls.
 The user's currently selected vocal part is enabled by default, and several
 vocal stems may be enabled together.
+
+The metronome uses the mixer's AudioContext and output/reference bus in both
+headphone and speaker modes. The old independent context and fixed 160 ms
+offset are no longer used. Pulse selection follows media time; the short click
+is generated in the same output graph as the accompaniment. This removes the
+separate device latency, but does not claim a measured physical Bluetooth
+alignment. Digital sample-level tests and the remaining hardware check are in
+the [follow-up report](../engineering/pitch-tracking/shared-playback-sync-2026-10-22.md).
 
 The local authoring server may generate or transform audio. Production serves
 only allowlisted, pre-generated assets and has no audio-processing endpoint.

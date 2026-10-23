@@ -6,7 +6,7 @@
     "build:xynon": "python scripts/build_dist.py --worker-config wrangler.xynon.jsonc --output artifacts/xynon-dist",
     "build:auth-client": "esbuild frontend/auth-client.ts --bundle --minify --platform=browser --target=es2022 --outfile=dist/auth-client.js",
     "check": "npm run typecheck && npm test && npm run test:calibration",
-    "test:calibration": "node --test scripts/microphone_calibration.test.cjs scripts/echo_cancellation.test.cjs scripts/echo_delay.test.cjs scripts/echo_diagnostics.test.cjs scripts/echo_lifecycle.test.cjs scripts/audio_sample_clock.test.cjs scripts/native_aec.test.cjs scripts/live_harmonics.test.cjs scripts/bluetooth_playback.test.cjs",
+    "test:calibration": "node --test scripts/microphone_calibration.test.cjs scripts/echo_cancellation.test.cjs scripts/echo_delay.test.cjs scripts/echo_diagnostics.test.cjs scripts/echo_lifecycle.test.cjs scripts/audio_sample_clock.test.cjs scripts/native_aec.test.cjs scripts/live_harmonics.test.cjs scripts/bluetooth_playback.test.cjs scripts/audio_output.test.cjs scripts/playback_alignment.test.cjs",
     "predeploy:access": "python scripts/check_access_deploy_config.py",
     "deploy:access": "npm run build && wrangler deploy --config wrangler.access.jsonc",
     "predeploy": "python scripts/check_deploy_config.py",
@@ -26,7 +26,7 @@
     "@cloudflare/workers-types": "5.20261011.1",
     "esbuild": "0.28.2",
     "typescript": "5.9.3",
-    "vitest": "4.1.11",
+    "vitest": "4.1.12",
     "wrangler": "4.149.0"
   }
 }

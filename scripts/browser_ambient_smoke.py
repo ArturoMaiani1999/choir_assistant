@@ -14,8 +14,7 @@ from http.server import ThreadingHTTPServer
 from pathlib import Path
 
 import websocket
-from browser_navigation_audit import Handler, ROOT, CHROME, command, evaluate, wait_for
-from browser_relax_smoke import RelaxHandler
+from browser_navigation_audit import Handler, ReleaseHandler, ROOT, CHROME, command, evaluate, wait_for
 
 ARTIFACTS = ROOT / 'artifacts' / 'ambient-curve' / ('built' if '--dist' in sys.argv else 'source')
 
@@ -24,7 +23,7 @@ def main():
     ARTIFACTS.mkdir(parents=True, exist_ok=True)
     use_dist = '--dist' in sys.argv
     directory = Path(sys.argv[sys.argv.index('--directory')+1]) if '--directory' in sys.argv else ROOT/'dist'
-    server = ThreadingHTTPServer(('127.0.0.1', 0), partial(RelaxHandler if use_dist else Handler,
+    server = ThreadingHTTPServer(('127.0.0.1', 0), partial(ReleaseHandler if use_dist else Handler,
         directory=str(directory if use_dist else ROOT/'frontend')))
     threading.Thread(target=server.serve_forever, daemon=True).start()
     reports = []

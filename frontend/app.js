@@ -8,6 +8,8 @@ const UiPreferences = window.ChoirUiPreferences;
 const VocalFeedback = window.VocalFeedback;
 const { MediaElementMixer, buildMediaPlaybackPlan } = window.ChoirMedia;
 const RUNTIME_CONFIG = window.ChoirRuntimeConfig ?? Object.freeze({});
+// Explicit, URL-scoped AEC trial. Never persist it as the default route.
+const NATIVE_AEC_MODE = new URLSearchParams(location.search).get('aec') === 'all' ? 'all' : true;
 let microphoneCalibrationUI = null;
 let echoCancellationUI = null;
 let echoDiagnosticsUI = null;
@@ -109,13 +111,15 @@ const UI_CONFIG = Object.freeze({
   pitchAnalysisIntervalMs: 1000 / 60,
 });
 
-const AUDIO_OUTPUT_SESSION_KEY = 'choir-audio-output:v1';
+const AUDIO_OUTPUT_STORAGE_KEY = window.ChoirAudioOutput.KEY;
+let audioOutputExpiryTimer = null;
+let audioOutputMemory = null;
 const PIANO_ROLL_DELAY_MAX_MS = 600;
 const PIANO_ROLL_DELAY_DEFAULT_MS = 270;
 const STANDARD_PLUME_ADVANCE_MS = 270;
-const BLUETOOTH_PLUME_ADVANCE_MS = 320;
-// With the default 270 ms piano-roll delay, leave a 110 ms audible lead.
-const METRONOME_OFFSET_MS = 160;
+const BLUETOOTH_PLUME_ADVANCE_MS = 190;
+// Click and music share one output graph. No device-independent delay preset.
+const METRONOME_OFFSET_MS = 0;
 const DEFAULT_METRONOME_VOLUME = 30;
 const MIXER_DEFAULTS_VERSION = 2;
 let practiceOrigin = new URLSearchParams(location.search).get('from') === 'repertorio' ? 'repertorio' : null;
@@ -126,14 +130,14 @@ const DEFAULT_ACCOMPANIMENT_LEVEL = .4;
 const els = Object.fromEntries([
   'transpose', 'transpose-value', 'settings-text-scale', 'settings-text-scale-value', 'settings-show-intervals',
   'voice-mixer-dialog', 'voice-mixer-options', 'voice-mixer-accompaniment', 'voice-mixer-accompaniment-enabled', 'voice-mixer-accompaniment-level', 'voice-mixer-accompaniment-value', 'voice-mixer-own', 'voice-mixer-all', 'voice-mixer-close',
-  'settings-menu-wrap', 'settings-menu', 'settings-menu-repertoire', 'settings-menu-mixer', 'settings-menu-profile', 'settings-menu-recording', 'settings-menu-basic', 'settings-menu-advanced', 'settings-dialog', 'settings-heading', 'settings-basic-panel', 'settings-advanced-panel', 'settings-audio-output-standard', 'settings-audio-output-bluetooth', 'settings-audio-output-status', 'settings-audio-output-description', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
+  'settings-menu-wrap', 'settings-menu', 'settings-menu-mixer', 'settings-menu-recording', 'settings-menu-basic', 'settings-menu-advanced', 'settings-dialog', 'settings-heading', 'settings-basic-panel', 'settings-advanced-panel', 'settings-audio-output-standard', 'settings-audio-output-bluetooth', 'settings-audio-output-status', 'settings-v1-rms', 'settings-v1-rms-value', 'settings-v1-rms-description', 'settings-weak-voice-mode', 'settings-v1-fast-alpha', 'settings-v1-fast-alpha-value', 'settings-v1-slow-alpha', 'settings-v1-slow-alpha-value', 'settings-v1-median-frames', 'settings-v1-median-frames-value', 'settings-v1-plume-width', 'settings-v1-plume-width-value', 'settings-v1-plume-intensity', 'settings-v1-plume-intensity-value', 'settings-v1-plume-advance', 'settings-v1-plume-advance-value', 'settings-piano-roll-delay', 'settings-piano-roll-delay-value', 'settings-reset',
   'result-dialog', 'result-heading', 'result-text', 'result-progress', 'retry', 'result-resume', 'result-close',
   'cockpit-link', 'performance-section', 'performance-heading', 'performance-identity', 'performance-tabs', 'performance-status', 'performance-list',
   'personal-recording-dialog', 'personal-recording-current', 'personal-recording-current-summary', 'personal-recording-sharing', 'personal-recording-auto-best', 'personal-recording-auto-best-status', 'personal-recording-consent', 'personal-recording-headphones', 'personal-recording-storage-consent', 'personal-recording-analysis-consent', 'personal-recording-status', 'personal-recording-review', 'personal-recording-review-summary', 'personal-recording-preview', 'personal-recording-actions', 'personal-recording-start', 'personal-recording-replay', 'personal-recording-delete', 'personal-recording-save', 'personal-recording-discard', 'personal-recording-close', 'personal-recording-live', 'personal-recording-live-title', 'personal-recording-live-detail', 'personal-recording-stop-live', 'personal-recording-replay-audio',
   'monitoring-consent-dialog', 'monitoring-consent-check', 'monitoring-consent-status', 'monitoring-consent-accept', 'monitoring-consent-decline',
   'member-profile-dialog', 'member-profile-form', 'member-profile-first-name', 'member-profile-last-name', 'member-profile-status', 'member-profile-save', 'member-profile-cancel',
   'note-names',
-  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'score-viewer-link', 'settings',
+  'piece-title', 'piece-picker', 'piece-picker-dialog', 'library-piece', 'library-part', 'library-note', 'library-open', 'library-score', 'library', 'restart-practice', 'restart-transport', 'ground-truth', 'ground-truth-dialog', 'ground-truth-status', 'ground-truth-count', 'ground-truth-start', 'ground-truth-approve', 'ground-truth-close', 'benchmark', 'benchmark-dialog', 'benchmark-scenario', 'benchmark-repeat', 'benchmark-setup', 'benchmark-setup-section', 'benchmark-status', 'benchmark-count', 'benchmark-primary-actions', 'benchmark-review-actions', 'benchmark-start', 'benchmark-listen', 'benchmark-accept', 'benchmark-discard', 'benchmark-close', 'benchmark-archive', 'benchmark-algorithm-label', 'benchmark-take-list', 'benchmark-take-summary', 'benchmark-open-analysis', 'benchmark-analysis', 'benchmark-analysis-back', 'benchmark-analysis-take', 'benchmark-analysis-name', 'benchmark-analysis-meta', 'benchmark-analysis-audio', 'benchmark-analysis-metrics', 'benchmark-analysis-v3-status', 'benchmark-analysis-v4-status', 'benchmark-analysis-v5-status', 'benchmark-analysis-roll', 'benchmark-analysis-time', 'benchmark-analysis-selection', 'benchmark-analysis-play-selection', 'benchmark-analysis-inspect', 'benchmark-analysis-help', 'benchmark-analysis-reset', 'benchmark-analysis-layer-v1', 'benchmark-analysis-layer-display', 'benchmark-analysis-layer-raw', 'benchmark-analysis-layer-audio', 'benchmark-analysis-layer-score', 'benchmark-recording', 'benchmark-live-scenario', 'benchmark-stop-live', 'neural-live', 'neural-live-status', 'neural-live-note', 'neural-live-timing', 'part-selector', 'playback-speed', 'accompaniment-mode', 'settings',
   'score-part-label', 'score-measure-label', 'score-viewport', 'score-sheet', 'score-image', 'score-cursor',
   'score-loading', 'score-pitch-divider', 'pitch-lane', 'pitch-fluid-layer', 'intonation-readout', 'live-note', 'live-cents', 'live-state', 'pitch-layer-v1', 'pitch-layer-crepe',
   'feedback-analyse', 'feedback-status', 'feedback-priorities', 'feedback-priority-list', 'feedback-score-image', 'feedback-note-card', 'feedback-note-name', 'feedback-note-meta', 'feedback-cent-chart', 'feedback-note-metrics', 'feedback-message', 'feedback-previous', 'feedback-next', 'feedback-original', 'feedback-corrected', 'feedback-strength', 'feedback-strength-value', 'feedback-playback-kind',
@@ -335,25 +339,40 @@ function formatRmsThreshold(value) {
 }
 
 function readAudioOutputPreference() {
+  if (audioOutputMemory !== null) return window.ChoirAudioOutput.parse(audioOutputMemory);
   try {
-    const preference = JSON.parse(sessionStorage.getItem(AUDIO_OUTPUT_SESSION_KEY));
-    const validType = preference?.type === 'bluetooth' || preference?.type === 'standard';
-    const confirmedAt = Number(preference?.confirmedAt);
-    if (!validType || !Number.isFinite(confirmedAt)) return null;
-    return { type: preference.type, confirmedAt };
-  } catch (_) { return null; }
+    return window.ChoirAudioOutput.parse(localStorage.getItem(AUDIO_OUTPUT_STORAGE_KEY));
+  } catch (_) { return window.ChoirAudioOutput.parse(audioOutputMemory); }
 }
 
 function restoreAudioOutputPreference() {
   const preference = readAudioOutputPreference();
-  state.audioOutputType = preference?.type ?? 'standard';
-  return true;
+  state.audioOutputType = preference?.type ?? null;
+  clearTimeout(audioOutputExpiryTimer);
+  if (preference) audioOutputExpiryTimer = setTimeout(() => {
+    restoreAudioOutputPreference();
+    updateDetectorSettingsUi();
+  }, Math.max(1, preference.confirmedAt + window.ChoirAudioOutput.TTL - Date.now()));
+  return Boolean(preference);
 }
 
 function saveAudioOutputPreference(type) {
   const preference = { type, confirmedAt: Date.now() };
-  try { sessionStorage.setItem(AUDIO_OUTPUT_SESSION_KEY, JSON.stringify(preference)); } catch (_) {}
+  audioOutputMemory = JSON.stringify(preference);
+  try { localStorage.setItem(AUDIO_OUTPUT_STORAGE_KEY, audioOutputMemory); audioOutputMemory = null; } catch (_) {}
   state.audioOutputType = type;
+  restoreAudioOutputPreference();
+}
+
+async function applyAudioOutputChoice(type) {
+  if (!['bluetooth', 'standard'].includes(type)) return;
+  await echoCancellationUI?.setEnabled(type === 'standard');
+  saveAudioOutputPreference(type);
+  state.plumeSettings.timeAdvanceMs = type === 'bluetooth'
+    ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
+  updateDetectorSettingsUi();
+  if (state.runtime) { savePreferences(); render(); }
+  else { try { saveGlobalDetectorPreferences(); } catch (_) { /* Storage is optional. */ } }
 }
 
 function updateDetectorSettingsUi() {
@@ -365,7 +384,8 @@ function updateDetectorSettingsUi() {
   els.settingsAudioOutputStandard.checked = state.audioOutputType === 'standard';
   els.settingsAudioOutputBluetooth.checked = state.audioOutputType === 'bluetooth';
   els.settingsAudioOutputStatus.textContent = state.audioOutputType === 'bluetooth'
-    ? 'Bluetooth' : 'Cavo o dispositivo';
+    ? 'Cuffie Bluetooth' : state.audioOutputType === 'standard' ? 'Altoparlanti o cuffie con cavo' : 'Da scegliere';
+  els.settingsAudioOutputStatus.hidden = Boolean(state.audioOutputType);
   els.settingsTextScale.value = String(Math.round(state.lyricTextScale * 100));
   els.settingsTextScaleValue.textContent = `${Math.round(state.lyricTextScale * 100)}%`;
   els.settingsShowIntervals.checked = state.showIntervals;
@@ -398,14 +418,9 @@ function updateDetectorSettingsUi() {
 
 function updateListeningSettingsUi() {
   const speakers = document.getElementById('echo-enabled').checked;
-  document.getElementById('settings-listening-headphones').checked = !speakers;
-  document.getElementById('settings-listening-speakers').checked = speakers;
-  document.getElementById('settings-listening-hint').textContent = speakers
-    ? 'Volume del dispositivo consigliato: 50%. Usa i tasti del dispositivo.'
-    : 'Indossa le cuffie prima di calibrare.';
   document.getElementById('settings-calibration-hint').textContent = speakers
-    ? 'Circa 30 secondi per voce e riduzione del rientro.'
-    : 'Una guida di circa 25 secondi, poi puoi cantare.';
+    ? 'Circa 30 secondi.'
+    : 'Circa 25 secondi.';
   microphoneCalibrationUI?.refresh();
 }
 
@@ -505,38 +520,75 @@ function openDetectorSettings(mode = 'basic') {
   if (!els.settingsDialog.open) els.settingsDialog.showModal();
 }
 
-function requestAudioOutputForEntry(action) {
-  restoreAudioOutputPreference();
-  void action();
+function requestAudioOutputForEntry() {
+  if (restoreAudioOutputPreference()) return false;
+  updateDetectorSettingsUi();
+  const dialog = document.getElementById('audio-output-dialog');
+  if (!dialog.open) {
+    document.getElementById('audio-output-form').reset();
+    document.getElementById('audio-output-confirm').disabled = true;
+    document.getElementById('audio-output-error').hidden = true;
+    dialog.showModal();
+  }
+  return true;
 }
 
 function bindAudioOutputControls() {
   if (audioOutputControlsBound) return;
   audioOutputControlsBound = true;
-  for (const mode of ['headphones', 'speakers']) {
-    document.getElementById(`settings-listening-${mode}`).addEventListener('change', event => {
-      if (!event.target.checked) return;
-      const toggle = document.getElementById('echo-enabled');
-      if (toggle.checked !== (mode === 'speakers')) toggle.click();
-      updateListeningSettingsUi();
-    });
-  }
   document.getElementById('echo-enabled').addEventListener('change', updateListeningSettingsUi);
   for (const control of [els.settingsAudioOutputStandard, els.settingsAudioOutputBluetooth]) {
-    control.addEventListener('change', () => {
+    control.addEventListener('change', async () => {
       if (!control.checked) return;
-      saveAudioOutputPreference(control.value);
-      state.plumeSettings.timeAdvanceMs = control.value === 'bluetooth'
-        ? BLUETOOTH_PLUME_ADVANCE_MS : STANDARD_PLUME_ADVANCE_MS;
-      updateDetectorSettingsUi();
-      if (state.runtime) savePreferences();
-      else { try { saveGlobalDetectorPreferences(); } catch (_) {} }
-      if (state.runtime) render();
-      showToast(control.value === 'bluetooth'
-        ? 'Connessione Bluetooth selezionata.'
-        : 'Connessione via cavo o dispositivo selezionata.');
+      for (const item of [els.settingsAudioOutputStandard, els.settingsAudioOutputBluetooth]) item.disabled = true;
+      try { await applyAudioOutputChoice(control.value); }
+      catch (_) { updateDetectorSettingsUi(); showToast('Scelta audio non riuscita. Riprova.'); }
+      finally { for (const item of [els.settingsAudioOutputStandard, els.settingsAudioOutputBluetooth]) item.disabled = false; }
     });
   }
+  const entry = document.getElementById('audio-output-dialog');
+  const form = document.getElementById('audio-output-form');
+  const confirm = document.getElementById('audio-output-confirm');
+  form.addEventListener('change', () => { confirm.disabled = !form.querySelector('input:checked'); });
+  form.addEventListener('submit', async event => {
+    event.preventDefault();
+    const selected = form.querySelector('input:checked');
+    if (!selected || confirm.disabled) return;
+    confirm.disabled = true;
+    try { await applyAudioOutputChoice(selected.value); entry.close(); }
+    catch (_) {
+      const error = document.getElementById('audio-output-error');
+      error.textContent = 'Scelta audio non riuscita. Riprova.'; error.hidden = false;
+    } finally { confirm.disabled = false; }
+  });
+  document.getElementById('audio-output-close').addEventListener('click', () => entry.close());
+  entry.addEventListener('click', event => closeDialogFromBackdrop(entry, event));
+  entry.addEventListener('close', () => {
+    entry.querySelectorAll('.audio-output-info').forEach(button => button.setAttribute('aria-expanded', 'false'));
+    if (!els.piecePickerDialog.open) els.settings.focus({ preventScroll: true });
+  });
+  // An actual tooltip node keeps the explanation available to assistive tech.
+  for (const button of document.querySelectorAll('.audio-output-info')) {
+    button.addEventListener('click', () => {
+      delete button.dataset.dismissed;
+      button.setAttribute('aria-expanded', String(button.getAttribute('aria-expanded') !== 'true'));
+    });
+    button.addEventListener('focus', () => { delete button.dataset.dismissed; });
+    button.addEventListener('pointerenter', () => { delete button.dataset.dismissed; });
+    button.addEventListener('keydown', event => {
+      if (event.key === 'Escape' && (button.getAttribute('aria-expanded') === 'true' || button.matches(':focus-visible'))) {
+        event.preventDefault(); event.stopPropagation(); button.setAttribute('aria-expanded', 'false');
+        button.dataset.dismissed = 'true';
+      }
+    });
+    button.addEventListener('blur', () => button.setAttribute('aria-expanded', 'false'));
+  }
+  window.addEventListener('storage', event => {
+    if (event.key === AUDIO_OUTPUT_STORAGE_KEY || event.key === null) {
+      restoreAudioOutputPreference(); updateDetectorSettingsUi();
+    }
+  });
+  window.addEventListener('pageshow', () => { restoreAudioOutputPreference(); updateDetectorSettingsUi(); });
   els.settingsDialog.addEventListener('click', (event) => {
     const selected = event.target.closest('.setting-info');
     const shouldOpen = selected && !selected.classList.contains('is-open');
@@ -545,6 +597,8 @@ function bindAudioOutputControls() {
   });
   els.settingsDialog.addEventListener('close', () => {
     els.settingsDialog.querySelectorAll('.setting-info.is-open').forEach((button) => button.classList.remove('is-open'));
+    els.settingsDialog.querySelectorAll('.audio-output-info').forEach(button => button.setAttribute('aria-expanded', 'false'));
+    if (!els.piecePickerDialog.open) els.settings.focus({ preventScroll: true });
   });
   els.settingsDialog.addEventListener('click', closeSettingsFromBackdrop);
   navigator.mediaDevices?.addEventListener('devicechange', () => {
@@ -1560,11 +1614,16 @@ function visuallyAdvancedPitchBeat(beat) {
   return state.runtime.beatAtSeconds(Math.max(0, scoreSeconds));
 }
 
-function currentPianoRollBeat(snapshot = playbackSnapshot(), interpolate = false) {
+function presentationPlaybackTime(snapshot = playbackSnapshot()) {
   const blocked = state.pianoRollWaiting || els.backingAudio.seeking || els.backingAudio.readyState < 3
     || (state.playbackMixer.context && state.playbackMixer.context.state !== 'running');
-  const time = interpolate ? state.pianoRollVisualTime.update(snapshot, performance.now(), blocked) : snapshot.performanceTime;
-  if (interpolate) state.lastPianoRollTime = time;
+  const time = state.pianoRollVisualTime.update(snapshot, performance.now(), blocked);
+  state.lastPianoRollTime = time;
+  return time;
+}
+
+function currentPianoRollBeat(snapshot = playbackSnapshot(), interpolate = false) {
+  const time = interpolate ? presentationPlaybackTime(snapshot) : snapshot.performanceTime;
   return delayedVisualBeat(state.runtime, time, snapshot.speed, state.pianoRollDelayMs);
 }
 
@@ -1862,10 +1921,11 @@ function render() {
   const measureCounter = `${scoreMeasureLabel} / ${state.occurrenceMeasures.length}`;
   if (els.scoreMeasureLabel.textContent !== scoreMeasureLabel) els.scoreMeasureLabel.textContent = scoreMeasureLabel;
   if (els.measureCounter.textContent !== measureCounter) els.measureCounter.textContent = measureCounter;
-  renderScore(snapshot.beat);
+  const presentationTime = presentationPlaybackTime(snapshot);
+  renderScore(state.runtime.beatAtSeconds(presentationTime));
   // Delay only the pitch-lane timeline. Audio, metronome and scoring continue
   // to use the media clock; the plume advance remains relative to this lane.
-  drawPitchLane(currentPianoRollBeat(snapshot, true));
+  drawPitchLane(delayedVisualBeat(state.runtime, presentationTime, snapshot.speed, state.pianoRollDelayMs));
   renderReadout(snapshot.beat, snapshot.running);
   renderSyncDebug(snapshot);
   if (snapshot.running || state.microphoneStatus === 'active' || (!state.gridInspect.active && state.pitchViewport?.animating)) state.rafId = requestAnimationFrame(render); else state.rafId = null;
@@ -1880,10 +1940,7 @@ function updateMetronomeControl() {
 function playMetronomeClick(accented) {
   const volume = Number(els.metronomeVolume.value) / 100;
   if (volume <= 0) return;
-  const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-  if (!AudioContextClass) return;
-  if (!echoCancellationUI?.enabled()) state.metronomeContext ??= new AudioContextClass({ latencyHint: 'interactive' });
-  const context = echoCancellationUI?.enabled() ? state.playbackMixer.context : state.metronomeContext;
+  const context = state.playbackMixer.context;
   if (!context) return;
   if (context.state === 'suspended') context.resume();
   const now = context.currentTime;
@@ -1894,7 +1951,7 @@ function playMetronomeClick(accented) {
   oscillator.frequency.exponentialRampToValueAtTime(accented ? 760 : 570, now + 0.045);
   gain.gain.setValueAtTime(Math.max(0.0001, volume * (accented ? 0.5 : 0.34)), now);
   gain.gain.exponentialRampToValueAtTime(0.0001, now + (accented ? 0.075 : 0.055));
-  oscillator.connect(gain).connect(echoCancellationUI?.enabled() ? state.playbackMixer.referenceOutput : context.destination);
+  oscillator.connect(gain).connect(state.playbackMixer.referenceOutput || context.destination);
   oscillator.start(now); oscillator.stop(now + 0.08);
 }
 
@@ -2115,6 +2172,8 @@ async function togglePlayback() {
   if (!state.bundleApproved) { showToast('Serve l’approvazione admin di questo bundle.'); return; }
   if (state.playbackPlan?.kind === 'muted') { showToast('Attiva almeno una traccia nel Mixer.'); return; }
   if (!state.clock.running) restoreAudioOutputPreference();
+  if (!state.clock.running && requestAudioOutputForEntry()) return;
+  if (!state.clock.running) await echoCancellationUI?.setEnabled(state.audioOutputType === 'standard');
   if (playbackSnapshot().beat >= totalBeats()) state.clock.seekBeat(0);
   echoCancellationUI?.checkpoint('playback-toggle');
   if (!state.clock.running && echoCancellationUI?.enabled() && !echoCancellationUI.ready()) {
@@ -2334,7 +2393,7 @@ async function toggleMicrophone() {
   try {
     const nativeAEC = echoCancellationUI?.enabled() && echoCancellationUI.isNative?.();
     const stream = await window.ChoirMedia.acquireMicrophone(navigator.mediaDevices, { audio: nativeAEC
-      ? { echoCancellation: {exact:true}, noiseSuppression: {exact:false}, autoGainControl: {exact:false}, channelCount:1 }
+      ? { echoCancellation: {exact:NATIVE_AEC_MODE}, noiseSuppression: {exact:false}, autoGainControl: {exact:false}, channelCount:1 }
       : { echoCancellation: false, noiseSuppression: false, autoGainControl: !echoCancellationUI?.enabled(), channelCount: 1 }, video: false }, {
       preferPhone: /Android/i.test(navigator.userAgent) && !echoCancellationUI?.enabled(),
       isCurrent: () => requestGeneration === state.microphoneRequestGeneration && document.visibilityState !== 'hidden',
@@ -4809,6 +4868,7 @@ function globalDetectorPreferences() {
     v1PlumeWidth: state.plumeSettings.width,
     plumeWidthPreferenceVersion: PitchShared.PLUME_WIDTH_PREFERENCE_VERSION,
     v1PlumeIntensity: state.plumeSettings.intensity,
+    plumeIntensityPreferenceVersion: PitchShared.PLUME_INTENSITY_PREFERENCE_VERSION,
     v1PlumeColor: state.plumeSettings.color,
     v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
     pitchLayerV1: state.pitchLayers.v1,
@@ -4837,6 +4897,7 @@ function savePreferences() {
       v1MedianWindowFrames: state.detectorSettings.medianWindowFrames,
       v1PlumeWidth: state.plumeSettings.width, plumeWidthPreferenceVersion: PitchShared.PLUME_WIDTH_PREFERENCE_VERSION,
       v1PlumeIntensity: state.plumeSettings.intensity,
+      plumeIntensityPreferenceVersion: PitchShared.PLUME_INTENSITY_PREFERENCE_VERSION,
       v1PlumeColor: state.plumeSettings.color, v1PlumeAdvanceMs: state.plumeSettings.timeAdvanceMs,
       pitchLayerV1: state.pitchLayers.v1,
       pitchLayerCrepe: state.pitchLayers.crepe }));
@@ -4898,8 +4959,8 @@ function restorePreferences() {
   els.metronomeVolume.value = saved.metronome != null && Number.isFinite(Number(saved.metronome))
     ? Math.max(0, Math.min(100, Number(saved.metronome))) : DEFAULT_METRONOME_VOLUME;
   state.rememberedMetronomeVolume = Number(els.metronomeVolume.value) || DEFAULT_METRONOME_VOLUME;
-  // The click timing is deliberately fixed: legacy saved values must not
-  // override the application-wide 160 ms offset.
+  // Legacy compensation belonged to the former independent click context.
+  // Do not restore it into the shared music graph.
   state.metronomeOffsetMs = METRONOME_OFFSET_MS;
   const sharedPitchPreferences = PitchShared.readPreferences({
     getItem: () => JSON.stringify(detectorSaved),
@@ -5092,12 +5153,15 @@ function bindControls() {
   els.backingAudio.addEventListener('waiting', () => { state.pianoRollWaiting = true; state.pianoRollVisualTime.reset(); });
   els.backingAudio.addEventListener('playing', () => { state.pianoRollWaiting = false; state.pianoRollVisualTime.reset(); });
   els.backingAudio.addEventListener('play', () => {
-    void playVoiceStems();
     if (state.personalRecording.replay) {
       syncPersonalRecordingReplayAudio(true);
       void els.personalRecordingReplayAudio.play().catch(() => {});
     }
   });
+  els.backingAudio.addEventListener('playing', () => {
+    if (!state.playbackMixer.startingGroup) void playVoiceStems();
+  });
+  els.backingAudio.addEventListener('waiting', pauseVoiceStems);
   els.backingAudio.addEventListener('pause', () => {
     pauseVoiceStems();
     if (state.personalRecording.replay) els.personalRecordingReplayAudio.pause();
@@ -5107,9 +5171,7 @@ function bindControls() {
     syncPersonalRecordingReplayAudio(true);
   });
   els.backingAudio.addEventListener('timeupdate', () => {
-    for (const audio of state.voiceStemAudio.values()) {
-      if (Math.abs(audio.currentTime - els.backingAudio.currentTime) > .08) audio.currentTime = els.backingAudio.currentTime;
-    }
+    state.playbackMixer.synchronize(els.backingAudio, state.voiceStemAudio.values());
     syncPersonalRecordingReplayAudio();
   });
   els.transpose.addEventListener('change', async () => {
@@ -5265,18 +5327,7 @@ function bindControls() {
     showToast(`Errore audio (${els.backingAudio.error?.code ?? 'sconosciuto'}).`);
   });
   els.settings.addEventListener('click', (event) => { event.stopPropagation(); toggleSettingsMenu(); });
-  els.settingsMenuRepertoire.addEventListener('click', () => void navigatePractice('repertorio.html'));
   els.settingsMenuMixer.addEventListener('click', openVoiceMixer);
-  els.settingsMenuProfile.addEventListener('click', () => openMemberProfile(false));
-  document.getElementById('settings-menu-relax').addEventListener('click', () => {
-    if (!canNavigatePractice()) return;
-    const returnPath = state.runtime && document.body.dataset.view === 'practice'
-      ? `${location.pathname}?${practiceReturnQuery()}` : '/index.html';
-    // Back must also restore this point when the browser evicts the rehearsal.
-    if (state.runtime && document.body.dataset.view === 'practice') history.replaceState(history.state, '', returnPath);
-    closeSettingsMenu();
-    void navigatePractice(`relax.html?return=${encodeURIComponent(returnPath)}`);
-  });
   els.settingsMenuRecording.addEventListener('click', () => void openPersonalRecordingDialog());
   els.settingsMenuBasic.addEventListener('click', () => openDetectorSettings('basic'));
   els.settingsMenuAdvanced.addEventListener('click', () => openDetectorSettings('advanced'));
@@ -5365,7 +5416,7 @@ function bindControls() {
     control.addEventListener('input', updatePlumeSettings);
     control.addEventListener('change', () => {
       savePreferences();
-      showToast('Aspetto della plume v1 salvato.');
+      showToast('Aspetto scia salvato.');
     });
   }
   els.settingsPianoRollDelay.addEventListener('input', () => {
@@ -5506,9 +5557,15 @@ async function initialize() {
       updateDetectorSettingsUi();
     },
   });
-  document.getElementById('settings-calibrate').addEventListener('click', () => void microphoneCalibrationUI.open());
+  document.getElementById('settings-calibrate').addEventListener('click', () => {
+    if (!restoreAudioOutputPreference()) {
+      closeSettingsMenu(); els.settingsDialog.close(); requestAudioOutputForEntry(); return;
+    }
+    void microphoneCalibrationUI.open();
+  });
   echoCancellationUI = window.ChoirEchoCancellationUI.create({
     nativeAEC: RUNTIME_CONFIG.features.platformAEC !== false,
+    nativeMode: NATIVE_AEC_MODE,
     openCalibration: () => microphoneCalibrationUI.open(),
     mixer: () => state.playbackMixer, stream: () => state.microphoneStream,
     volume: () => Number(els.volume.value) / 100,
@@ -5532,6 +5589,8 @@ async function initialize() {
       els.settings.focus();
     },
   });
+  if (restoreAudioOutputPreference()) await echoCancellationUI.setEnabled(state.audioOutputType === 'standard');
+  updateDetectorSettingsUi();
   echoDiagnosticsUI = window.ChoirEchoDiagnostics.create({
     save: (id, metadata, blob) => PersonalRecordings.saveEchoDiagnostic(id, metadata, blob),
     latest: () => PersonalRecordings.echoDiagnostics(state.bundleManifest?.piece_id),
@@ -5746,13 +5805,6 @@ function bindLibraryPicker() {
   els.libraryScore.addEventListener('click', () => {
     void navigatePractice(`score-viewer.html?piece=${encodeURIComponent(els.libraryPiece.value)}&from=menu`);
   });
-  els.scoreViewerLink.addEventListener('click', event => {
-    if (!state.runtime) return;
-    els.scoreViewerLink.href = `score-viewer.html?${practiceReturnQuery()}`;
-    if (event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return;
-    event.preventDefault();
-    void navigatePractice(els.scoreViewerLink.href);
-  });
 }
 
 function restartPractice() {
@@ -5781,6 +5833,8 @@ async function loadPracticePiece(pieceId, { partId = null, updateHistory = false
     throw new Error('Salva o scarta la registrazione personale prima di cambiare brano.');
   }
   if (state.personalRecording.replay) stopPersonalRecordingReplay();
+  const hasAudioOutput = restoreAudioOutputPreference();
+  if (hasAudioOutput) await echoCancellationUI?.setEnabled(state.audioOutputType === 'standard');
   if (state.runtime) void sharePracticeProgress({ completed: false });
   const generation = ++practiceLoadGeneration;
   state.transportSeekToken += 1;
@@ -5791,7 +5845,7 @@ async function loadPracticePiece(pieceId, { partId = null, updateHistory = false
   els.backingAudio.pause();
   els.scoreLoading.hidden = false;
   els.scoreLoading.textContent = 'Preparazione spartito…';
-  const preserveCalibratedInput = state.microphoneStatus === 'active' && Boolean(microphoneCalibrationUI?.activeSettings());
+  const preserveCalibratedInput = hasAudioOutput && state.microphoneStatus === 'active' && Boolean(microphoneCalibrationUI?.activeSettings());
   const stopMicrophonePromise = state.microphoneStatus === 'idle' || preserveCalibratedInput ? Promise.resolve() : stopMicrophone();
   const bundleManifest = await loadBundleManifest(pieceId);
   const [payload, glyphMap, backingManifest] = await loadPieceData(pieceId, bundleManifest);
@@ -5855,7 +5909,9 @@ async function loadPracticePiece(pieceId, { partId = null, updateHistory = false
   state.lastScoreEvent = null;
   state.occurrenceMeasures = buildOccurrenceMeasures(state.runtime);
   configureBacking();
-  state.clock = new MediaPlaybackClock({ mediaElement: els.backingAudio, scoreRuntime: state.runtime });
+  state.clock = new MediaPlaybackClock({ mediaElement: els.backingAudio, scoreRuntime: state.runtime,
+    startPlayback: () => state.playbackMixer.playTogether([els.backingAudio, ...state.voiceStemAudio.values()]),
+    cancelPlayback: () => state.playbackMixer.cancelGroupStart() });
   state.pianoRollVisualTime.reset();
   state.pianoRollWaiting = false;
   // Media decoders can change the output route; retain the voice profile and
@@ -5875,16 +5931,17 @@ async function loadPracticePiece(pieceId, { partId = null, updateHistory = false
   const libraryPiece = state.library.find((piece) => piece.piece_id === bundleManifest.piece_id);
   els.pieceTitle.textContent = libraryPiece ? pieceDisplayTitle(libraryPiece) : state.runtime.title.split('·')[0].trim();
   document.title = `${els.pieceTitle.textContent} · Xynon`;
-  els.scoreViewerLink.href = `score-viewer.html?piece=${encodeURIComponent(bundleManifest.piece_id)}`;
   els.scorePartLabel.textContent = parts.find((part) => part.id === state.runtime.selectedPartId)?.name ?? 'Parte';
   bindControls(); updateMicrophoneButton(); updateMetronomeControl(); seekToMeasure(0); updatePlaybackButton();
   mobileChrome.topCollapsed = false; updateMobileChrome(); updatePracticeReturn();
   if (!els.piecePickerDialog.open) document.body.dataset.view = 'practice';
   if (updateHistory) {
     const query = new URLSearchParams({ piece: bundleManifest.piece_id, part: state.runtime.selectedPartId });
+    if (NATIVE_AEC_MODE === 'all') query.set('aec', 'all');
     if (practiceOrigin) query.set('from', practiceOrigin);
     history.pushState(null, '', `?${query}`);
   }
+  requestAudioOutputForEntry();
 }
 
 initialize().then(() => window.ChoirStartup?.ready()).catch((error) => {

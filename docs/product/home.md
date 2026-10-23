@@ -3,7 +3,7 @@
 **Status:** canonical; pubblicato su staging Xynon, build verificata in locale
 
 **Owner:** project maintainer  
-**Last reviewed:** 2026-10-21
+**Last reviewed:** 2026-10-22
 
 ## Composizione
 
@@ -74,10 +74,11 @@ scroll naturale, senza nascondere contenuti.
 
 ## About e missione
 
-Nel passo iniziale del menù, **about** è un collegamento discreto centrato in
-fondo al viewport, con area utile di almeno 44×44 px e focus visibile. Nei
+Nel passo iniziale del menù, **About Xynon** e **About the logo** sono due
+collegamenti secondari affiancati e centrati in fondo al viewport, con area
+utile di almeno 44×44 px e focus visibile. Nei
 passi di scelta successivi resta nascosto senza modificare la composizione
-della curva. Apre `about.html`; **Menù** riporta alla Home e resta disponibile
+della curva. Aprono `about.html` e `about-logo.html`; **Menù** riporta alla Home e resta disponibile
 anche con JavaScript disabilitato.
 
 La pagina riprende fondo nero, token, caratteri e controllo di ritorno della
@@ -94,16 +95,31 @@ visibile e marchio animato sono eccezioni intenzionali alle regole di copy
 breve e movimento solo funzionale: questa superficie è dedicata alla missione.
 Non aggiunge illustrazioni, contenitori o azioni promozionali.
 
+**About the logo** è una pagina separata, con lo stesso marchio animato e la
+stessa colonna di lettura. Spiega brevemente che una curva di Lissajous
+combina oscillazioni su assi diversi e mostra le equazioni del logo 3D:
+`x(t) = sin(t)`, `y(t) = sin(2t)`, `z(t) = sin(3t)`. Distingue il logo dalle
+curve piane dei percorsi vocali, che combinano due oscillazioni nei rapporti
+1:3, 2:3 e 3:4. La formula corrisponde al renderer condiviso; la definizione
+è verificata nel riferimento [Wolfram MathWorld](https://mathworld.wolfram.com/LissajousCurve.html).
+La pagina riusa `about.css` e `about.js`, con movimento ridotto e sospensione
+del marchio. La lettura può scorrere naturalmente, come nella pagina della
+missione: è la stessa eccezione intenzionale per i contenuti editoriali.
+
 Verifica: `python scripts/browser_home_smoke.py`, anche con
 `--dist --directory artifacts/about-dist`. Lo smoke copre accesso da tastiera,
 ritorno, testo completo, assenza di scroll orizzontale, marchio accessibile,
 movimento ridotto, sospensione fuori vista e BFCache a 1366×768 e 390×844;
 controlla inoltre che il pulsante non si sovrapponga alle azioni sugli undici
-viewport della Home. Screenshot `about-top-*` e `about-full-*` in
+viewport della Home. Verifica anche accesso da tastiera, equazioni, movimento
+ridotto e ritorno della pagina del logo. Screenshot `about-top-*`,
+`about-full-*` e `about-logo-*` in
 `artifacts/home-redesign`.
 
 La pagina e l'ultima revisione del testo sono pubblicate su staging Xynon nel
 [rilascio completo del 21 ottobre](../operations/releases/2026-10-21-xynon-complete-update.md).
+I due link separati e la pagina **About the logo** sono pubblicati nel
+[rilascio del 22 ottobre](../operations/releases/2026-10-22-xynon-about-logo.md).
 
 ## Firma e movimento
 
@@ -148,7 +164,7 @@ dietro un altro dialogo, fuori dal viewport, in background e in pausa.
 Con movimento ridotto parte statico e si arresta anche quando la preferenza
 cambia; resta disponibile la ripresa esplicita. Observer, listener e RAF
 vengono rilasciati all'uscita definitiva, preservando il ritorno da BFCache.
-Il comportamento grafico di Relax mode rimane quello documentato separatamente.
+Il renderer condiviso rimane in uso in Home e About dopo la rimozione di Relax mode.
 
 ### Duetto nascosto
 
@@ -186,15 +202,20 @@ canto e abilitazione sono centralizzati in `duetConfig` di `lissajous.js`,
 con override opzionali per istanza. Pausa, dialoghi, background, fuori vista
 e BFCache sospendono anche il tempo del duetto. Con movimento ridotto la
 scena aggiuntiva è esclusa anche dopo una ripresa esplicita; un cambio della
-preferenza rimuove i volti e mette in pausa. Relax mode conserva il proprio
-movimento senza duetto. Questa breve scena contemplativa è un'eccezione
+preferenza rimuove i volti e mette in pausa. About usa il marchio senza
+duetto. Questa breve scena contemplativa è un'eccezione
 intenzionale alle animazioni funzionali del sistema UX/UI.
 
 ## Profilo e impostazioni
 
 Il disclosure nativo `details` riunisce profilo, impostazioni esistenti
-(pausa, Relax mode, Base, Avanzate) e uscita dall'account. Non esiste più la
+(pausa, Base, Avanzate) e uscita dall'account. Non esiste più la
 gear separata. La sezione Impostazioni raggruppa i controlli senza duplicarli.
+Relax mode, la sua pagina e i relativi asset sono rimossi dalla webapp.
+Nelle impostazioni della prova non compaiono più **Il mio profilo** e
+**Brani assegnati**: il profilo resta disponibile dalla Home, i brani dal
+percorso **Scegli brano**. La scelta audio è unica e dura 24 ore, secondo il
+[contratto della prova](practice-experience.md#calibrazione-e-pitch).
 Il simbolo `+` / `−` segue il design system; su mobile resta solo l'avatar.
 
 Tab conserva l'ordine nativo; frecce, Home ed End permettono di scorrere le
@@ -259,8 +280,8 @@ con controlli browser sull'esatto artefatto e verifica remota di accesso.
   `animation-after-*` conservano i due fotogrammi.
 - `python scripts/browser_navigation_smoke.py`: tre percorsi, partitura,
   repertorio, profilo, logout anche dalla Home, SATB e ritorno al beat 16.
-- `python scripts/browser_relax_smoke.py`: rendering Relax, drag e frecce,
-  pausa, movimento ridotto, ritorno alla prova e impostazioni del laboratorio.
+- `python scripts/browser_settings_smoke.py`: scelta audio, scadenza di 24 ore,
+  impostazioni desktop/mobile e assenza della precedente pagina Relax.
 - `npm run check`: TypeScript, 89 test applicativi e 26 test audio/calibrazione.
 - `python scripts/build_dist.py --output artifacts/home-redesign/dist`: build
   locale isolata, senza modificare la release esistente; 1293 file e 19 brani.

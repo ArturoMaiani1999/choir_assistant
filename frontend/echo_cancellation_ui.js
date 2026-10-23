@@ -11,6 +11,8 @@
   // filter after it, or report a pre-AEC waveform/ERLE that we cannot observe.
   function createNative(adapter) {
     const Core=window.ChoirEchoCancellation;
+    const requestedMode=adapter.nativeMode==='all'?'all':true;
+    const matchingSettings=s=>s.echoCancellation===requestedMode&&s.noiseSuppression===false&&s.autoGainControl===false;
     let graph=null,profile=null,preparing=false,busy=false,generation=0,cancelMeasurement=null,sequence=0;
     const events=[],key=`choir-speaker-listening:v1:${adapter.userId()}`;
     let journalScope=adapter.userId(),sessionId=crypto.randomUUID();
@@ -21,7 +23,7 @@
     function checkpoint(reason,details={}){
       journalAccount();
       events.push({sequence:++sequence,reason,wallTime:Date.now(),contextTime:graph?.context.currentTime??null,
-        strategy:'platform',...details});if(events.length>256)events.shift();
+        strategy:'platform',requestedMode,...details});if(events.length>256)events.shift();
     }
     const lifecycle=()=>{journalAccount();return {schemaVersion:1,sessionId,events:events.map(e=>({...e})),
       clockNote:'Platform capture follows the browser AEC. No simultaneous pre-AEC microphone or ERLE is available.'};};
@@ -31,21 +33,21 @@
       if(!graph)return false;
       const s=settings(graph.stream);
       return enabled()&&graph.scope===adapter.userId()&&graph.track.readyState==='live'
-        &&graph.context.state==='running'&&s.echoCancellation===true&&s.noiseSuppression===false&&s.autoGainControl===false;
+        &&graph.context.state==='running'&&matchingSettings(s);
     }
     function ready(){
       if(!graph||!profile)return false;
       const s=settings(graph.stream);
       const valid=enabled()&&profile.scope===adapter.userId()&&graph.track.readyState==='live'
-        &&graph.context.state==='running'&&s.echoCancellation===true&&s.noiseSuppression===false&&s.autoGainControl===false
+        &&graph.context.state==='running'&&matchingSettings(s)
         &&(adapter.running()||Date.now()-profile.createdAt<Core.TTL);
       if(!valid)profile=null;
       return valid;
     }
     function update(){
-      ready();const liveRoute=operational();$('entry-status').textContent=!enabled()?'Non attiva':liveRoute?'Attiva · dispositivo':'Si attiva con il microfono';
-      const live=$('live-status');live.hidden=!enabled()||!graph;live.textContent=liveRoute?'Rientro · dispositivo':'Rientro · non attivo';
-      live.title=liveRoute?'Riduzione del rientro del dispositivo attiva.':'Percorso audio non attivo.';
+      ready();const liveRoute=operational();$('entry-status').textContent=!enabled()?'Non attiva':requestedMode==='all'?liveRoute?'Attiva · prova all':'Prova all · microfono spento':liveRoute?'Attiva · dispositivo':'Si attiva con il microfono';
+      const live=$('live-status');live.hidden=!enabled()||!graph;live.textContent=liveRoute?requestedMode==='all'?'Rientro · prova all':'Rientro · dispositivo':'Rientro · non attivo';
+      live.title=liveRoute?requestedMode==='all'?'Prova AEC all attiva su questa pagina.':'Riduzione del rientro del dispositivo attiva.':'Percorso audio non attivo.';
       live.setAttribute('aria-label',live.title);live.dataset.state=liveRoute?'automatic':'unverified';
     }
     function cancel(message='Misura interrotta. Puoi riprovare.'){
@@ -67,7 +69,7 @@
       if(!enabled())return stream;
       if(!preparing)throw Error('Avvia Calibra audio prima di iniziare.');
       const s=settings(stream);
-      if(s.echoCancellation!==true||s.noiseSuppression!==false||s.autoGainControl!==false)
+      if(!matchingSettings(s))
         throw Error('La riduzione del rientro non è disponibile con queste impostazioni. Usa le cuffie.');
       const token=generation;
       await adapter.mixer().setReferenceOutput(true);await adapter.mixer().resume([]);
@@ -115,13 +117,13 @@
           const a=Math.round(2*context.sampleRate),b=Math.round(7.8*context.sampleRate);
           for(let i=a;i<b;i++){const y=data.microphone[i];energy+=y*y;peak=Math.max(peak,Math.abs(y));referenceEnergy+=data.reference[i]**2;}
           const residualRms=Math.sqrt(energy/(b-a)),s=settings(active.stream);
-          if(s.echoCancellation!==true||s.noiseSuppression!==false||s.autoGainControl!==false||adapter.userId()!==account){
+          if(!matchingSettings(s)||adapter.userId()!==account){
             finish(Error('Impostazioni audio cambiate. Ripeti il controllo.'));return;
           }
           if(referenceEnergy<1e-8||residualRms>.004||peak>=.98){
             finish(Error('Il rientro è ancora forte. Abbassa il volume o usa le cuffie, poi riprova.'));return;
           }
-          finish(null,{usable:true,strategy:'platform',probeId:window.ChoirCalibrationProbe.id,nativeResidualRms:residualRms,noiseRms:residualRms,
+          finish(null,{usable:true,strategy:'platform',captureMode:s.echoCancellation,probeId:window.ChoirCalibrationProbe.id,nativeResidualRms:residualRms,noiseRms:residualRms,
             validationDb:null,peakDelayMs:null,clock:data.clock});
         };
         for(const [index,at] of [2,5].entries()){
@@ -140,15 +142,23 @@
       });
     }
     const open=()=>adapter.openCalibration();
-    $('enabled').addEventListener('change',async()=>{
+    async function updateEnabled(){
       try{localStorage.setItem(key,String(enabled()));}catch(_){}
       invalidate('listening-mode-changed');await(adapter.pauseForToggle?.()??adapter.pause());
       await adapter.mixer().setReferenceOutput(enabled());adapter.changed();update();
-    });
+    }
+    async function setEnabled(value){
+      if(enabled()===value)return;
+      const previous=enabled();$('enabled').checked=value;
+      try{await updateEnabled();}
+      catch(error){$('enabled').checked=previous;throw error;}
+    }
+    $('enabled').addEventListener('change',()=>void updateEnabled().catch(error=>adapter.notify(error.message)));
     $('live-status').addEventListener('click',()=>void open());update();
-    return Object.freeze({enabled,ready,operational,attach,detach,open,invalidate,cancel,measure,checkpoint,lifecycle,
+    return Object.freeze({enabled,setEnabled,ready,operational,attach,detach,open,invalidate,cancel,measure,checkpoint,lifecycle,
       isNative:()=>true,prepare:()=>{preparing=true;invalidate('calibration-start');},refresh:update,isBusy:()=>busy,detectionFloor:()=>0,
       diagnostics:()=>({enabled:enabled(),ready:ready(),operational:operational(),strategy:'platform',status:operational()?'automatic':'unverified',
+        requestedMode,captureMode:graph?settings(graph.stream).echoCancellation??null:null,experimental:requestedMode==='all',
         gain:0,appliedGain:0,targetGain:0,validationDb:null,peakDelayMs:null,nativeResidualRms:profile?.nativeResidualRms??null}),
       captureGraph:()=>graph?{context:graph.context,raw:graph.source,processed:graph.source,reference:adapter.mixer().referenceOutput,
         prediction:null,profile:{calibrationVerified:ready(),strategy:'platform',inputStage:'post-platform-aec',
@@ -542,16 +552,22 @@
         }
       });
     }
-    $('enabled').addEventListener('change', async () => {
+    async function updateEnabled() {
       try { localStorage.setItem(listeningKey, String(enabled())); } catch (_) {}
       invalidate('listening-mode-changed'); await (adapter.pauseForToggle?.() ?? adapter.pause());
-      try { await mixer().setReferenceOutput(enabled()); }
-      catch (error) { $('enabled').checked = false; adapter.notify(error.message); }
+      await mixer().setReferenceOutput(enabled());
       adapter.changed(); update();
-    });
+    }
+    async function setEnabled(value) {
+      if (enabled() === value) return;
+      const previous=enabled(); $('enabled').checked=value;
+      try { await updateEnabled(); }
+      catch (error) { $('enabled').checked=previous; throw error; }
+    }
+    $('enabled').addEventListener('change', () => void updateEnabled().catch(error => adapter.notify(error.message)));
     $('live-status').addEventListener('click', () => void open());
     update(); checkpoint('created');
-    return Object.freeze({ enabled, ready, attach, detach, detectionFloor, open, invalidate, cancel, prepare, measure, checkpoint, lifecycle, refresh: update, isBusy: () => busy,
+    return Object.freeze({ enabled, setEnabled, ready, attach, detach, detectionFloor, open, invalidate, cancel, prepare, measure, checkpoint, lifecycle, refresh: update, isBusy: () => busy,
       diagnostics: () => ({ enabled: enabled(), ready: ready(), status: graph?.status || 'idle',
         gain: appliedGain(), appliedGain: appliedGain(), followerGain: graph?.follower.gain ?? null,
         targetGain: graph?.targetGain ?? 0, graphId: graph?.id ?? null, modelId: graph?.modelId ?? null,

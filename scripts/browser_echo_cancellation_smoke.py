@@ -34,7 +34,12 @@ navigator.mediaDevices.getUserMedia=async constraints=>{
   if(!state.playbackMixer.context)await state.playbackMixer.resume([]);
   if(!state.playbackMixer.referenceOutput)await state.playbackMixer.setReferenceOutput(true);
   await state.playbackMixer.setReferenceOutput(document.getElementById('echo-enabled').checked);
-  const permission=await nativeMic(constraints),original=permission.getAudioTracks()[0];
+  // The local graph supplies synthetic post-AEC PCM. Emulate the requested
+  // extended mode even when desktop capture supports only boolean AEC.
+  const requestedEcho=constraints.audio?.echoCancellation?.exact??constraints.audio?.echoCancellation;
+  const captureConstraints=window.testNativeRoute&&requestedEcho==='all'
+    ? {...constraints,audio:{...constraints.audio,echoCancellation:{exact:true}}}:constraints;
+  const permission=await nativeMic(captureConstraints),original=permission.getAudioTracks()[0];
   const ctx=state.playbackMixer.context,delay=ctx.createDelay(1);delay.delayTime.value=.035;
   const room=ctx.createConvolver();room.normalize=false;
   const ir=ctx.createBuffer(1,4000,ctx.sampleRate),samples=ir.getChannelData(0);
@@ -45,7 +50,7 @@ navigator.mediaDevices.getUserMedia=async constraints=>{
   const voice=ctx.createOscillator(),voiceGain=ctx.createGain();voice.frequency.value=220;voiceGain.gain.value=0;
   voice.connect(voiceGain);voiceGain.connect(sum);voice.start();
   const stream=out.stream,track=stream.getAudioTracks()[0],stop=track.stop.bind(track);
-  track.getSettings=()=>({...original.getSettings(),sampleRate:ctx.sampleRate,channelCount:1});
+  track.getSettings=()=>({...original.getSettings(),...(window.testNativeRoute?{echoCancellation:requestedEcho}:{}),sampleRate:ctx.sampleRate,channelCount:1});
   track.stop=()=>{stop();permission.getTracks().forEach(t=>t.stop());
     try{state.playbackMixer.referenceOutput.disconnect(delay)}catch(_){}
     delay.disconnect();room.disconnect();roomLevel.disconnect();sum.disconnect();voice.stop();voice.disconnect();voiceGain.disconnect();};
